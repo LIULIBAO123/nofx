@@ -44,6 +44,32 @@ else
     git checkout dev
 fi
 
+# 创建 .env 文件
+if [ ! -f "$INSTALL_DIR/.env" ]; then
+    echo "创建环境变量文件..."
+    if [ -f "$INSTALL_DIR/.env.example" ]; then
+        cp "$INSTALL_DIR/.env.example" "$INSTALL_DIR/.env"
+    else
+        cat > "$INSTALL_DIR/.env" << 'EOF'
+# NOFX 交易系统环境变量配置
+DB_PATH=./data/nofx.db
+API_PORT=8080
+FRONTEND_PORT=3000
+LOG_LEVEL=info
+JWT_SECRET=nofx-default-secret-please-change-this-in-production
+ENABLE_HTTPS=false
+TZ=Asia/Shanghai
+DATA_DIR=./data
+LOG_DIR=./logs
+EOF
+    fi
+    echo "环境变量文件已创建"
+fi
+
+# 创建必要的目录
+mkdir -p "$INSTALL_DIR/data"
+mkdir -p "$INSTALL_DIR/logs"
+
 # 启动服务
 echo "启动服务..."
 docker compose up -d

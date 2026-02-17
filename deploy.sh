@@ -218,8 +218,14 @@ configure_env() {
         fi
     fi
     
-    # 创建 .env 文件
-    cat > .env << 'EOF'
+    # 如果有 .env.example，复制它
+    if [ -f .env.example ]; then
+        log_info "从 .env.example 创建 .env 文件..."
+        cp .env.example .env
+    else
+        # 创建 .env 文件
+        log_info "创建 .env 文件..."
+        cat > .env << 'EOF'
 # NOFX 交易系统环境变量配置
 
 # 数据库配置
@@ -233,7 +239,7 @@ FRONTEND_PORT=3000
 LOG_LEVEL=info
 
 # JWT 密钥 (请修改为随机字符串)
-JWT_SECRET=your-secret-key-change-this
+JWT_SECRET=nofx-default-secret-please-change-this-in-production
 
 # 是否启用 HTTPS
 ENABLE_HTTPS=false
@@ -244,7 +250,18 @@ SSL_KEY_PATH=
 
 # 时区
 TZ=Asia/Shanghai
+
+# 数据目录
+DATA_DIR=./data
+
+# 日志目录
+LOG_DIR=./logs
 EOF
+    fi
+    
+    # 创建必要的目录
+    mkdir -p "$INSTALL_DIR/data"
+    mkdir -p "$INSTALL_DIR/logs"
     
     log_info "环境变量配置完成"
     log_warn "请编辑 $INSTALL_DIR/.env 文件，修改 JWT_SECRET 等敏感信息"
