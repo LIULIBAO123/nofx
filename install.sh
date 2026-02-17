@@ -1,13 +1,13 @@
 #!/bin/bash
 #
 # NOFX One-Click Installation Script
-# https://github.com/NoFxAiOS/nofx
+# https://github.com/LIULIBAO123/nofx
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/NoFxAiOS/nofx/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/LIULIBAO123/nofx/dev/install.sh | bash
 #
 # Or with custom directory:
-#   curl -fsSL https://raw.githubusercontent.com/NoFxAiOS/nofx/main/install.sh | bash -s -- /opt/nofx
+#   curl -fsSL https://raw.githubusercontent.com/LIULIBAO123/nofx/dev/install.sh | bash -s -- /opt/nofx
 #
 
 set -e
@@ -17,12 +17,13 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # Default installation directory
 INSTALL_DIR="${1:-$HOME/nofx}"
 COMPOSE_FILE="docker-compose.prod.yml"
-GITHUB_RAW="https://raw.githubusercontent.com/NoFxAiOS/nofx/main"
+GITHUB_RAW="https://raw.githubusercontent.com/LIULIBAO123/nofx/dev"
 
 echo -e "${BLUE}"
 echo "╔════════════════════════════════════════════════════════════╗"
@@ -64,6 +65,8 @@ check_docker() {
 setup_directory() {
     echo -e "${YELLOW}Setting up installation directory: ${INSTALL_DIR}${NC}"
     mkdir -p "$INSTALL_DIR"
+    mkdir -p "$INSTALL_DIR/data"
+    mkdir -p "$INSTALL_DIR/logs"
     cd "$INSTALL_DIR"
     echo -e "${GREEN}✓ Directory ready${NC}"
 }
@@ -88,13 +91,17 @@ generate_env() {
     fi
 
     # Generate JWT secret (32 bytes, base64)
-    JWT_SECRET=$(openssl rand -base64 32)
+    JWT_SECRET=$(openssl rand -base64 32 2>/dev/null || echo "nofx-jwt-secret-$(date +%s)-please-change")
 
     # Generate AES data encryption key (32 bytes, base64)
-    DATA_ENCRYPTION_KEY=$(openssl rand -base64 32)
+    DATA_ENCRYPTION_KEY=$(openssl rand -base64 32 2>/dev/null || echo "nofx-aes-key-$(date +%s)-please-change")
 
     # Generate RSA private key (2048 bits)
-    RSA_PRIVATE_KEY=$(openssl genrsa 2048 2>/dev/null | tr '\n' '\\' | sed 's/\\/\\n/g' | sed 's/\\n$//')
+    if command -v openssl &> /dev/null; then
+        RSA_PRIVATE_KEY=$(openssl genrsa 2048 2>/dev/null | tr '\n' '\\' | sed 's/\\/\\n/g' | sed 's/\\n$//')
+    else
+        RSA_PRIVATE_KEY="RSA-KEY-NOT-GENERATED-PLEASE-CONFIGURE-MANUALLY"
+    fi
 
     # Create .env file
     cat > .env << EOF
@@ -130,7 +137,7 @@ pull_images() {
 
 # Ask user if they want to clear trading data
 ask_clear_trading_data() {
-    local db_file="data/data.db"
+    local db_file="data/nofx.db"
 
     # Only ask if database file exists
     if [ ! -f "$db_file" ]; then
@@ -167,13 +174,13 @@ start_services() {
     echo -e "${GREEN}✓ Services started${NC}"
 }
 
-# Clear trading data (called before services start)
+# Clear trading data
 clear_trading_data() {
     if [ "$CLEAR_TRADING_DATA" != "yes" ]; then
         return 0
     fi
 
-    local db_file="data/data.db"
+    local db_file="data/nofx.db"
 
     if [ ! -f "$db_file" ]; then
         echo -e "${YELLOW}Database file not found, skipping...${NC}"
@@ -183,15 +190,15 @@ clear_trading_data() {
     echo -e "${YELLOW}Clearing trading data tables...${NC}"
 
     if command -v sqlite3 &> /dev/null; then
-        sqlite3 "$db_file" 'DELETE FROM trader_fills; DELETE FROM trader_orders; DELETE FROM trader_positions;'
+        sqlite3 "$db_file" 'DELETE FROM trader_fills; DELETE FROM trader_orders; DELETE FROM trader_positions;' 2>/dev/null || true
         if [ $? -eq 0 ]; then
             echo -e "${GREEN}✓ Trading data tables cleared${NC}"
         else
-            echo -e "${RED}Failed to clear trading data${NC}"
+            echo -e "${YELLOW}Note: Some tables may not exist yet${NC}"
         fi
     else
-        echo -e "${RED}sqlite3 not found. Please install sqlite3 and run manually:${NC}"
-        echo -e "${BLUE}  sqlite3 data/data.db 'DELETE FROM trader_fills; DELETE FROM trader_orders; DELETE FROM trader_positions;'${NC}"
+        echo -e "${YELLOW}sqlite3 not found. To clear data manually, install sqlite3 and run:${NC}"
+        echo -e "${BLUE}  sqlite3 data/nofx.db 'DELETE FROM trader_fills; DELETE FROM trader_orders; DELETE FROM trader_positions;'${NC}"
     fi
 }
 
@@ -248,13 +255,12 @@ print_success() {
     echo -e "  ${BLUE}Install Dir:${NC}    $INSTALL_DIR"
     echo ""
     echo -e "${CYAN}╔════════════════════════════════════════════════════════════╗"
-    echo -e "║  💡 Keep Updated: Run this command daily to stay current   ║"
+    echo -e "║  💡 Keep Updated: Run this command to update               ║"
     echo -e "╚════════════════════════════════════════════════════════════╝${NC}"
     echo ""
-    echo -e "  ${GREEN}curl -fsSL https://raw.githubusercontent.com/NoFxAiOS/nofx/main/install.sh | bash${NC}"
+    echo -e "  ${GREEN}curl -fsSL https://raw.githubusercontent.com/LIULIBAO123/nofx/dev/install.sh | bash${NC}"
     echo ""
-    echo -e "  Updates are frequent. This one-liner pulls the latest"
-    echo -e "  official images and restarts services automatically."
+    echo -e "  This will pull the latest images and restart services."
     echo ""
     echo -e "${YELLOW}Quick Commands:${NC}"
     echo "  cd $INSTALL_DIR"
@@ -266,7 +272,7 @@ print_success() {
     echo -e "${YELLOW}Next Steps:${NC}"
     echo "  1. Open http://${SERVER_IP}:3000 in your browser"
     echo "  2. Configure AI Models (DeepSeek, OpenAI, etc.)"
-    echo "  3. Configure Exchanges (Binance, Hyperliquid, etc.)"
+    echo "  3. Configure Exchanges (Binance, Bybit, etc.)"
     echo "  4. Create a Strategy in Strategy Studio"
     echo "  5. Create a Trader and start trading!"
     echo ""
@@ -285,9 +291,9 @@ main() {
     generate_env
     pull_images
     ask_clear_trading_data
-    clear_trading_data
     start_services
     wait_for_services
+    clear_trading_data
     print_success
 }
 
