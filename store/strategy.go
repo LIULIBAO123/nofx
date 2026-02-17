@@ -224,6 +224,74 @@ type RiskControlConfig struct {
 	MinRiskRewardRatio float64 `json:"min_risk_reward_ratio"`
 	// Min AI confidence to open position (AI guided)
 	MinConfidence int `json:"min_confidence"`
+
+	// Dynamic Stop Loss & Take Profit
+	DynamicStopLoss   *DynamicStopLossConfig   `json:"dynamic_stop_loss,omitempty"`
+	DynamicTakeProfit *DynamicTakeProfitConfig `json:"dynamic_take_profit,omitempty"`
+}
+
+// DynamicStopLossConfig dynamic stop loss configuration
+type DynamicStopLossConfig struct {
+	Enabled      bool   `json:"enabled"`
+	TriggerLogic string `json:"trigger_logic"` // "any" = 任一条件触发即平仓, "all" = 所有启用的条件都触发才平仓
+
+	// Initial fixed stop loss (required, acts as safety net)
+	InitialStopPercent float64 `json:"initial_stop_percent"` // initial fixed stop %
+
+	// Trailing Stop - Tiered Mode
+	TrailingEnabled *bool                `json:"trailing_enabled,omitempty"` // enable trailing stop
+	TrailingLevels  []TrailingStopLevel  `json:"trailing_levels,omitempty"`  // trailing stop levels
+
+	// ATR Stop - Dynamic Range Mode
+	ATREnabled        *bool    `json:"atr_enabled,omitempty"`          // enable ATR stop
+	ATRMultiplierMin  *float64 `json:"atr_multiplier_min,omitempty"`   // ATR multiplier min (AI range)
+	ATRMultiplierMax  *float64 `json:"atr_multiplier_max,omitempty"`   // ATR multiplier max (AI range)
+	ATRPeriodBTCETH   *int     `json:"atr_period_btc_eth,omitempty"`   // ATR period for BTC/ETH
+	ATRPeriodAltcoin  *int     `json:"atr_period_altcoin,omitempty"`   // ATR period for altcoins
+
+	// Support/Resistance Stop
+	SupportResistanceEnabled *bool    `json:"support_resistance_enabled,omitempty"` // enable S/R stop
+	SupportResistanceBuffer  *float64 `json:"support_resistance_buffer,omitempty"`  // buffer %
+}
+
+// TrailingStopLevel trailing stop level configuration
+type TrailingStopLevel struct {
+	ProfitThreshold float64 `json:"profit_threshold"` // profit % threshold to activate this level
+	TrailingPercent float64 `json:"trailing_percent"` // trailing stop % at this level
+}
+
+// DynamicTakeProfitConfig dynamic take profit configuration
+type DynamicTakeProfitConfig struct {
+	Enabled bool `json:"enabled"`
+
+	// Fixed Take Profit
+	FixedEnabled *bool    `json:"fixed_enabled,omitempty"` // enable fixed take profit
+	FixedPercent *float64 `json:"fixed_percent,omitempty"` // fixed take profit %
+
+	// Scaled Take Profit
+	ScaledEnabled *bool                   `json:"scaled_enabled,omitempty"` // enable scaled take profit
+	ScaledLevels  []ScaledTakeProfitLevel `json:"scaled_levels,omitempty"`
+
+	// ATR Take Profit - Dynamic Range Mode
+	ATREnabled        *bool    `json:"atr_enabled,omitempty"`          // enable ATR take profit
+	ATRMultiplierMin  *float64 `json:"atr_multiplier_min,omitempty"`   // ATR multiplier min (AI range)
+	ATRMultiplierMax  *float64 `json:"atr_multiplier_max,omitempty"`   // ATR multiplier max (AI range)
+	ATRPeriodBTCETH   *int     `json:"atr_period_btc_eth,omitempty"`   // ATR period for BTC/ETH
+	ATRPeriodAltcoin  *int     `json:"atr_period_altcoin,omitempty"`   // ATR period for altcoins
+
+	// Resistance Take Profit
+	ResistanceEnabled *bool    `json:"resistance_enabled,omitempty"` // enable resistance take profit
+	ResistanceBuffer  *float64 `json:"resistance_buffer,omitempty"`  // buffer %
+
+	// Common Settings
+	LockProfitPercent *float64 `json:"lock_profit_percent,omitempty"` // move stop to breakeven after this profit
+}
+
+// ScaledTakeProfitLevel scaled take profit level
+type ScaledTakeProfitLevel struct {
+	ProfitPercent        float64 `json:"profit_percent"`                    // profit % trigger
+	ClosePercent         float64 `json:"close_percent"`                     // position % to close
+	MoveStopToBreakeven  *bool   `json:"move_stop_to_breakeven,omitempty"`  // move stop to breakeven
 }
 
 // NewStrategyStore creates a new StrategyStore

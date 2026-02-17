@@ -607,6 +607,74 @@ export interface RiskControlConfig {
   min_position_size: number;       // Min position size in USDT (CODE ENFORCED)
   min_risk_reward_ratio: number;   // Min take_profit / stop_loss ratio (AI guided)
   min_confidence: number;          // Min AI confidence to open position (AI guided)
+
+  // Dynamic Stop Loss & Take Profit
+  dynamic_stop_loss?: DynamicStopLossConfig;
+  dynamic_take_profit?: DynamicTakeProfitConfig;
+}
+
+// 动态止损配置
+export interface DynamicStopLossConfig {
+  enabled: boolean;                // 是否启用动态止损
+  trigger_logic: 'any' | 'all';    // 触发逻辑：'any' = 任一条件触发即平仓，'all' = 所有启用的条件都触发才平仓
+  
+  // 初始固定止损（必需，作为保底）
+  initial_stop_percent: number;    // 初始固定止损百分比 (例如: 3 = 3%)
+  
+  // 追踪止损 (Trailing Stop) - 分层模式
+  trailing_enabled?: boolean;      // 是否启用追踪止损
+  trailing_levels?: TrailingStopLevel[];  // 追踪止损层级
+  
+  // ATR 止损 - 动态区间模式
+  atr_enabled?: boolean;           // 是否启用 ATR 止损
+  atr_multiplier_min?: number;     // ATR 倍数最小值 (AI 可选范围下限)
+  atr_multiplier_max?: number;     // ATR 倍数最大值 (AI 可选范围上限)
+  atr_period_btc_eth?: number;     // BTC/ETH 的 ATR 周期
+  atr_period_altcoin?: number;     // 山寨币的 ATR 周期
+  
+  // 支撑阻力止损
+  support_resistance_enabled?: boolean;  // 是否启用支撑阻力止损
+  support_resistance_buffer?: number;    // 支撑/阻力位缓冲百分比 (例如: 0.5 = 0.5%)
+}
+
+// 追踪止损层级
+export interface TrailingStopLevel {
+  profit_threshold: number;        // 盈利阈值 (例如: 3 = 盈利3%时激活此层级)
+  trailing_percent: number;        // 该层级的追踪止损百分比 (例如: 2 = 允许2%回撤)
+}
+
+// 动态止盈配置
+export interface DynamicTakeProfitConfig {
+  enabled: boolean;                // 是否启用动态止盈
+  
+  // 固定止盈
+  fixed_enabled?: boolean;         // 是否启用固定止盈
+  fixed_percent?: number;          // 固定止盈百分比 (例如: 8 = 8%)
+  
+  // 分批止盈 (Scaled Take Profit)
+  scaled_enabled?: boolean;        // 是否启用分批止盈
+  scaled_levels?: ScaledTakeProfitLevel[];  // 分批止盈层级
+  
+  // ATR 止盈 - 动态区间模式
+  atr_enabled?: boolean;           // 是否启用 ATR 止盈
+  atr_multiplier_min?: number;     // ATR 倍数最小值 (AI 可选范围下限)
+  atr_multiplier_max?: number;     // ATR 倍数最大值 (AI 可选范围上限)
+  atr_period_btc_eth?: number;     // BTC/ETH 的 ATR 周期
+  atr_period_altcoin?: number;     // 山寨币的 ATR 周期
+  
+  // 阻力位止盈
+  resistance_enabled?: boolean;    // 是否启用阻力位止盈
+  resistance_buffer?: number;      // 阻力位缓冲百分比 (例如: 0.5 = 0.5%)
+  
+  // 通用设置
+  lock_profit_percent?: number;    // 锁定利润百分比 (达到后移动止损到盈亏平衡点)
+}
+
+// 分批止盈层级
+export interface ScaledTakeProfitLevel {
+  profit_percent: number;          // 盈利百分比触发点 (例如: 3 = 3%)
+  close_percent: number;           // 平仓百分比 (例如: 30 = 平仓30%)
+  move_stop_to_breakeven?: boolean; // 是否移动止损到盈亏平衡点
 }
 
 // Debate Arena Types

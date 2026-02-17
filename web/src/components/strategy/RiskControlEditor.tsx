@@ -1,5 +1,7 @@
-import { Shield, AlertTriangle } from 'lucide-react'
+import { Shield, AlertTriangle, TrendingDown, TrendingUp } from 'lucide-react'
 import type { RiskControlConfig } from '../../types'
+import { DynamicStopLossEditor } from './DynamicStopLossEditor'
+import { DynamicTakeProfitEditor } from './DynamicTakeProfitEditor'
 
 interface RiskControlEditorProps {
   config: RiskControlConfig
@@ -42,6 +44,8 @@ export function RiskControlEditor({
       minPositionSizeDesc: { zh: 'USDT 最小名义价值', en: 'Minimum notional value in USDT' },
       minConfidence: { zh: '最小信心度', en: 'Min Confidence' },
       minConfidenceDesc: { zh: 'AI 开仓信心度阈值', en: 'AI confidence threshold for entry' },
+      dynamicStopLoss: { zh: '动态止损', en: 'Dynamic Stop Loss' },
+      dynamicTakeProfit: { zh: '动态止盈', en: 'Dynamic Take Profit' },
     }
     return translations[key]?.[language] || key
   }
@@ -385,6 +389,38 @@ export function RiskControlEditor({
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Dynamic Stop Loss */}
+      <div>
+        <div className="flex items-center gap-2 mb-4">
+          <TrendingDown className="w-5 h-5" style={{ color: '#F6465D' }} />
+          <h3 className="font-medium" style={{ color: '#EAECEF' }}>
+            {t('dynamicStopLoss')}
+          </h3>
+        </div>
+        <DynamicStopLossEditor
+          config={config.dynamic_stop_loss}
+          onChange={(dynamicStopLoss) => updateField('dynamic_stop_loss', dynamicStopLoss)}
+          disabled={disabled}
+          language={language}
+        />
+      </div>
+
+      {/* Dynamic Take Profit */}
+      <div>
+        <div className="flex items-center gap-2 mb-4">
+          <TrendingUp className="w-5 h-5" style={{ color: '#0ECB81' }} />
+          <h3 className="font-medium" style={{ color: '#EAECEF' }}>
+            {t('dynamicTakeProfit')}
+          </h3>
+        </div>
+        <DynamicTakeProfitEditor
+          config={config.dynamic_take_profit}
+          onChange={(dynamicTakeProfit) => updateField('dynamic_take_profit', dynamicTakeProfit)}
+          disabled={disabled}
+          language={language}
+        />
       </div>
     </div>
   )
