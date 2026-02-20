@@ -584,7 +584,7 @@ func (s *BacktestStore) LoadConfig(runID string) ([]byte, error) {
 }
 
 // SaveTradeAIAnalysis saves AI analysis for a trade
-func (s *BacktestStore) SaveTradeAIAnalysis(runID string, tradeID int64, analysis *AIAnalysis) error {
+func (s *BacktestStore) SaveTradeAIAnalysis(runID string, tradeID int64, analysis *TradeAnalysis) error {
 	analysisJSON, err := json.Marshal(analysis)
 	if err != nil {
 		return fmt.Errorf("failed to marshal analysis: %w", err)
@@ -600,7 +600,7 @@ func (s *BacktestStore) SaveTradeAIAnalysis(runID string, tradeID int64, analysi
 }
 
 // GetTradeAIAnalysis gets AI analysis for a trade
-func (s *BacktestStore) GetTradeAIAnalysis(runID string, tradeID int64) (*AIAnalysis, error) {
+func (s *BacktestStore) GetTradeAIAnalysis(runID string, tradeID int64) (*TradeAnalysis, error) {
 	var trade BacktestTrade
 	err := s.db.Where("run_id = ? AND id = ?", runID, tradeID).First(&trade).Error
 	if err != nil {
@@ -611,7 +611,7 @@ func (s *BacktestStore) GetTradeAIAnalysis(runID string, tradeID int64) (*AIAnal
 		return nil, nil
 	}
 
-	var analysis AIAnalysis
+	var analysis TradeAnalysis
 	if err := json.Unmarshal([]byte(trade.AIAnalysis), &analysis); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal analysis: %w", err)
 	}
