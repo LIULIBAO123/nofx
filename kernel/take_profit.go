@@ -2,9 +2,7 @@ package kernel
 
 import (
 	"fmt"
-	"math"
 	"nofx/logger"
-	"nofx/market"
 	"nofx/store"
 )
 
@@ -76,25 +74,9 @@ func (c *TakeProfitChecker) CheckTakeProfit(
 		return &TakeProfitSignal{Triggered: false}
 	}
 
-	// "any" logic: any condition triggers = take profit
-	if c.config.TriggerLogic == "any" {
-		return signals[0] // return first triggered signal
-	}
-
-	// "all" logic: all enabled conditions must trigger
-	enabledCount := c.countEnabledConditions()
-	if len(signals) >= enabledCount {
-		// All enabled conditions triggered
-		return &TakeProfitSignal{
-			Triggered:      true,
-			Reason:         "All take profit conditions triggered",
-			Price:          currentPrice,
-			Type:           "combined",
-			PartialPercent: 100,
-		}
-	}
-
-	return &TakeProfitSignal{Triggered: false}
+	// Default to "any" logic: any condition triggers = take profit
+	// Return first triggered signal
+	return signals[0]
 }
 
 // checkFixedTakeProfit checks fixed take profit level
