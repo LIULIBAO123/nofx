@@ -71,9 +71,10 @@ func NewRunner(cfg BacktestConfig, mcpClient mcp.AIClient) (*Runner, error) {
 		return nil, err
 	}
 
-	client, err := configureMCPClient(cfg, mcpClient)
-	if err != nil {
-		return nil, err
+	// Use the provided MCP client directly
+	client := mcpClient
+	if client == nil {
+		return nil, fmt.Errorf("mcpClient cannot be nil")
 	}
 
 	feed, err := NewDataFeed(cfg)

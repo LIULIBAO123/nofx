@@ -2766,13 +2766,6 @@ func (s *Server) getKlinesFromHyperliquid(symbol, interval string, limit int) ([
 func (s *Server) handleSymbols(c *gin.Context) {
 	exchange := c.DefaultQuery("exchange", "binance")
 
-	type SymbolInfo struct {
-		Symbol      string `json:"symbol"`
-		Name        string `json:"name"`
-		Category    string `json:"category"` // crypto, stock, forex, commodity, index
-		MaxLeverage int    `json:"maxLeverage,omitempty"`
-	}
-
 	var symbols []SymbolInfo
 
 	switch strings.ToLower(exchange) {
@@ -2857,19 +2850,16 @@ func (s *Server) handleSymbols(c *gin.Context) {
 	})
 }
 
-// getBinanceSymbols returns Binance USDT perpetual symbols
-func (s *Server) getBinanceSymbols() []struct {
+// SymbolInfo represents exchange symbol information
+type SymbolInfo struct {
 	Symbol      string `json:"symbol"`
 	Name        string `json:"name"`
 	Category    string `json:"category"`
 	MaxLeverage int    `json:"maxLeverage,omitempty"`
-} {
-	type SymbolInfo struct {
-		Symbol      string `json:"symbol"`
-		Name        string `json:"name"`
-		Category    string `json:"category"`
-		MaxLeverage int    `json:"maxLeverage,omitempty"`
-	}
+}
+
+// getBinanceSymbols returns Binance USDT perpetual symbols
+func (s *Server) getBinanceSymbols() []SymbolInfo {
 	
 	// Fetch from Binance API
 	resp, err := http.Get("https://fapi.binance.com/fapi/v1/exchangeInfo")
@@ -2906,18 +2896,7 @@ func (s *Server) getBinanceSymbols() []struct {
 }
 
 // getBybitSymbols returns Bybit USDT perpetual symbols
-func (s *Server) getBybitSymbols() []struct {
-	Symbol      string `json:"symbol"`
-	Name        string `json:"name"`
-	Category    string `json:"category"`
-	MaxLeverage int    `json:"maxLeverage,omitempty"`
-} {
-	type SymbolInfo struct {
-		Symbol      string `json:"symbol"`
-		Name        string `json:"name"`
-		Category    string `json:"category"`
-		MaxLeverage int    `json:"maxLeverage,omitempty"`
-	}
+func (s *Server) getBybitSymbols() []SymbolInfo {
 	
 	// Fetch from Bybit API
 	resp, err := http.Get("https://api.bybit.com/v5/market/instruments-info?category=linear")
@@ -2956,18 +2935,7 @@ func (s *Server) getBybitSymbols() []struct {
 }
 
 // getOKXSymbols returns OKX USDT perpetual symbols
-func (s *Server) getOKXSymbols() []struct {
-	Symbol      string `json:"symbol"`
-	Name        string `json:"name"`
-	Category    string `json:"category"`
-	MaxLeverage int    `json:"maxLeverage,omitempty"`
-} {
-	type SymbolInfo struct {
-		Symbol      string `json:"symbol"`
-		Name        string `json:"name"`
-		Category    string `json:"category"`
-		MaxLeverage int    `json:"maxLeverage,omitempty"`
-	}
+func (s *Server) getOKXSymbols() []SymbolInfo {
 	
 	// Fetch from OKX API
 	resp, err := http.Get("https://www.okx.com/api/v5/public/instruments?instType=SWAP")
@@ -3007,18 +2975,7 @@ func (s *Server) getOKXSymbols() []struct {
 }
 
 // getBitgetSymbols returns Bitget USDT perpetual symbols
-func (s *Server) getBitgetSymbols() []struct {
-	Symbol      string `json:"symbol"`
-	Name        string `json:"name"`
-	Category    string `json:"category"`
-	MaxLeverage int    `json:"maxLeverage,omitempty"`
-} {
-	type SymbolInfo struct {
-		Symbol      string `json:"symbol"`
-		Name        string `json:"name"`
-		Category    string `json:"category"`
-		MaxLeverage int    `json:"maxLeverage,omitempty"`
-	}
+func (s *Server) getBitgetSymbols() []SymbolInfo {
 	
 	// Fetch from Bitget API
 	resp, err := http.Get("https://api.bitget.com/api/mix/v1/market/contracts?productType=umcbl")
@@ -3056,18 +3013,7 @@ func (s *Server) getBitgetSymbols() []struct {
 }
 
 // getGateSymbols returns Gate.io USDT perpetual symbols
-func (s *Server) getGateSymbols() []struct {
-	Symbol      string `json:"symbol"`
-	Name        string `json:"name"`
-	Category    string `json:"category"`
-	MaxLeverage int    `json:"maxLeverage,omitempty"`
-} {
-	type SymbolInfo struct {
-		Symbol      string `json:"symbol"`
-		Name        string `json:"name"`
-		Category    string `json:"category"`
-		MaxLeverage int    `json:"maxLeverage,omitempty"`
-	}
+func (s *Server) getGateSymbols() []SymbolInfo {
 	
 	// Fetch from Gate.io API
 	resp, err := http.Get("https://api.gateio.ws/api/v4/futures/usdt/contracts")
@@ -3101,18 +3047,7 @@ func (s *Server) getGateSymbols() []struct {
 }
 
 // getKuCoinSymbols returns KuCoin USDT perpetual symbols
-func (s *Server) getKuCoinSymbols() []struct {
-	Symbol      string `json:"symbol"`
-	Name        string `json:"name"`
-	Category    string `json:"category"`
-	MaxLeverage int    `json:"maxLeverage,omitempty"`
-} {
-	type SymbolInfo struct {
-		Symbol      string `json:"symbol"`
-		Name        string `json:"name"`
-		Category    string `json:"category"`
-		MaxLeverage int    `json:"maxLeverage,omitempty"`
-	}
+func (s *Server) getKuCoinSymbols() []SymbolInfo {
 	
 	// Fetch from KuCoin API
 	resp, err := http.Get("https://api-futures.kucoin.com/api/v1/contracts/active")
@@ -3151,18 +3086,7 @@ func (s *Server) getKuCoinSymbols() []struct {
 }
 
 // getCommonSymbols returns common USDT perpetual symbols as fallback
-func (s *Server) getCommonSymbols() []struct {
-	Symbol      string `json:"symbol"`
-	Name        string `json:"name"`
-	Category    string `json:"category"`
-	MaxLeverage int    `json:"maxLeverage,omitempty"`
-} {
-	type SymbolInfo struct {
-		Symbol      string `json:"symbol"`
-		Name        string `json:"name"`
-		Category    string `json:"category"`
-		MaxLeverage int    `json:"maxLeverage,omitempty"`
-	}
+func (s *Server) getCommonSymbols() []SymbolInfo {
 	
 	commonSymbols := []string{
 		"BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT",

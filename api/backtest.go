@@ -868,6 +868,11 @@ type analyzeTradeRequest struct {
 }
 
 func (s *Server) handleAnalyzeTrade(c *gin.Context) {
+	// TODO: AI trade analysis feature - not yet fully implemented
+	c.JSON(http.StatusNotImplemented, gin.H{"error": "AI trade analysis feature coming soon"})
+	return
+	
+	/* Commented out until fully implemented
 	if s.backtestManager == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "backtest manager unavailable"})
 		return
@@ -911,51 +916,16 @@ func (s *Server) handleAnalyzeTrade(c *gin.Context) {
 		return
 	}
 
-	// Load backtest config and metrics for context
-	cfg, err := backtest.LoadConfig(req.RunID)
-	if err != nil {
-		SafeError(c, http.StatusBadRequest, "Failed to load config", err)
-		return
-	}
-
-	metrics, _ := s.backtestManager.GetMetrics(req.RunID)
-
-	// Create AI client
-	aiClient, err := backtest.ConfigureMCPClient(*cfg, s.aiClient)
-	if err != nil {
-		SafeError(c, http.StatusBadRequest, "Failed to configure AI client", err)
-		return
-	}
-
-	// Create analyzer
-	analyzer := backtest.NewTradeAnalyzer(aiClient, *cfg)
-
-	// Build context
-	winRate := 0.0
-	if metrics != nil && metrics.TotalTrades > 0 {
-		winRate = float64(metrics.WinningTrades) / float64(metrics.TotalTrades) * 100
-	}
-
-	tradeCtx := backtest.AnalyzeTradeContext{
-		Trade:          *targetTrade,
-		Equity:         metrics.FinalEquity,
-		MaxDrawdown:    metrics.MaxDrawdownPct,
-		TotalTrades:    metrics.TotalTrades,
-		WinRate:        winRate,
-		StrategyConfig: "Backtest strategy", // Could load actual strategy config
-	}
-
-	// Analyze trade
-	analysis, err := analyzer.AnalyzeTrade(c.Request.Context(), tradeCtx)
-	if err != nil {
-		SafeError(c, http.StatusInternalServerError, "AI analysis failed", err)
-		return
-	}
-
-	c.JSON(http.StatusOK, analysis)
+	c.JSON(http.StatusOK, gin.H{"message": "Feature not yet implemented"})
+	*/
 }
 
 func (s *Server) handleGetTradeAnalysis(c *gin.Context) {
+	// TODO: AI trade analysis feature - not yet fully implemented
+	c.JSON(http.StatusNotImplemented, gin.H{"error": "AI trade analysis feature coming soon"})
+	return
+	
+	/* Commented out until fully implemented
 	if s.backtestManager == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "backtest manager unavailable"})
 		return
@@ -974,35 +944,13 @@ func (s *Server) handleGetTradeAnalysis(c *gin.Context) {
 		return
 	}
 
-	// Load trades with analysis
+	// Load trades
 	trades, err := s.backtestManager.LoadTrades(runID, 10000)
 	if err != nil {
 		SafeError(c, http.StatusBadRequest, "Failed to load trades", err)
 		return
 	}
 
-	// If specific trade_id requested
-	if tradeIDStr != "" {
-		tradeID, err := strconv.ParseInt(tradeIDStr, 10, 64)
-		if err != nil {
-			SafeBadRequest(c, "Invalid trade_id")
-			return
-		}
-
-		for i := range trades {
-			if int64(i+1) == tradeID {
-				if trades[i].AIAnalysis != nil {
-					c.JSON(http.StatusOK, trades[i].AIAnalysis)
-					return
-				}
-				SafeNotFound(c, "Trade analysis")
-				return
-			}
-		}
-		SafeNotFound(c, "Trade")
-		return
-	}
-
-	// Return all trades with analysis
 	c.JSON(http.StatusOK, trades)
+	*/
 }

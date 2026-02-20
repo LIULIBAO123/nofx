@@ -40,8 +40,8 @@ type AnalyzeTradeContext struct {
 func (a *TradeAnalyzer) AnalyzeTrade(ctx context.Context, tradeCtx AnalyzeTradeContext) (*store.TradeAnalysis, error) {
 	prompt := a.buildAnalysisPrompt(tradeCtx)
 	
-	// Call AI model
-	response, err := a.aiClient.Chat(ctx, prompt)
+	// Call AI model using CallWithMessages (system prompt empty, all in user prompt)
+	response, err := a.aiClient.CallWithMessages("", prompt)
 	if err != nil {
 		return nil, fmt.Errorf("AI analysis failed: %w", err)
 	}
