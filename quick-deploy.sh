@@ -70,21 +70,79 @@ fi
 mkdir -p "$INSTALL_DIR/data"
 mkdir -p "$INSTALL_DIR/logs"
 
-# 检查是否需要登录 GHCR
-if [ -f "$INSTALL_DIR/docker-compose.prod.yml" ]; then
-    if grep -q "ghcr.io" "$INSTALL_DIR/docker-compose.prod.yml"; then
-        echo "检测到使用 GHCR 镜像，需要登录认证"
-        echo "请先登录 GHCR:"
-        echo "  docker login ghcr.io -u YOUR_GITHUB_USERNAME"
-        echo "或者使用 Personal Access Token:"
-        echo "  echo YOUR_PAT | docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-stdin"
-        echo ""
-        read -p "是否现在登录 GHCR? [y/N]: " login_ghcr
-        if [[ $login_ghcr == [yY] ]]; then
-            docker login ghcr.io
+# 登录 GHCR（如果需要）
+login_ghcr() {
+    if [ ! -f "$INSTALL_DIR/docker-compose.prod.yml" ]; then
+        return 0
+    fi
+    
+    if ! grep -q "ghcr.io" "$INSTALL_DIR/docker-compose.prod.yml"; then
+        return 0
+    fi
+    
+    echo "检测到使用 GHCR 私有镜像，需要登录认证"
+    
+    # 方法1: 使用环境变量 GITHUB_PAT 和 GITHUB_USERNAME
+    if [ -n "$GITHUB_PAT" ] && [ -n "$GITHUB_USERNAME" ]; then
+        echo "使用环境变量中的 PAT 登录 GHCR..."
+        echo "$GITHUB_PAT" | docker login ghcr.io -u "$GITHUB_USERNAME" --password-stdin
+        if [ $? -eq 0 ]; then
+            echo "✓ GHCR 登录成功"
+            return 0
+        else
+            echo "✗ GHCR 登录失败，请检查 PAT 和用户名"
         fi
     fi
-fi
+    
+    # 方法2: 使用命令行参数
+    if [ -n "$1" ] && [ -n "$2" ]; then
+        echo "使用命令行参数中的 PAT 登录 GHCR..."
+        echo "$1" | docker login ghcr.io -u "$2" --password-stdin
+        if [ $? -eq 0 ]; then
+            echo "✓ GHCR 登录成功"
+            return 0
+        else
+            echo "✗ GHCR 登录失败，请检查 PAT 和用户名"
+        fi
+    fi
+    
+    # 方法3: 交互式输入
+    echo ""
+    echo "请选择登录方式："
+    echo "1) 使用 Personal Access Token (PAT)"
+    echo "2) 跳过（如果已登录）"
+    read -p "请选择 [1-2]: " choice
+    
+    case $choice in
+        1)
+            read -p "请输入 GitHub 用户名: " github_username
+            read -sp "请输入 Personal Access Token: " github_pat
+            echo ""
+            if [ -n "$github_username" ] && [ -n "$github_pat" ]; then
+                echo "$github_pat" | docker login ghcr.io -u "$github_username" --password-stdin
+                if [ $? -eq 0 ]; then
+                    echo "✓ GHCR 登录成功"
+                else
+                    echo "✗ GHCR 登录失败"
+                    exit 1
+                fi
+            else
+                echo "✗ 用户名或 PAT 为空"
+                exit 1
+            fi
+            ;;
+        2)
+            echo "跳过登录，假设已登录 GHCR"
+            ;;
+        *)
+            echo "无效选择，退出"
+            exit 1
+            ;;
+    esac
+}
+
+# 调用登录函数（支持命令行参数: PAT 用户名）
+login_ghcr "$1" "$2"
 
 # 启动服务
 echo "启动服务..."

@@ -308,25 +308,60 @@ login_ghcr() {
     log_step "检查是否需要登录 GHCR..."
     
     # 检查 docker-compose.prod.yml 是否使用 GHCR 镜像
-    if [ -f "$INSTALL_DIR/docker-compose.prod.yml" ]; then
-        if grep -q "ghcr.io" "$INSTALL_DIR/docker-compose.prod.yml"; then
-            log_info "检测到使用 GHCR 镜像，需要登录认证"
-            read -p "是否使用 Personal Access Token (PAT) 登录 GHCR? [Y/n]: " confirm
-            if [[ ! $confirm == [nN] ]]; then
-                read -sp "请输入您的 GitHub Personal Access Token: " GITHUB_TOKEN
-                echo ""
-                if [ -n "$GITHUB_TOKEN" ]; then
-                    echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$(whoami)" --password-stdin
-                    if [ $? -eq 0 ]; then
-                        log_info "GHCR 登录成功"
-                    else
-                        log_error "GHCR 登录失败，将尝试构建镜像"
-                    fi
-                else
-                    log_warn "未提供 PAT，将尝试构建镜像"
-                fi
-            fi
+    if [ ! -f "$INSTALL_DIR/docker-compose.prod.yml" ]; then
+        return 0
+    fi
+    
+    if ! grep -q "ghcr.io" "$INSTALL_DIR/docker-compose.prod.yml"; then
+        return 0
+    fi
+    
+    log_info "检测到使用 GHCR 私有镜像，需要登录认证"
+    
+    # 方法1: 使用环境变量 GITHUB_PAT 和 GITHUB_USERNAME
+    if [ -n "$GITHUB_PAT" ] && [ -n "$GITHUB_USERNAME" ]; then
+        log_info "使用环境变量中的 PAT 登录 GHCR..."
+        echo "$GITHUB_PAT" | docker login ghcr.io -u "$GITHUB_USERNAME" --password-stdin
+        if [ $? -eq 0 ]; then
+            log_info "✓ GHCR 登录成功"
+            return 0
+        else
+            log_error "✗ GHCR 登录失败，请检查 PAT 和用户名"
         fi
+    fi
+    
+    # 方法2: 使用命令行参数（如果通过函数参数传入）
+    if [ -n "$1" ] && [ -n "$2" ]; then
+        log_info "使用命令行参数中的 PAT 登录 GHCR..."
+        echo "$1" | docker login ghcr.io -u "$2" --password-stdin
+        if [ $? -eq 0 ]; then
+            log_info "✓ GHCR 登录成功"
+            return 0
+        else
+            log_error "✗ GHCR 登录失败，请检查 PAT 和用户名"
+        fi
+    fi
+    
+    # 方法3: 交互式输入
+    read -p "是否使用 Personal Access Token (PAT) 登录 GHCR? [Y/n]: " confirm
+    if [[ ! $confirm == [nN] ]]; then
+        read -p "请输入 GitHub 用户名: " github_username
+        read -sp "请输入 Personal Access Token: " github_pat
+        echo ""
+        if [ -n "$github_username" ] && [ -n "$github_pat" ]; then
+            echo "$github_pat" | docker login ghcr.io -u "$github_username" --password-stdin
+            if [ $? -eq 0 ]; then
+                log_info "✓ GHCR 登录成功"
+            else
+                log_error "✗ GHCR 登录失败"
+                exit 1
+            fi
+        else
+            log_error "✗ 用户名或 PAT 为空"
+            exit 1
+        fi
+    else
+        log_warn "跳过 GHCR 登录，假设已登录或使用本地构建"
     fi
 }
 
