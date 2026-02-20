@@ -1,4 +1,4 @@
-import { TrendingUp, TrendingDown, AlertCircle, CheckCircle, Zap } from 'lucide-react'
+import { TrendingUp, AlertCircle, CheckCircle, Zap } from 'lucide-react'
 import { useState } from 'react'
 
 type AlertType = 'opportunity' | 'warning' | 'info' | 'success'
