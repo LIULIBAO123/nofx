@@ -2764,7 +2764,7 @@ func (s *Server) getKlinesFromHyperliquid(symbol, interval string, limit int) ([
 
 // handleSymbols returns available symbols for a given exchange
 func (s *Server) handleSymbols(c *gin.Context) {
-	exchange := c.DefaultQuery("exchange", "hyperliquid")
+	exchange := c.DefaultQuery("exchange", "binance")
 
 	type SymbolInfo struct {
 		Symbol      string `json:"symbol"`
@@ -2776,6 +2776,30 @@ func (s *Server) handleSymbols(c *gin.Context) {
 	var symbols []SymbolInfo
 
 	switch strings.ToLower(exchange) {
+	case "binance":
+		// Fetch symbols from Binance Futures
+		symbols = s.getBinanceSymbols()
+		
+	case "bybit":
+		// Fetch symbols from Bybit
+		symbols = s.getBybitSymbols()
+		
+	case "okx":
+		// Fetch symbols from OKX
+		symbols = s.getOKXSymbols()
+		
+	case "bitget":
+		// Fetch symbols from Bitget
+		symbols = s.getBitgetSymbols()
+		
+	case "gate":
+		// Fetch symbols from Gate.io
+		symbols = s.getGateSymbols()
+		
+	case "kucoin":
+		// Fetch symbols from KuCoin
+		symbols = s.getKuCoinSymbols()
+		
 	case "hyperliquid", "hyperliquid-xyz", "xyz":
 		// Fetch symbols from Hyperliquid
 		client := hyperliquid.NewClient()
@@ -2822,8 +2846,8 @@ func (s *Server) handleSymbols(c *gin.Context) {
 		}
 
 	default:
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Unsupported exchange for symbol listing"})
-		return
+		// Default to common USDT perpetual symbols
+		symbols = s.getCommonSymbols()
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -2831,6 +2855,333 @@ func (s *Server) handleSymbols(c *gin.Context) {
 		"symbols":  symbols,
 		"count":    len(symbols),
 	})
+}
+
+// getBinanceSymbols returns Binance USDT perpetual symbols
+func (s *Server) getBinanceSymbols() []struct {
+	Symbol      string `json:"symbol"`
+	Name        string `json:"name"`
+	Category    string `json:"category"`
+	MaxLeverage int    `json:"maxLeverage,omitempty"`
+} {
+	type SymbolInfo struct {
+		Symbol      string `json:"symbol"`
+		Name        string `json:"name"`
+		Category    string `json:"category"`
+		MaxLeverage int    `json:"maxLeverage,omitempty"`
+	}
+	
+	// Fetch from Binance API
+	resp, err := http.Get("https://fapi.binance.com/fapi/v1/exchangeInfo")
+	if err != nil {
+		logger.Warnf("Failed to fetch Binance symbols: %v", err)
+		return s.getCommonSymbols()
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Symbols []struct {
+			Symbol string `json:"symbol"`
+			Status string `json:"status"`
+		} `json:"symbols"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		logger.Warnf("Failed to parse Binance symbols: %v", err)
+		return s.getCommonSymbols()
+	}
+
+	var symbols []SymbolInfo
+	for _, s := range result.Symbols {
+		if s.Status == "TRADING" && strings.HasSuffix(s.Symbol, "USDT") {
+			symbols = append(symbols, SymbolInfo{
+				Symbol:   s.Symbol,
+				Name:     s.Symbol,
+				Category: "crypto",
+			})
+		}
+	}
+
+	return symbols
+}
+
+// getBybitSymbols returns Bybit USDT perpetual symbols
+func (s *Server) getBybitSymbols() []struct {
+	Symbol      string `json:"symbol"`
+	Name        string `json:"name"`
+	Category    string `json:"category"`
+	MaxLeverage int    `json:"maxLeverage,omitempty"`
+} {
+	type SymbolInfo struct {
+		Symbol      string `json:"symbol"`
+		Name        string `json:"name"`
+		Category    string `json:"category"`
+		MaxLeverage int    `json:"maxLeverage,omitempty"`
+	}
+	
+	// Fetch from Bybit API
+	resp, err := http.Get("https://api.bybit.com/v5/market/instruments-info?category=linear")
+	if err != nil {
+		logger.Warnf("Failed to fetch Bybit symbols: %v", err)
+		return s.getCommonSymbols()
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Result struct {
+			List []struct {
+				Symbol string `json:"symbol"`
+				Status string `json:"status"`
+			} `json:"list"`
+		} `json:"result"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		logger.Warnf("Failed to parse Bybit symbols: %v", err)
+		return s.getCommonSymbols()
+	}
+
+	var symbols []SymbolInfo
+	for _, s := range result.Result.List {
+		if s.Status == "Trading" && strings.HasSuffix(s.Symbol, "USDT") {
+			symbols = append(symbols, SymbolInfo{
+				Symbol:   s.Symbol,
+				Name:     s.Symbol,
+				Category: "crypto",
+			})
+		}
+	}
+
+	return symbols
+}
+
+// getOKXSymbols returns OKX USDT perpetual symbols
+func (s *Server) getOKXSymbols() []struct {
+	Symbol      string `json:"symbol"`
+	Name        string `json:"name"`
+	Category    string `json:"category"`
+	MaxLeverage int    `json:"maxLeverage,omitempty"`
+} {
+	type SymbolInfo struct {
+		Symbol      string `json:"symbol"`
+		Name        string `json:"name"`
+		Category    string `json:"category"`
+		MaxLeverage int    `json:"maxLeverage,omitempty"`
+	}
+	
+	// Fetch from OKX API
+	resp, err := http.Get("https://www.okx.com/api/v5/public/instruments?instType=SWAP")
+	if err != nil {
+		logger.Warnf("Failed to fetch OKX symbols: %v", err)
+		return s.getCommonSymbols()
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Data []struct {
+			InstId string `json:"instId"`
+			State  string `json:"state"`
+		} `json:"data"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		logger.Warnf("Failed to parse OKX symbols: %v", err)
+		return s.getCommonSymbols()
+	}
+
+	var symbols []SymbolInfo
+	for _, s := range result.Data {
+		if s.State == "live" && strings.Contains(s.InstId, "USDT") {
+			// Convert BTC-USDT-SWAP to BTCUSDT
+			symbol := strings.ReplaceAll(s.InstId, "-SWAP", "")
+			symbol = strings.ReplaceAll(symbol, "-", "")
+			symbols = append(symbols, SymbolInfo{
+				Symbol:   symbol,
+				Name:     symbol,
+				Category: "crypto",
+			})
+		}
+	}
+
+	return symbols
+}
+
+// getBitgetSymbols returns Bitget USDT perpetual symbols
+func (s *Server) getBitgetSymbols() []struct {
+	Symbol      string `json:"symbol"`
+	Name        string `json:"name"`
+	Category    string `json:"category"`
+	MaxLeverage int    `json:"maxLeverage,omitempty"`
+} {
+	type SymbolInfo struct {
+		Symbol      string `json:"symbol"`
+		Name        string `json:"name"`
+		Category    string `json:"category"`
+		MaxLeverage int    `json:"maxLeverage,omitempty"`
+	}
+	
+	// Fetch from Bitget API
+	resp, err := http.Get("https://api.bitget.com/api/mix/v1/market/contracts?productType=umcbl")
+	if err != nil {
+		logger.Warnf("Failed to fetch Bitget symbols: %v", err)
+		return s.getCommonSymbols()
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Data []struct {
+			Symbol string `json:"symbol"`
+		} `json:"data"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		logger.Warnf("Failed to parse Bitget symbols: %v", err)
+		return s.getCommonSymbols()
+	}
+
+	var symbols []SymbolInfo
+	for _, s := range result.Data {
+		if strings.HasSuffix(s.Symbol, "USDT") {
+			// Remove _UMCBL suffix
+			symbol := strings.ReplaceAll(s.Symbol, "_UMCBL", "")
+			symbols = append(symbols, SymbolInfo{
+				Symbol:   symbol,
+				Name:     symbol,
+				Category: "crypto",
+			})
+		}
+	}
+
+	return symbols
+}
+
+// getGateSymbols returns Gate.io USDT perpetual symbols
+func (s *Server) getGateSymbols() []struct {
+	Symbol      string `json:"symbol"`
+	Name        string `json:"name"`
+	Category    string `json:"category"`
+	MaxLeverage int    `json:"maxLeverage,omitempty"`
+} {
+	type SymbolInfo struct {
+		Symbol      string `json:"symbol"`
+		Name        string `json:"name"`
+		Category    string `json:"category"`
+		MaxLeverage int    `json:"maxLeverage,omitempty"`
+	}
+	
+	// Fetch from Gate.io API
+	resp, err := http.Get("https://api.gateio.ws/api/v4/futures/usdt/contracts")
+	if err != nil {
+		logger.Warnf("Failed to fetch Gate.io symbols: %v", err)
+		return s.getCommonSymbols()
+	}
+	defer resp.Body.Close()
+
+	var result []struct {
+		Name string `json:"name"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		logger.Warnf("Failed to parse Gate.io symbols: %v", err)
+		return s.getCommonSymbols()
+	}
+
+	var symbols []SymbolInfo
+	for _, s := range result {
+		// Convert BTC_USDT to BTCUSDT
+		symbol := strings.ReplaceAll(s.Name, "_", "")
+		symbols = append(symbols, SymbolInfo{
+			Symbol:   symbol,
+			Name:     symbol,
+			Category: "crypto",
+		})
+	}
+
+	return symbols
+}
+
+// getKuCoinSymbols returns KuCoin USDT perpetual symbols
+func (s *Server) getKuCoinSymbols() []struct {
+	Symbol      string `json:"symbol"`
+	Name        string `json:"name"`
+	Category    string `json:"category"`
+	MaxLeverage int    `json:"maxLeverage,omitempty"`
+} {
+	type SymbolInfo struct {
+		Symbol      string `json:"symbol"`
+		Name        string `json:"name"`
+		Category    string `json:"category"`
+		MaxLeverage int    `json:"maxLeverage,omitempty"`
+	}
+	
+	// Fetch from KuCoin API
+	resp, err := http.Get("https://api-futures.kucoin.com/api/v1/contracts/active")
+	if err != nil {
+		logger.Warnf("Failed to fetch KuCoin symbols: %v", err)
+		return s.getCommonSymbols()
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Data []struct {
+			Symbol string `json:"symbol"`
+		} `json:"data"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		logger.Warnf("Failed to parse KuCoin symbols: %v", err)
+		return s.getCommonSymbols()
+	}
+
+	var symbols []SymbolInfo
+	for _, s := range result.Data {
+		if strings.HasSuffix(s.Symbol, "USDTM") {
+			// Convert XBTUSDTM to BTCUSDT
+			symbol := strings.ReplaceAll(s.Symbol, "USDTM", "USDT")
+			symbol = strings.ReplaceAll(symbol, "XBT", "BTC")
+			symbols = append(symbols, SymbolInfo{
+				Symbol:   symbol,
+				Name:     symbol,
+				Category: "crypto",
+			})
+		}
+	}
+
+	return symbols
+}
+
+// getCommonSymbols returns common USDT perpetual symbols as fallback
+func (s *Server) getCommonSymbols() []struct {
+	Symbol      string `json:"symbol"`
+	Name        string `json:"name"`
+	Category    string `json:"category"`
+	MaxLeverage int    `json:"maxLeverage,omitempty"`
+} {
+	type SymbolInfo struct {
+		Symbol      string `json:"symbol"`
+		Name        string `json:"name"`
+		Category    string `json:"category"`
+		MaxLeverage int    `json:"maxLeverage,omitempty"`
+	}
+	
+	commonSymbols := []string{
+		"BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT",
+		"DOGEUSDT", "ADAUSDT", "MATICUSDT", "DOTUSDT", "LTCUSDT",
+		"AVAXUSDT", "LINKUSDT", "UNIUSDT", "ATOMUSDT", "ETCUSDT",
+		"XLMUSDT", "NEARUSDT", "ALGOUSDT", "VETUSDT", "ICPUSDT",
+		"FILUSDT", "APTUSDT", "ARBUSDT", "OPUSDT", "SUIUSDT",
+	}
+
+	var symbols []SymbolInfo
+	for _, sym := range commonSymbols {
+		symbols = append(symbols, SymbolInfo{
+			Symbol:   sym,
+			Name:     sym,
+			Category: "crypto",
+		})
+	}
+
+	return symbols
 }
 
 // handleDecisions Decision log list
