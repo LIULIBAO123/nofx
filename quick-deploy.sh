@@ -69,6 +69,26 @@ fi
 # 创建必要的目录
 mkdir -p "$INSTALL_DIR/data"
 mkdir -p "$INSTALL_DIR/logs"
+mkdir -p "$INSTALL_DIR/keys"
+
+# 生成 RSA 密钥（如果不存在）
+echo "生成 RSA 密钥..."
+if [ ! -f "$INSTALL_DIR/keys/private.pem" ]; then
+    # 检查 openssl 是否安装
+    if ! command -v openssl &> /dev/null; then
+        echo "安装 openssl..."
+        apt-get update && apt-get install -y openssl || yum install -y openssl
+    fi
+    
+    # 生成密钥对
+    openssl genrsa -out "$INSTALL_DIR/keys/private.pem" 2048 2>/dev/null
+    openssl rsa -in "$INSTALL_DIR/keys/private.pem" -pubout -out "$INSTALL_DIR/keys/public.pem" 2>/dev/null
+    chmod 600 "$INSTALL_DIR/keys/private.pem"
+    chmod 644 "$INSTALL_DIR/keys/public.pem"
+    echo "✓ RSA 密钥生成成功"
+else
+    echo "✓ RSA 密钥已存在"
+fi
 
 # 登录 GHCR（如果需要）
 login_ghcr() {

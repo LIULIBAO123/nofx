@@ -262,9 +262,74 @@ EOF
     # 创建必要的目录
     mkdir -p "$INSTALL_DIR/data"
     mkdir -p "$INSTALL_DIR/logs"
+    mkdir -p "$INSTALL_DIR/keys"
     
     log_info "环境变量配置完成"
     log_warn "请编辑 $INSTALL_DIR/.env 文件，修改 JWT_SECRET 等敏感信息"
+}
+
+# 生成 RSA 密钥
+generate_rsa_keys() {
+    log_step "生成 RSA 密钥..."
+    
+    cd "$INSTALL_DIR"
+    
+    # 检查是否已存在有效的密钥
+    if [ -f "keys/private.pem" ]; then
+        log_info "检测到现有私钥，验证中..."
+        if openssl rsa -in keys/private.pem -check -noout 2>/dev/null; then
+            log_info "✓ 现有 RSA 私钥有效，跳过生成"
+            return 0
+        else
+            log_warn "✗ 现有私钥无效，将重新生成"
+        fi
+    fi
+    
+    # 检查 openssl 是否安装
+    if ! command -v openssl &> /dev/null; then
+        log_warn "openssl 未安装，正在安装..."
+        case $OS in
+            ubuntu|debian)
+                apt-get update && apt-get install -y openssl
+                ;;
+            centos|rhel)
+                yum install -y openssl
+                ;;
+        esac
+    fi
+    
+    # 生成 RSA 密钥对
+    log_info "生成 RSA 密钥对（2048位）..."
+    openssl genrsa -out keys/private.pem 2048 2>/dev/null
+    
+    if [ $? -ne 0 ]; then
+        log_error "生成私钥失败"
+        exit 1
+    fi
+    
+    log_info "生成公钥..."
+    openssl rsa -in keys/private.pem -pubout -out keys/public.pem 2>/dev/null
+    
+    if [ $? -ne 0 ]; then
+        log_error "生成公钥失败"
+        exit 1
+    fi
+    
+    # 设置权限
+    chmod 600 keys/private.pem
+    chmod 644 keys/public.pem
+    
+    # 验证密钥
+    if openssl rsa -in keys/private.pem -check -noout 2>/dev/null; then
+        log_info "✓ RSA 密钥生成并验证成功"
+    else
+        log_error "✗ RSA 密钥验证失败"
+        exit 1
+    fi
+    
+    log_info "密钥文件位置："
+    log_info "  私钥: $INSTALL_DIR/keys/private.pem"
+    log_info "  公钥: $INSTALL_DIR/keys/public.pem"
 }
 
 # 配置防火墙
@@ -563,6 +628,9 @@ main() {
     
     # 配置环境
     configure_env
+    
+    # 生成 RSA 密钥
+    generate_rsa_keys
     
     # 登录 GHCR (如果需要)
     login_ghcr

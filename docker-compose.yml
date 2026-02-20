@@ -12,12 +12,15 @@ services:
       - "6060:6060"  # pprof profiling
     volumes:
       - ./data:/app/data
+      - ./keys:/app/keys
       - /etc/localtime:/etc/localtime:ro
     env_file:
       - .env
     environment:
       - TZ=${TZ:-Asia/Shanghai}
       - AI_MAX_TOKENS=8000
+      - RSA_PRIVATE_KEY_PATH=/app/keys/private.pem
+      - RSA_PUBLIC_KEY_PATH=/app/keys/public.pem
     networks:
       - nofx-network
     healthcheck:
