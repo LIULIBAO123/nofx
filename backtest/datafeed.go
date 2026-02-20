@@ -174,8 +174,10 @@ func (df *DataFeed) BuildMarketData(ts int64) (map[string]*market.Data, map[stri
 				result[symbol] = data
 			}
 		}
+		// Skip symbols without primary data instead of failing the entire backtest
 		if _, ok := perTF[df.primaryTF]; !ok {
-			return nil, nil, fmt.Errorf("no primary data for %s at %d", symbol, ts)
+			// Log warning but continue with other symbols
+			continue
 		}
 		multi[symbol] = perTF
 	}
