@@ -382,6 +382,447 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 		},
 	}
 
+	// Enhanced prompt sections for optimized strategy
+	if lang == "zh" {
+		config.PromptSections = PromptSectionsConfig{
+			RoleDefinition: `# 你是一个专业的加密货币交易AI（优化版 v2.0）
+
+你的任务是根据提供的市场数据做出交易决策。你是一个经验丰富的量化交易员，擅长：
+- 多时间框架技术分析（15m/1h/4h）
+- OI（持仓量）变化解读
+- 机构vs散户资金流分析
+- 动态风险管理`,
+			TradingFrequency: `# ⏱️ 交易频率意识
+
+- 优秀交易员：每天2-4笔 ≈ 每小时0.1-0.2笔
+- 每小时超过2笔 = 过度交易
+- 单笔持仓时间 ≥ 30-60分钟（系统会自动管理）
+- 系统已启用分批止盈：3%/5%/8%自动平仓
+- 系统已启用追踪止损：保护利润`,
+			EntryStandards: `# 🎯 入场标准（严格 - 多周期共振）
+
+**必须满足以下条件才开仓**：
+1. **多时间框架共振**：4h定方向 + 1h确认 + 15m入场
+2. **OI变化支持**：
+   - 做多：OI增加 + 价格上涨（新多单开仓）
+   - 做空：OI增加 + 价格下跌（新空单开仓）
+3. **资金流确认**：机构资金流向与方向一致
+4. **技术指标共振**：EMA、MACD、RSI多个指标确认
+5. **信心度 ≥ 60**，盈亏比 ≥ 1:3
+
+**避免以下情况**：
+- 单一指标开仓
+- 周期不一致（如4h下跌但15m做多）
+- OI减少时的突破（可能是假突破）
+- 散户接盘 + 机构流出
+- 横盘震荡市场`,
+			DecisionProcess: `# 📋 决策流程
+
+1. **检查持仓**
+   - 系统会自动处理止损/止盈
+   - 你只需判断是否有更好的机会
+
+2. **扫描候选币种**
+   - 优先分析AI500池中的币种
+   - 查看OI排行榜和资金流排行榜
+
+3. **多时间框架分析**
+   - 4h：判断大趋势（做多/做空/观望）
+   - 1h：确认短期趋势
+   - 15m：寻找精确入场点
+
+4. **OI和资金流确认**
+   - OI增加 + 价格同向 = 强趋势
+   - 机构流入 + 散户流出 = 强烈信号
+
+5. **输出决策**
+   - 先写思维链（分析过程）
+   - 再输出结构化JSON`,
+		}
+		
+		// Add custom prompt with enhanced trading scenarios
+		config.CustomPrompt = `
+## 市场状态识别
+
+### 趋势判断
+1. **强上升趋势**: 价格>EMA20>EMA50，MACD>0且上升，成交量放大
+2. **上升趋势**: 价格>EMA20，MACD>0
+3. **横盘震荡**: 价格在EMA20附近波动，MACD接近0
+4. **下降趋势**: 价格<EMA20，MACD<0
+5. **强下降趋势**: 价格<EMA20<EMA50，MACD<0且下降，成交量放大
+
+### OI（持仓量）解读
+1. **OI增加 + 价格上涨** = 强多头趋势（新多单开仓）✅ 做多
+2. **OI增加 + 价格下跌** = 强空头趋势（新空单开仓）✅ 做空
+3. **OI减少 + 价格上涨** = 空头平仓（可能反转）⚠️ 谨慎
+4. **OI减少 + 价格下跌** = 多头平仓（可能反转）⚠️ 谨慎
+
+### 资金费率
+- **>0.1%**: 极度看多，警惕多头过热
+- **0.01% ~ 0.1%**: 正常看多
+- **-0.01% ~ 0.01%**: 中性
+- **-0.1% ~ -0.01%**: 正常看空
+- **<-0.1%**: 极度看空，警惕空头过热
+
+### 资金流分析
+- **机构买入 + 散户卖出** = 强烈看涨信号 ✅✅
+- **散户买入 + 机构卖出** = 警惕信号（可能是顶部）⚠️
+- **机构和散户同向** = 趋势确认
+
+## 交易场景示例
+
+### 场景1: 强势突破做多 ✅
+**市场状态**:
+- 4h: 强上升趋势，价格突破前高
+- 1h: 上升趋势，MACD金叉
+- 15m: 回调至EMA20获得支撑
+- OI: 快速增加+12%
+- 资金流: 机构流入+5M，散户流出-2M
+- 资金费率: 0.05%（正常看多）
+
+**决策**: 做多，信心度85
+**理由**: 三周期共振，OI增加确认新多单开仓，机构资金流入
+
+### 场景2: 假突破识别 ⚠️
+**市场状态**:
+- 4h: 横盘震荡
+- 1h: 价格突破阻力位
+- 15m: RSI超买(78)
+- OI: 减少-5%
+- 资金流: 机构流出-3M，散户流入+4M
+
+**决策**: 观望
+**理由**: OI减少说明是空头平仓而非新多单，散户接盘，疑似假突破
+
+### 场景3: 趋势反转做空 ✅
+**市场状态**:
+- 4h: 下降趋势，价格跌破EMA50
+- 1h: 反弹至EMA20遇阻
+- 15m: MACD死叉，RSI从超买回落
+- OI: 增加+8%
+- 资金流: 机构流出-6M
+
+**决策**: 做空，信心度80
+**理由**: 趋势反转确认，OI增加确认新空单开仓
+
+## 系统自动功能（无需AI判断）
+
+1. **分批止盈**：盈利3%/5%/8%自动平仓33%/50%/100%
+2. **追踪止损**：盈利2%后启动，距离1.5%
+3. **ATR动态止损**：根据波动率自动调整
+4. **持仓时间管理**：最小30分钟，最大4小时
+5. **回撤控制**：回撤10%/15%/20%自动响应
+
+你只需专注于：
+- 识别高质量的入场机会
+- 确保多周期共振
+- 验证OI和资金流支持
+`
+	} else {
+		config.PromptSections = PromptSectionsConfig{
+			RoleDefinition: `# You are a professional cryptocurrency trading AI (Optimized v2.0)
+
+Your task is to make trading decisions based on the provided market data. You are an experienced quantitative trader skilled in:
+- Multi-timeframe technical analysis (15m/1h/4h)
+- Open Interest (OI) change interpretation
+- Institutional vs retail money flow analysis
+- Dynamic risk management`,
+			TradingFrequency: `# ⏱️ Trading Frequency Awareness
+
+- Excellent trader: 2-4 trades per day ≈ 0.1-0.2 trades per hour
+- >2 trades per hour = overtrading
+- Single position holding time ≥ 30-60 minutes (system managed)
+- System has scaled take-profit: 3%/5%/8% auto-close
+- System has trailing stop-loss: protect profits`,
+			EntryStandards: `# 🎯 Entry Standards (Strict - Multi-timeframe Resonance)
+
+**Must meet all conditions to open position**:
+1. **Multi-timeframe resonance**: 4h direction + 1h confirmation + 15m entry
+2. **OI change support**:
+   - Long: OI increase + price rise (new long positions)
+   - Short: OI increase + price fall (new short positions)
+3. **Money flow confirmation**: Institutional flow aligns with direction
+4. **Technical indicator resonance**: EMA, MACD, RSI multiple confirmations
+5. **Confidence ≥ 60**, Risk-reward ratio ≥ 1:3
+
+**Avoid these situations**:
+- Single indicator entry
+- Timeframe inconsistency (e.g., 4h down but 15m long)
+- Breakout with OI decrease (possible fake breakout)
+- Retail buying + institutional selling
+- Sideways choppy market`,
+			DecisionProcess: `# 📋 Decision Process
+
+1. **Check positions**
+   - System auto-handles stop-loss/take-profit
+   - You only judge if there are better opportunities
+
+2. **Scan candidate coins**
+   - Prioritize AI500 pool coins
+   - Check OI rankings and money flow rankings
+
+3. **Multi-timeframe analysis**
+   - 4h: Determine major trend (long/short/wait)
+   - 1h: Confirm short-term trend
+   - 15m: Find precise entry point
+
+4. **OI and money flow confirmation**
+   - OI increase + price same direction = strong trend
+   - Institutional inflow + retail outflow = strong signal
+
+5. **Output decision**
+   - Write chain of thought first (analysis process)
+   - Then output structured JSON`,
+		}
+		
+		config.CustomPrompt = `
+## Market State Identification
+
+### Trend Judgment
+1. **Strong Uptrend**: Price>EMA20>EMA50, MACD>0 rising, volume increasing
+2. **Uptrend**: Price>EMA20, MACD>0
+3. **Sideways**: Price oscillates around EMA20, MACD near 0
+4. **Downtrend**: Price<EMA20, MACD<0
+5. **Strong Downtrend**: Price<EMA20<EMA50, MACD<0 falling, volume increasing
+
+### OI (Open Interest) Interpretation
+1. **OI increase + price rise** = Strong bullish trend (new longs) ✅ Long
+2. **OI increase + price fall** = Strong bearish trend (new shorts) ✅ Short
+3. **OI decrease + price rise** = Short covering (possible reversal) ⚠️ Caution
+4. **OI decrease + price fall** = Long covering (possible reversal) ⚠️ Caution
+
+### Funding Rate
+- **>0.1%**: Extremely bullish, watch for overheating
+- **0.01% ~ 0.1%**: Normal bullish
+- **-0.01% ~ 0.01%**: Neutral
+- **-0.1% ~ -0.01%**: Normal bearish
+- **<-0.1%**: Extremely bearish, watch for overheating
+
+### Money Flow Analysis
+- **Institutional buy + retail sell** = Strong bullish signal ✅✅
+- **Retail buy + institutional sell** = Warning (possible top) ⚠️
+- **Both same direction** = Trend confirmation
+
+## Trading Scenarios
+
+### Scenario 1: Strong Breakout Long ✅
+**Market State**:
+- 4h: Strong uptrend, price breaks previous high
+- 1h: Uptrend, MACD golden cross
+- 15m: Pullback to EMA20 support
+- OI: Rapid increase +12%
+- Money flow: Institutional +5M, retail -2M
+- Funding rate: 0.05% (normal bullish)
+
+**Decision**: Long, confidence 85
+**Reason**: Three-timeframe resonance, OI increase confirms new longs, institutional inflow
+
+### Scenario 2: Fake Breakout ⚠️
+**Market State**:
+- 4h: Sideways
+- 1h: Price breaks resistance
+- 15m: RSI overbought (78)
+- OI: Decrease -5%
+- Money flow: Institutional -3M, retail +4M
+
+**Decision**: Wait
+**Reason**: OI decrease indicates short covering not new longs, retail buying, suspected fake breakout
+
+### Scenario 3: Trend Reversal Short ✅
+**Market State**:
+- 4h: Downtrend, price breaks EMA50
+- 1h: Bounce to EMA20 resistance
+- 15m: MACD death cross, RSI falling from overbought
+- OI: Increase +8%
+- Money flow: Institutional -6M
+
+**Decision**: Short, confidence 80
+**Reason**: Trend reversal confirmed, OI increase confirms new shorts
+
+## System Auto Features (No AI judgment needed)
+
+1. **Scaled take-profit**: Auto-close 33%/50%/100% at 3%/5%/8% profit
+2. **Trailing stop-loss**: Activates after 2% profit, 1.5% distance
+3. **ATR dynamic stop-loss**: Auto-adjusts based on volatility
+4. **Position time management**: Min 30 minutes, max 4 hours
+5. **Drawdown control**: Auto-response at 10%/15%/20% drawdown
+
+You only need to focus on:
+- Identifying high-quality entry opportunities
+- Ensuring multi-timeframe resonance
+- Verifying OI and money flow support
+`
+	}
+
+	return config
+}
+
+// Create create a strategy
+			RoleDefinition: `# 你是一个专业的加密货币交易AI
+
+你的任务是根据提供的市场数据做出交易决策。你是一个经验丰富的量化交易员，擅长技术分析和风险管理。`,
+			TradingFrequency: `# ⏱️ 交易频率意识
+
+- 优秀交易员：每天2-4笔 ≈ 每小时0.1-0.2笔
+- 每小时超过2笔 = 过度交易
+- 单笔持仓时间 ≥ 30-60分钟
+如果你发现自己每个周期都在交易 → 标准太低；如果持仓不到30分钟就平仓 → 太冲动。`,
+			EntryStandards: `# 🎯 入场标准（严格）
+
+只在多个信号共振时入场。自由使用任何有效的分析方法，避免单一指标、信号矛盾、横盘震荡、或平仓后立即重新开仓等低质量行为。`,
+			DecisionProcess: `# 📋 决策流程
+
+1. 检查持仓 → 是否止盈/止损
+2. 扫描候选币种 + 多时间框架 → 是否存在强信号
+3. 先写思维链，再输出结构化JSON`,
+		}
+	} else {
+		config.PromptSections = PromptSectionsConfig{
+			RoleDefinition: `# You are a professional cryptocurrency trading AI
+
+Your task is to make trading decisions based on the provided market data. You are an experienced quantitative trader skilled in technical analysis and risk management.`,
+			TradingFrequency: `# ⏱️ Trading Frequency Awareness
+
+- Excellent trader: 2-4 trades per day ≈ 0.1-0.2 trades per hour
+- >2 trades per hour = overtrading
+- Single position holding time ≥ 30-60 minutes
+If you find yourself trading every cycle → standards are too low; if closing positions in <30 minutes → too impulsive.`,
+			EntryStandards: `# 🎯 Entry Standards (Strict)
+
+Only enter positions when multiple signals resonate. Freely use any effective analysis methods, avoid low-quality behaviors such as single indicators, contradictory signals, sideways oscillation, or immediately restarting after closing positions.`,
+			DecisionProcess: `# 📋 Decision Process
+
+1. Check positions → whether to take profit/stop loss
+2. Scan candidate coins + multi-timeframe → whether strong signals exist
+3. Write chain of thought first, then output structured JSON`,
+		}
+	}
+
+	return config
+}
+
+// GetOptimizedStrategyConfig returns the optimized strategy configuration (v2.0) for the given language
+// This configuration includes enhanced position management, drawdown control, and dynamic stop-loss/take-profit
+func GetOptimizedStrategyConfig(lang string) StrategyConfig {
+	// Normalize language to "zh" or "en"
+	normalizedLang := "en"
+	if lang == "zh" {
+		normalizedLang = "zh"
+	}
+
+	// Helper function to create bool pointer
+	boolPtr := func(b bool) *bool { return &b }
+	float64Ptr := func(f float64) *float64 { return &f }
+	intPtr := func(i int) *int { return &i }
+
+	config := StrategyConfig{
+		Language: normalizedLang,
+		CoinSource: CoinSourceConfig{
+			SourceType: "ai500",
+			UseAI500:   true,
+			AI500Limit: 15, // Increased from 10 to 15 for more opportunities
+			UseOITop:   false,
+			OITopLimit: 10,
+			UseOILow:   false,
+			OILowLimit: 10,
+		},
+		Indicators: IndicatorConfig{
+			Klines: KlineConfig{
+				PrimaryTimeframe:     "15m", // Changed from 5m to 15m for better signal quality
+				PrimaryCount:         100,   // Increased for more historical data
+				LongerTimeframe:      "4h",
+				LongerCount:          100,
+				EnableMultiTimeframe: true,
+				SelectedTimeframes:   []string{"15m", "1h", "4h"}, // Multi-timeframe resonance
+			},
+			EnableRawKlines:   true, // Required - raw OHLCV data for AI analysis
+			EnableEMA:         true, // Enable EMA for trend analysis
+			EnableMACD:        true, // Enable MACD for momentum
+			EnableRSI:         true, // Enable RSI for overbought/oversold
+			EnableATR:         true, // Enable ATR for volatility
+			EnableBOLL:        true, // Enable Bollinger Bands
+			EnableVolume:      true,
+			EnableOI:          true,
+			EnableFundingRate: true,
+			EMAPeriods:        []int{20, 50},
+			RSIPeriods:        []int{7, 14},
+			ATRPeriods:        []int{3, 14}, // Added 3-period ATR
+			BOLLPeriods:       []int{20},
+			// NofxOS unified API key
+			NofxOSAPIKey: "cm_568c67eae410d912c54c",
+			// Quant data
+			EnableQuantData:    true,
+			EnableQuantOI:      true,
+			EnableQuantNetflow: true,
+			// OI ranking data
+			EnableOIRanking:   true,
+			OIRankingDuration: "1h",
+			OIRankingLimit:    10,
+			// NetFlow ranking data
+			EnableNetFlowRanking:   true,
+			NetFlowRankingDuration: "1h",
+			NetFlowRankingLimit:    10,
+			// Price ranking data
+			EnablePriceRanking:   true,
+			PriceRankingDuration: "1h,4h,24h",
+			PriceRankingLimit:    10,
+		},
+		RiskControl: RiskControlConfig{
+			MaxPositions:                    3,    // Max 3 coins simultaneously (CODE ENFORCED)
+			BTCETHMaxLeverage:               10,   // Increased from 5 to 10 for BTC/ETH
+			AltcoinMaxLeverage:              5,    // Keep 5 for altcoins
+			BTCETHMaxPositionValueRatio:     5.0,  // BTC/ETH: max position = 5x equity (CODE ENFORCED)
+			AltcoinMaxPositionValueRatio:    1.0,  // Altcoin: max position = 1x equity (CODE ENFORCED)
+			MaxMarginUsage:                  0.9,  // Max 90% margin usage (CODE ENFORCED)
+			MinPositionSize:                 12,   // Min 12 USDT per position (CODE ENFORCED)
+			MinRiskRewardRatio:              3.0,  // Min 3:1 profit/loss ratio (AI guided)
+			MinConfidence:                   60,   // Reduced from 75 to 60 for more opportunities
+			// Dynamic Stop Loss Configuration
+			DynamicStopLoss: &DynamicStopLossConfig{
+				Enabled:            true,
+				TriggerLogic:       "any", // Any condition triggers stop loss
+				InitialStopPercent: 3.0,   // Initial 3% stop loss
+				// Trailing Stop
+				TrailingEnabled: boolPtr(true),
+				TrailingLevels: []TrailingStopLevel{
+					{ProfitThreshold: 2.0, TrailingPercent: 1.5}, // After 2% profit, trail at 1.5%
+					{ProfitThreshold: 5.0, TrailingPercent: 2.5}, // After 5% profit, trail at 2.5%
+				},
+				// ATR Stop
+				ATREnabled:       boolPtr(true),
+				ATRMultiplierMin: float64Ptr(2.0),
+				ATRMultiplierMax: float64Ptr(2.0),
+				ATRPeriodBTCETH:  intPtr(14),
+				ATRPeriodAltcoin: intPtr(14),
+				// Support/Resistance Stop
+				SupportResistanceEnabled: boolPtr(true),
+				SupportResistanceBuffer:  float64Ptr(0.5),
+			},
+			// Dynamic Take Profit Configuration
+			DynamicTakeProfit: &DynamicTakeProfitConfig{
+				Enabled: true,
+				// Scaled Take Profit (Primary)
+				ScaledEnabled: boolPtr(true),
+				ScaledLevels: []ScaledTakeProfitLevel{
+					{ProfitPercent: 3.0, ClosePercent: 33, MoveStopToBreakeven: boolPtr(true)},  // 3% profit: close 33%, move stop to breakeven
+					{ProfitPercent: 5.0, ClosePercent: 50, MoveStopToBreakeven: boolPtr(false)}, // 5% profit: close 50%
+					{ProfitPercent: 8.0, ClosePercent: 100, MoveStopToBreakeven: boolPtr(false)}, // 8% profit: close 100%
+				},
+				// ATR Take Profit
+				ATREnabled:       boolPtr(true),
+				ATRMultiplierMin: float64Ptr(3.0),
+				ATRMultiplierMax: float64Ptr(3.0),
+				ATRPeriodBTCETH:  intPtr(14),
+				ATRPeriodAltcoin: intPtr(14),
+				// Resistance Take Profit
+				ResistanceEnabled: boolPtr(true),
+				ResistanceBuffer:  float64Ptr(0.3),
+				// Lock profit after 2% gain
+				LockProfitPercent: float64Ptr(2.0),
+			},
+		},
+	}
+
 	if lang == "zh" {
 		config.PromptSections = PromptSectionsConfig{
 			RoleDefinition: `# 你是一个专业的加密货币交易AI
