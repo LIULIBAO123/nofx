@@ -15,6 +15,7 @@ import (
 	"nofx/backtest"
 	"nofx/logger"
 	"nofx/market"
+	"nofx/mcp"
 	"nofx/provider/nofxos"
 	"nofx/store"
 
@@ -868,11 +869,6 @@ type analyzeTradeRequest struct {
 }
 
 func (s *Server) handleAnalyzeTrade(c *gin.Context) {
-	// TODO: AI trade analysis feature - not yet fully implemented
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "AI trade analysis feature coming soon"})
-	return
-	
-	/* Commented out until fully implemented
 	if s.backtestManager == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "backtest manager unavailable"})
 		return
@@ -905,7 +901,7 @@ func (s *Server) handleAnalyzeTrade(c *gin.Context) {
 	// Find the specific trade
 	var targetTrade *store.TradeEvent
 	for i := range trades {
-		if int64(i+1) == req.TradeID {
+		if trades[i].ID == req.TradeID {
 			targetTrade = &trades[i]
 			break
 		}
@@ -916,16 +912,39 @@ func (s *Server) handleAnalyzeTrade(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Feature not yet implemented"})
-	*/
+	// Get backtest run to access AI config
+	run, err := s.store.Backtest().GetRun(req.RunID)
+	if err != nil {
+		SafeError(c, http.StatusInternalServerError, "Failed to load backtest run", err)
+		return
+	}
+
+	// Create MCP client for AI analysis
+	mcpClient, err := s.createMCPClientFromBacktestConfig(run)
+	if err != nil {
+		SafeError(c, http.StatusInternalServerError, "Failed to create AI client", err)
+		return
+	}
+
+	// Perform AI analysis
+	analysis, err := s.analyzeTradeWithAI(targetTrade, mcpClient)
+	if err != nil {
+		SafeError(c, http.StatusInternalServerError, "Failed to analyze trade", err)
+		return
+	}
+
+	// Save analysis to database
+	if err := s.store.Backtest().SaveTradeAIAnalysis(req.RunID, req.TradeID, analysis); err != nil {
+		logger.Infof("⚠️  Failed to save AI analysis: %v", err)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"analysis": analysis,
+		"trade":    targetTrade,
+	})
 }
 
 func (s *Server) handleGetTradeAnalysis(c *gin.Context) {
-	// TODO: AI trade analysis feature - not yet fully implemented
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "AI trade analysis feature coming soon"})
-	return
-	
-	/* Commented out until fully implemented
 	if s.backtestManager == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "backtest manager unavailable"})
 		return
@@ -940,17 +959,128 @@ func (s *Server) handleGetTradeAnalysis(c *gin.Context) {
 		return
 	}
 
+	if tradeIDStr == "" {
+		SafeBadRequest(c, "trade_id is required")
+		return
+	}
+
+	tradeID, err := strconv.ParseInt(tradeIDStr, 10, 64)
+	if err != nil {
+		SafeBadRequest(c, "Invalid trade_id")
+		return
+	}
+
 	if _, err := s.ensureBacktestRunOwnership(runID, userID); writeBacktestAccessError(c, err) {
 		return
 	}
 
-	// Load trades
-	trades, err := s.backtestManager.LoadTrades(runID, 10000)
+	// Load analysis from database
+	analysis, err := s.store.Backtest().GetTradeAIAnalysis(runID, tradeID)
 	if err != nil {
-		SafeError(c, http.StatusBadRequest, "Failed to load trades", err)
+		SafeError(c, http.StatusInternalServerError, "Failed to load analysis", err)
 		return
 	}
 
-	c.JSON(http.StatusOK, trades)
-	*/
+	if analysis == nil {
+		SafeNotFound(c, "Trade analysis")
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"analysis": analysis,
+	})
+}
+
+// createMCPClientFromBacktestConfig creates an MCP client from backtest run configuration
+func (s *Server) createMCPClientFromBacktestConfig(run *store.BacktestRun) (*mcp.Client, error) {
+	var config backtest.BacktestConfig
+	if err := json.Unmarshal([]byte(run.Config), &config); err != nil {
+		return nil, fmt.Errorf("failed to parse backtest config: %w", err)
+	}
+
+	// Create MCP client based on AI config
+	aiCfg := config.AICfg
+	
+	var mcpClient *mcp.Client
+	var err error
+
+	switch aiCfg.Provider {
+	case "deepseek":
+		mcpClient, err = mcp.NewDeepSeekClient(aiCfg.APIKey)
+	case "qwen":
+		mcpClient, err = mcp.NewQwenClient(aiCfg.APIKey)
+	case "custom":
+		mcpClient, err = mcp.NewCustomClient(aiCfg.BaseURL, aiCfg.APIKey, aiCfg.Model)
+	default:
+		return nil, fmt.Errorf("unsupported AI provider: %s", aiCfg.Provider)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to create MCP client: %w", err)
+	}
+
+	return mcpClient, nil
+}
+
+// analyzeTradeWithAI performs AI analysis on a trade
+func (s *Server) analyzeTradeWithAI(trade *store.TradeEvent, mcpClient *mcp.Client) (*store.AIAnalysis, error) {
+	// Build analysis prompt
+	systemPrompt := `You are a professional trading analyst. Analyze the following trade and provide insights on:
+1. Entry timing and price level
+2. Exit timing and whether it was optimal
+3. Risk management (stop loss, take profit)
+4. What went well and what could be improved
+5. Key lessons learned
+
+Provide your analysis in the following JSON format:
+{
+  "rating": "excellent|good|fair|poor",
+  "summary": "Brief 1-2 sentence summary",
+  "profit_analysis": "Analysis of profit/loss outcome",
+  "improvements": ["suggestion 1", "suggestion 2"],
+  "risk_warnings": ["warning 1", "warning 2"]
+}`
+
+	userPrompt := fmt.Sprintf(`Analyze this trade:
+
+Symbol: %s
+Side: %s
+Entry Price: %.4f
+Exit Price: %.4f
+Entry Time: %s
+Exit Time: %s
+Realized PnL: %.2f USDT (%.2f%%)
+Hold Duration: %s
+
+Please provide your analysis in JSON format:`, 
+		trade.Symbol,
+		trade.Side,
+		trade.EntryPrice,
+		trade.ExitPrice,
+		time.Unix(trade.Timestamp, 0).Format("2006-01-02 15:04:05"),
+		time.Unix(trade.Timestamp, 0).Add(time.Hour).Format("2006-01-02 15:04:05"), // Approximate exit time
+		trade.RealizedPnL,
+		(trade.RealizedPnL / (trade.Price * trade.Quantity)) * 100,
+		"N/A",
+	)
+
+	// Call AI
+	response, err := mcpClient.CallWithMessages(systemPrompt, userPrompt)
+	if err != nil {
+		return nil, fmt.Errorf("AI analysis failed: %w", err)
+	}
+
+	// Parse JSON response
+	var analysis store.AIAnalysis
+	if err := json.Unmarshal([]byte(response), &analysis); err != nil {
+		// If JSON parsing fails, use the raw response as summary
+		analysis = store.AIAnalysis{
+			Rating:  "fair",
+			Summary: response,
+		}
+	}
+
+	analysis.AnalyzedAt = time.Now()
+
+	return &analysis, nil
 }

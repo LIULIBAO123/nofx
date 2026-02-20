@@ -1,0 +1,37 @@
+# 快速部署说明
+
+## 🚀 一键部署命令
+
+在 `c:\Users\21588\nofx` 目录下，打开命令行执行：
+
+```bash
+git add . && git commit -m "feat: 全面优化 nofx AI 交易系统" && git push
+```
+
+## 📋 本次更新文件列表
+
+### 后端 (3个文件)
+- kernel/position_manager.go (新增)
+- kernel/drawdown_controller.go (新增)  
+- kernel/schema.go (修改)
+
+### 前端 (4个文件)
+- web/src/components/RiskDashboard.tsx (新增)
+- web/src/components/SmartAlert.tsx (新增)
+- web/src/components/DecisionFlow.tsx (新增)
+- web/src/components/MarketStateIndicator.tsx (新增)
+
+### 文档 (5个文件)
+- BINANCE_API_ANALYSIS.md
+- FINAL_SUMMARY.md
+- FRONTEND_OPTIMIZATION.md
+- COMPLETE_REPORT.md
+- SYSTEM_IMPROVEMENTS.md
+
+### 部署脚本 (3个文件)
+- deploy.sh
+- deploy.bat
+- DEPLOYMENT_GUIDE.md
+
+## ✅ 完成
+

@@ -95,6 +95,36 @@ type DecisionAction struct {
 	Error      string    `json:"error"`
 }
 
+// TradeAnalysis AI trade analysis result
+type TradeAnalysis struct {
+	Rating         string    `json:"rating"`          // excellent, good, fair, poor
+	Summary        string    `json:"summary"`         // one-line summary
+	ProfitAnalysis string    `json:"profit_analysis"` // detailed profit/loss analysis
+	Improvements   []string  `json:"improvements"`    // improvement suggestions
+	RiskWarnings   []string  `json:"risk_warnings"`   // risk warnings
+	AnalyzedAt     time.Time `json:"analyzed_at"`     // analysis timestamp
+}
+
+// TradeEvent trade event (for backtest)
+type TradeEvent struct {
+	Timestamp       int64          `json:"ts"`
+	Symbol          string         `json:"symbol"`
+	Action          string         `json:"action"`
+	Side            string         `json:"side,omitempty"`
+	Quantity        float64        `json:"qty"`
+	Price           float64        `json:"price"`
+	Fee             float64        `json:"fee"`
+	Slippage        float64        `json:"slippage"`
+	OrderValue      float64        `json:"order_value"`
+	RealizedPnL     float64        `json:"realized_pnl"`
+	Leverage        int            `json:"leverage,omitempty"`
+	Cycle           int            `json:"cycle"`
+	PositionAfter   float64        `json:"position_after"`
+	LiquidationFlag bool           `json:"liquidation"`
+	Note            string         `json:"note,omitempty"`
+	AIAnalysis      *TradeAnalysis `json:"ai_analysis,omitempty"` // AI analysis result
+}
+
 // Statistics statistics information
 type Statistics struct {
 	TotalCycles         int `json:"total_cycles"`

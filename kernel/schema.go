@@ -215,6 +215,93 @@ var DataDictionary = map[string]map[string]BilingualFieldDef{
 			DescEN: "OI change in 1 hour. Used to determine real capital flow direction",
 		},
 	},
+
+	"TechnicalIndicators": {
+		"EMA": {
+			NameZH:    "指数移动平均线",
+			NameEN:    "Exponential Moving Average",
+			Unit:      "USDT",
+			FormulaZH: "EMA = 前一日EMA × (n-1)/(n+1) + 今日收盘价 × 2/(n+1)",
+			FormulaEN: "EMA = Previous EMA × (n-1)/(n+1) + Today's Close × 2/(n+1)",
+			DescZH:    "趋势指标。价格在EMA上方=多头趋势，下方=空头趋势。EMA20金叉EMA50=买入信号",
+			DescEN:    "Trend indicator. Price above EMA = bullish, below = bearish. EMA20 crosses above EMA50 = buy signal",
+		},
+		"MACD": {
+			NameZH:    "指数平滑异同移动平均线",
+			NameEN:    "Moving Average Convergence Divergence",
+			Unit:      "points",
+			FormulaZH: "MACD = EMA12 - EMA26, Signal = EMA9(MACD)",
+			FormulaEN: "MACD = EMA12 - EMA26, Signal = EMA9(MACD)",
+			DescZH:    "动量指标。MACD>0=多头，<0=空头。MACD上穿信号线=金叉(买入)，下穿=死叉(卖出)",
+			DescEN:    "Momentum indicator. MACD>0=bullish, <0=bearish. MACD crosses above signal=golden cross(buy), below=death cross(sell)",
+		},
+		"RSI": {
+			NameZH:    "相对强弱指标",
+			NameEN:    "Relative Strength Index",
+			Unit:      "0-100",
+			FormulaZH: "RSI = 100 - 100/(1 + 平均涨幅/平均跌幅)",
+			FormulaEN: "RSI = 100 - 100/(1 + Average Gain/Average Loss)",
+			DescZH:    "超买超卖指标。RSI>70=超买(考虑卖出)，<30=超卖(考虑买入)，40-60=中性区间",
+			DescEN:    "Overbought/oversold indicator. RSI>70=overbought(consider sell), <30=oversold(consider buy), 40-60=neutral",
+		},
+		"ATR": {
+			NameZH:    "平均真实波幅",
+			NameEN:    "Average True Range",
+			Unit:      "USDT",
+			FormulaZH: "ATR = MA14(max(高-低, |高-昨收|, |低-昨收|))",
+			FormulaEN: "ATR = MA14(max(High-Low, |High-PrevClose|, |Low-PrevClose|))",
+			DescZH:    "波动率指标。ATR越大=波动越大。用于设置止损距离：止损=入场价±(2~3)×ATR",
+			DescEN:    "Volatility indicator. Higher ATR = higher volatility. Used for stop-loss: SL = Entry ± (2~3)×ATR",
+		},
+		"BOLL": {
+			NameZH:    "布林带",
+			NameEN:    "Bollinger Bands",
+			Unit:      "USDT",
+			FormulaZH: "中轨=MA20, 上轨=中轨+2×标准差, 下轨=中轨-2×标准差",
+			FormulaEN: "Middle=MA20, Upper=Middle+2×StdDev, Lower=Middle-2×StdDev",
+			DescZH:    "波动通道。价格触及上轨=超买，触及下轨=超卖。突破上轨=强势突破，跌破下轨=弱势破位",
+			DescEN:    "Volatility channel. Price at upper band=overbought, at lower band=oversold. Break above upper=strong breakout, below lower=weak breakdown",
+		},
+		"FundingRate": {
+			NameZH:    "资金费率",
+			NameEN:    "Funding Rate",
+			Unit:      "%",
+			FormulaZH: "每8小时结算一次",
+			FormulaEN: "Settled every 8 hours",
+			DescZH:    "多空平衡指标。正值=多头支付空头(市场看多)，负值=空头支付多头(市场看空)。>0.1%=极度看多，<-0.1%=极度看空",
+			DescEN:    "Long/short balance. Positive=longs pay shorts(bullish), negative=shorts pay longs(bearish). >0.1%=extremely bullish, <-0.1%=extremely bearish",
+		},
+	},
+
+	"QuantData": {
+		"InstitutionFlow": {
+			NameZH:    "机构资金流",
+			NameEN:    "Institutional Flow",
+			Unit:      "USDT",
+			FormulaZH: "机构账户的净买入金额",
+			FormulaEN: "Net buying amount from institutional accounts",
+			DescZH:    "机构资金流向。正值=机构买入，负值=机构卖出。机构买入+散户卖出=强烈看涨信号",
+			DescEN:    "Institutional capital flow. Positive=institutions buying, negative=selling. Institutions buying + retail selling = strong bullish signal",
+		},
+		"RetailFlow": {
+			NameZH:    "散户资金流",
+			NameEN:    "Retail Flow",
+			Unit:      "USDT",
+			FormulaZH: "散户账户的净买入金额",
+			FormulaEN: "Net buying amount from retail accounts",
+			DescZH:    "散户资金流向。正值=散户买入，负值=散户卖出。散户买入+机构卖出=警惕信号(可能是顶部)",
+			DescEN:    "Retail capital flow. Positive=retail buying, negative=selling. Retail buying + institutions selling = warning signal(possible top)",
+		},
+		"PriceChange": {
+			NameZH:    "多周期价格变化",
+			NameEN:    "Multi-period Price Change",
+			Unit:      "%",
+			FormulaZH: "(当前价 - N周期前价格) / N周期前价格 × 100",
+			FormulaEN: "(Current Price - N-period ago Price) / N-period ago Price × 100",
+			DescZH:    "不同时间周期的涨跌幅。用于判断短期动量和长期趋势的一致性",
+			DescEN:    "Price changes across different timeframes. Used to assess consistency between short-term momentum and long-term trend",
+		},
+	},
 }
 
 // ========== 双语规则定义 ==========
@@ -479,12 +566,36 @@ func getSchemaPromptZH() string {
 		prompt += formatFieldDefZH(key, field)
 	}
 
+	// 技术指标
+	prompt += "\n### 技术指标\n"
+	for key, field := range DataDictionary["TechnicalIndicators"] {
+		prompt += formatFieldDefZH(key, field)
+	}
+
+	// 量化数据
+	prompt += "\n### 量化数据\n"
+	for key, field := range DataDictionary["QuantData"] {
+		prompt += formatFieldDefZH(key, field)
+	}
+
 	// OI解读
 	prompt += "\n## 💹 持仓量(OI)变化解读\n\n"
 	prompt += "- **OI增加 + 价格上涨**: " + OIInterpretation.OIUp_PriceUp.ZH + "\n"
 	prompt += "- **OI增加 + 价格下跌**: " + OIInterpretation.OIUp_PriceDown.ZH + "\n"
 	prompt += "- **OI减少 + 价格上涨**: " + OIInterpretation.OIDown_PriceUp.ZH + "\n"
 	prompt += "- **OI减少 + 价格下跌**: " + OIInterpretation.OIDown_PriceDown.ZH + "\n"
+
+	// 市场状态识别
+	prompt += "\n## 📊 市场状态识别\n\n"
+	prompt += getMarketRegimeGuideZH()
+
+	// 多时间框架分析
+	prompt += "\n## ⏱️ 多时间框架分析指南\n\n"
+	prompt += getMultiTimeframeGuideZH()
+
+	// 交易场景
+	prompt += "\n## 🎯 交易场景示例\n\n"
+	prompt += getTradingScenarioExamplesZH()
 
 	return prompt
 }
@@ -518,12 +629,36 @@ func getSchemaPromptEN() string {
 		prompt += formatFieldDefEN(key, field)
 	}
 
+	// Technical Indicators
+	prompt += "\n### Technical Indicators\n"
+	for key, field := range DataDictionary["TechnicalIndicators"] {
+		prompt += formatFieldDefEN(key, field)
+	}
+
+	// Quant Data
+	prompt += "\n### Quantitative Data\n"
+	for key, field := range DataDictionary["QuantData"] {
+		prompt += formatFieldDefEN(key, field)
+	}
+
 	// OI Interpretation
 	prompt += "\n## 💹 Open Interest (OI) Change Interpretation\n\n"
 	prompt += "- **OI Up + Price Up**: " + OIInterpretation.OIUp_PriceUp.EN + "\n"
 	prompt += "- **OI Up + Price Down**: " + OIInterpretation.OIUp_PriceDown.EN + "\n"
 	prompt += "- **OI Down + Price Up**: " + OIInterpretation.OIDown_PriceUp.EN + "\n"
 	prompt += "- **OI Down + Price Down**: " + OIInterpretation.OIDown_PriceDown.EN + "\n"
+
+	// Market Regime Recognition
+	prompt += "\n## 📊 Market Regime Recognition\n\n"
+	prompt += getMarketRegimeGuideEN()
+
+	// Multi-Timeframe Analysis
+	prompt += "\n## ⏱️ Multi-Timeframe Analysis Guide\n\n"
+	prompt += getMultiTimeframeGuideEN()
+
+	// Trading Scenarios
+	prompt += "\n## 🎯 Trading Scenario Examples\n\n"
+	prompt += getTradingScenarioExamplesEN()
 
 	return prompt
 }
@@ -552,4 +687,374 @@ func formatFieldDefEN(key string, field BilingualFieldDef) string {
 	}
 	result += "\n"
 	return result
+}
+
+// ========== 市场状态识别指南 ==========
+
+// getMarketRegimeGuideZH 获取中文市场状态识别指南
+func getMarketRegimeGuideZH() string {
+	return `### 趋势判断
+- **强上升趋势**: 价格持续在EMA20上方 + MACD>0且上升 + RSI>50 + OI增加
+- **上升趋势**: 价格在EMA20上方 + MACD>0 + RSI 40-70
+- **横盘震荡**: 价格围绕EMA20波动 + MACD接近0 + RSI 40-60 + 1h波动率<2%
+- **下降趋势**: 价格在EMA20下方 + MACD<0 + RSI 30-60
+- **强下降趋势**: 价格持续在EMA20下方 + MACD<0且下降 + RSI<50 + OI增加
+
+### 波动率判断
+- **低波动**: ATR < 平均ATR的0.7倍，适合网格策略
+- **正常波动**: ATR在平均ATR的0.7-1.3倍之间
+- **高波动**: ATR > 平均ATR的1.3倍，降低杠杆，扩大止损
+- **极端波动**: ATR > 平均ATR的2倍，暂停交易或仅平仓
+
+### 成交量判断
+- **放量**: 当前成交量 > 平均成交量的1.5倍，趋势可靠
+- **缩量**: 当前成交量 < 平均成交量的0.7倍，趋势可能反转
+- **天量**: 当前成交量 > 平均成交量的3倍，警惕反转
+
+`
+}
+
+// getMarketRegimeGuideEN 获取英文市场状态识别指南
+func getMarketRegimeGuideEN() string {
+	return `### Trend Identification
+- **Strong Uptrend**: Price consistently above EMA20 + MACD>0 and rising + RSI>50 + OI increasing
+- **Uptrend**: Price above EMA20 + MACD>0 + RSI 40-70
+- **Sideways**: Price oscillating around EMA20 + MACD near 0 + RSI 40-60 + 1h volatility<2%
+- **Downtrend**: Price below EMA20 + MACD<0 + RSI 30-60
+- **Strong Downtrend**: Price consistently below EMA20 + MACD<0 and falling + RSI<50 + OI increasing
+
+### Volatility Assessment
+- **Low Volatility**: ATR < 0.7× average ATR, suitable for grid strategies
+- **Normal Volatility**: ATR between 0.7-1.3× average ATR
+- **High Volatility**: ATR > 1.3× average ATR, reduce leverage, widen stop-loss
+- **Extreme Volatility**: ATR > 2× average ATR, pause trading or close only
+
+### Volume Assessment
+- **Volume Surge**: Current volume > 1.5× average, trend is reliable
+- **Volume Decline**: Current volume < 0.7× average, trend may reverse
+- **Climax Volume**: Current volume > 3× average, watch for reversal
+
+`
+}
+
+// ========== 多时间框架分析指南 ==========
+
+// getMultiTimeframeGuideZH 获取中文多时间框架分析指南
+func getMultiTimeframeGuideZH() string {
+	return `### 时间框架层级
+- **15m**: 精确入场时机，寻找最佳入场点
+- **1h**: 趋势确认，判断短期趋势方向
+- **4h**: 大趋势判断，确定主要趋势方向
+
+### 分析原则
+1. **大周期定方向**: 先看4h确定大趋势（做多/做空/观望）
+2. **中周期找时机**: 再看1h确认短期趋势是否与大趋势一致
+3. **小周期精确入场**: 最后看15m寻找具体入场点
+
+### 多空判断
+- **强烈看多**: 4h上升 + 1h上升 + 15m上升（三周期共振）
+- **看多**: 4h上升 + 1h上升 + 15m震荡/回调（等待15m转多）
+- **谨慎看多**: 4h上升 + 1h震荡 + 15m上升（1h可能转多）
+- **观望**: 4h震荡 或 各周期方向不一致
+- **谨慎看空**: 4h下降 + 1h震荡 + 15m下降（1h可能转空）
+- **看空**: 4h下降 + 1h下降 + 15m震荡/反弹（等待15m转空）
+- **强烈看空**: 4h下降 + 1h下降 + 15m下降（三周期共振）
+
+### 实战案例
+**场景**: 4h强上升趋势，1h刚突破EMA20，15m回调到EMA20附近
+**判断**: 大趋势向上，短期突破确认，小周期回调提供入场机会
+**操作**: 在15m EMA20附近做多，止损设在15m EMA20下方
+
+`
+}
+
+// getMultiTimeframeGuideEN 获取英文多时间框架分析指南
+func getMultiTimeframeGuideEN() string {
+	return `### Timeframe Hierarchy
+- **15m**: Precise entry timing, find optimal entry points
+- **1h**: Trend confirmation, determine short-term trend direction
+- **4h**: Major trend assessment, establish primary trend direction
+
+### Analysis Principles
+1. **Higher timeframe sets direction**: Check 4h first to determine major trend (long/short/wait)
+2. **Medium timeframe finds timing**: Check 1h to confirm short-term trend aligns with major trend
+3. **Lower timeframe precise entry**: Check 15m last to find specific entry point
+
+### Long/Short Assessment
+- **Strong Bullish**: 4h up + 1h up + 15m up (triple timeframe alignment)
+- **Bullish**: 4h up + 1h up + 15m sideways/pullback (wait for 15m to turn bullish)
+- **Cautiously Bullish**: 4h up + 1h sideways + 15m up (1h may turn bullish)
+- **Wait**: 4h sideways OR timeframes not aligned
+- **Cautiously Bearish**: 4h down + 1h sideways + 15m down (1h may turn bearish)
+- **Bearish**: 4h down + 1h down + 15m sideways/bounce (wait for 15m to turn bearish)
+- **Strong Bearish**: 4h down + 1h down + 15m down (triple timeframe alignment)
+
+### Practical Example
+**Scenario**: 4h strong uptrend, 1h just broke above EMA20, 15m pulling back to EMA20
+**Assessment**: Major trend up, short-term breakout confirmed, minor pullback offers entry
+**Action**: Go long near 15m EMA20, stop-loss below 15m EMA20
+
+`
+}
+
+// ========== 交易场景示例 ==========
+
+// getTradingScenarioExamplesZH 获取中文交易场景示例
+func getTradingScenarioExamplesZH() string {
+	return `### 场景1: 趋势突破做多 ✅
+
+**市场状态:**
+- ETHUSDT 价格突破3200（EMA20: 3180）
+- MACD金叉（当前0.0156，前值-0.0023）
+- RSI: 58（健康区间，未超买）
+- 机构资金流入: 1h +8.3M, 4h +25M
+- 散户资金流出: 1h -2.1M
+- OI增加: 1h +5.2%, 4h +12.3%
+- 成交量: 当前1.8倍平均值（放量突破）
+- 在OI Top榜第1名
+
+**多时间框架:**
+- 4h: 强上升趋势，价格远离EMA20
+- 1h: 刚突破EMA20，MACD金叉
+- 15m: 突破后回踩EMA20，形成支撑
+
+**决策:**
+` + "```json" + `
+{
+  "symbol": "ETHUSDT",
+  "action": "open_long",
+  "leverage": 5,
+  "position_size_usd": 800,
+  "stop_loss": 3150,
+  "take_profit": 3350,
+  "confidence": 85,
+  "reasoning": "多信号共振：价格突破EMA20+MACD金叉+机构大额流入+散户流出+OI快速增加+放量突破+多时间框架一致，趋势突破信号强烈"
+}
+` + "```" + `
+
+---
+
+### 场景2: 假突破陷阱 ❌
+
+**市场状态:**
+- SOLUSDT 价格突破150（EMA20: 148）
+- MACD金叉（0.0089）
+- RSI: 78（超买警告）
+- 机构资金流出: 1h -2.5M
+- 散户资金流入: 1h +3.2M（散户接盘）
+- OI减少: 1h -3.5%（多头平仓）
+- 成交量: 当前0.6倍平均值（缩量突破）
+
+**多时间框架:**
+- 4h: 横盘震荡，无明确趋势
+- 1h: 价格刚突破但MACD动能不足
+- 15m: RSI严重超买
+
+**决策:**
+` + "```json" + `
+{
+  "symbol": "SOLUSDT",
+  "action": "wait",
+  "reasoning": "虽然价格突破，但RSI超买+机构资金流出+散户接盘+OI减少+缩量突破+4h无趋势，疑似假突破陷阱，等待回调或更明确信号"
+}
+` + "```" + `
+
+---
+
+### 场景3: 止盈平仓 💰
+
+**持仓状态:**
+- BTCUSDT long，入场94500，当前95800
+- 盈利: +1.38% (+138 USDT)
+- 峰值盈利: +1.85%（已回撤0.47%）
+- 持仓时长: 1h 45m
+- RSI: 72（接近超买）
+- MACD开始走平，动能减弱
+- 机构资金流入减弱: 15m +0.5M（前值+2.3M）
+- OI增速放缓: 15m +0.8%（前值+2.1%）
+
+**决策:**
+` + "```json" + `
+{
+  "symbol": "BTCUSDT",
+  "action": "close_long",
+  "reasoning": "盈利达标+从峰值回撤25%+RSI接近超买+MACD动能减弱+机构资金流入放缓+OI增速下降，多个信号显示上涨动能衰竭，及时止盈锁定利润"
+}
+` + "```" + `
+
+---
+
+### 场景4: 止损离场 🛑
+
+**持仓状态:**
+- ETHUSDT long，入场3200，当前3140
+- 亏损: -1.88% (-37.6 USDT)
+- 持仓时长: 35分钟
+- 价格跌破EMA20（3180）
+- MACD死叉
+- 机构资金突然流出: 5m -5.2M（大额卖单）
+- OI快速减少: 5m -2.3%（多头止损）
+
+**决策:**
+` + "```json" + `
+{
+  "symbol": "ETHUSDT",
+  "action": "close_long",
+  "reasoning": "价格跌破EMA20+MACD死叉+机构大额流出+OI快速减少，趋势反转信号明确，及时止损避免更大损失"
+}
+` + "```" + `
+
+---
+
+### 场景5: 横盘观望 ⏸️
+
+**市场状态:**
+- BTCUSDT 价格在94000-95000区间震荡
+- EMA20: 94500（价格围绕EMA20波动）
+- MACD: 接近0轴，无明确方向
+- RSI: 48-52之间窄幅波动
+- 1h波动率: 0.8%（极低）
+- OI变化: -0.3%（几乎无变化）
+- 成交量: 0.5倍平均值（极度缩量）
+
+**决策:**
+` + "```json" + `
+{
+  "symbol": "BTCUSDT",
+  "action": "wait",
+  "reasoning": "横盘震荡，无明确趋势+极低波动率+缩量+OI无变化，市场处于平衡状态，等待方向选择后再入场"
+}
+` + "```" + `
+
+`
+}
+
+// getTradingScenarioExamplesEN 获取英文交易场景示例
+func getTradingScenarioExamplesEN() string {
+	return `### Scenario 1: Trend Breakout Long ✅
+
+**Market State:**
+- ETHUSDT price breaks above 3200 (EMA20: 3180)
+- MACD golden cross (current 0.0156, previous -0.0023)
+- RSI: 58 (healthy zone, not overbought)
+- Institutional inflow: 1h +8.3M, 4h +25M
+- Retail outflow: 1h -2.1M
+- OI increase: 1h +5.2%, 4h +12.3%
+- Volume: 1.8× average (volume breakout)
+- Ranked #1 in OI Top
+
+**Multi-Timeframe:**
+- 4h: Strong uptrend, price well above EMA20
+- 1h: Just broke above EMA20, MACD golden cross
+- 15m: Pullback to EMA20 after breakout, forming support
+
+**Decision:**
+` + "```json" + `
+{
+  "symbol": "ETHUSDT",
+  "action": "open_long",
+  "leverage": 5,
+  "position_size_usd": 800,
+  "stop_loss": 3150,
+  "take_profit": 3350,
+  "confidence": 85,
+  "reasoning": "Multiple signal confluence: price breaks EMA20+MACD golden cross+large institutional inflow+retail outflow+rapid OI increase+volume breakout+multi-timeframe alignment, strong trend breakout signal"
+}
+` + "```" + `
+
+---
+
+### Scenario 2: False Breakout Trap ❌
+
+**Market State:**
+- SOLUSDT price breaks above 150 (EMA20: 148)
+- MACD golden cross (0.0089)
+- RSI: 78 (overbought warning)
+- Institutional outflow: 1h -2.5M
+- Retail inflow: 1h +3.2M (retail buying the top)
+- OI decrease: 1h -3.5% (longs closing)
+- Volume: 0.6× average (low volume breakout)
+
+**Multi-Timeframe:**
+- 4h: Sideways consolidation, no clear trend
+- 1h: Price just broke out but MACD momentum weak
+- 15m: RSI severely overbought
+
+**Decision:**
+` + "```json" + `
+{
+  "symbol": "SOLUSDT",
+  "action": "wait",
+  "reasoning": "Despite price breakout, RSI overbought+institutional outflow+retail buying top+OI decrease+low volume breakout+4h no trend, suspected false breakout trap, wait for pullback or clearer signal"
+}
+` + "```" + `
+
+---
+
+### Scenario 3: Take Profit Exit 💰
+
+**Position State:**
+- BTCUSDT long, entry 94500, current 95800
+- Profit: +1.38% (+138 USDT)
+- Peak profit: +1.85% (pulled back 0.47%)
+- Holding duration: 1h 45m
+- RSI: 72 (approaching overbought)
+- MACD flattening, momentum weakening
+- Institutional inflow weakening: 15m +0.5M (previous +2.3M)
+- OI growth slowing: 15m +0.8% (previous +2.1%)
+
+**Decision:**
+` + "```json" + `
+{
+  "symbol": "BTCUSDT",
+  "action": "close_long",
+  "reasoning": "Profit target met+25% pullback from peak+RSI approaching overbought+MACD momentum weakening+institutional inflow slowing+OI growth declining, multiple signals show upward momentum exhausted, take profit to lock in gains"
+}
+` + "```" + `
+
+---
+
+### Scenario 4: Stop Loss Exit 🛑
+
+**Position State:**
+- ETHUSDT long, entry 3200, current 3140
+- Loss: -1.88% (-37.6 USDT)
+- Holding duration: 35 minutes
+- Price broke below EMA20 (3180)
+- MACD death cross
+- Sudden institutional outflow: 5m -5.2M (large sell orders)
+- Rapid OI decrease: 5m -2.3% (longs stopping out)
+
+**Decision:**
+` + "```json" + `
+{
+  "symbol": "ETHUSDT",
+  "action": "close_long",
+  "reasoning": "Price broke below EMA20+MACD death cross+large institutional outflow+rapid OI decrease, clear trend reversal signal, stop loss immediately to avoid larger loss"
+}
+` + "```" + `
+
+---
+
+### Scenario 5: Sideways Wait ⏸️
+
+**Market State:**
+- BTCUSDT price oscillating in 94000-95000 range
+- EMA20: 94500 (price oscillating around EMA20)
+- MACD: Near 0 axis, no clear direction
+- RSI: Oscillating between 48-52
+- 1h volatility: 0.8% (extremely low)
+- OI change: -0.3% (almost no change)
+- Volume: 0.5× average (extremely low volume)
+
+**Decision:**
+` + "```json" + `
+{
+  "symbol": "BTCUSDT",
+  "action": "wait",
+  "reasoning": "Sideways consolidation, no clear trend+extremely low volatility+low volume+no OI change, market in equilibrium, wait for direction breakout before entry"
+}
+` + "```" + `
+
+`
 }

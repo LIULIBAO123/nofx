@@ -565,6 +565,11 @@ func (at *AutoTrader) runCycle() error {
 		logger.Info("📅 Daily P&L reset")
 	}
 
+	// 3. Check dynamic stop loss and take profit for existing positions
+	if err := at.checkDynamicStopLossTakeProfit(); err != nil {
+		logger.Infof("⚠️  Failed to check dynamic stop loss/take profit: %v", err)
+	}
+
 	// 4. Collect trading context
 	ctx, err := at.buildTradingContext()
 	if err != nil {
@@ -2322,5 +2327,242 @@ func getSideFromAction(action string) string {
 // GetOpenOrders returns open orders (pending SL/TP) from exchange
 func (at *AutoTrader) GetOpenOrders(symbol string) ([]OpenOrder, error) {
 	return at.trader.GetOpenOrders(symbol)
+}
+
+// checkDynamicStopLossTakeProfit checks all positions for dynamic stop loss and take profit triggers
+func (at *AutoTrader) checkDynamicStopLossTakeProfit() error {
+	// Check if dynamic stop loss/take profit is enabled
+	if at.strategyEngine == nil || at.strategyEngine.GetConfig() == nil {
+		return nil
+	}
+
+	riskConfig := at.strategyEngine.GetConfig().RiskControl
+	stopLossConfig := riskConfig.DynamicStopLoss
+	takeProfitConfig := riskConfig.DynamicTakeProfit
+
+	// Skip if both are disabled
+	if (stopLossConfig == nil || !stopLossConfig.Enabled) && (takeProfitConfig == nil || !takeProfitConfig.Enabled) {
+		return nil
+	}
+
+	// Get current positions
+	positions, err := at.trader.GetPositions()
+	if err != nil {
+		return fmt.Errorf("failed to get positions: %w", err)
+	}
+
+	if len(positions) == 0 {
+		return nil // No positions to check
+	}
+
+	// Create checkers
+	var stopLossChecker *kernel.StopLossChecker
+	var takeProfitChecker *kernel.TakeProfitChecker
+
+	if stopLossConfig != nil && stopLossConfig.Enabled {
+		stopLossChecker = kernel.NewStopLossChecker(stopLossConfig)
+	}
+	if takeProfitConfig != nil && takeProfitConfig.Enabled {
+		takeProfitChecker = kernel.NewTakeProfitChecker(takeProfitConfig)
+	}
+
+	// Check each position
+	for _, pos := range positions {
+		symbol := pos["symbol"].(string)
+		side := pos["side"].(string)
+		entryPrice := pos["entryPrice"].(float64)
+		markPrice := pos["markPrice"].(float64)
+		quantity := pos["positionAmt"].(float64)
+		if quantity < 0 {
+			quantity = -quantity
+		}
+
+		// Skip closed positions
+		if quantity == 0 {
+			continue
+		}
+
+		leverage := 10
+		if lev, ok := pos["leverage"].(float64); ok {
+			leverage = int(lev)
+		}
+
+		unrealizedPnl := pos["unRealizedProfit"].(float64)
+		liquidationPrice := pos["liquidationPrice"].(float64)
+		marginUsed := (quantity * markPrice) / float64(leverage)
+
+		// Calculate P&L percentage
+		pnlPct := calculatePnLPercentage(unrealizedPnl, marginUsed)
+
+		// Get position update time
+		posKey := symbol + "_" + side
+		updateTime := at.positionFirstSeenTime[posKey]
+		if updateTime == 0 {
+			updateTime = time.Now().UnixMilli()
+		}
+
+		// Get peak PnL
+		at.peakPnLCacheMutex.RLock()
+		peakPnlPct := at.peakPnLCache[posKey]
+		at.peakPnLCacheMutex.RUnlock()
+
+		// Update peak PnL if current is higher
+		if pnlPct > peakPnlPct {
+			at.peakPnLCacheMutex.Lock()
+			at.peakPnLCache[posKey] = pnlPct
+			peakPnlPct = pnlPct
+			at.peakPnLCacheMutex.Unlock()
+		}
+
+		positionInfo := kernel.PositionInfo{
+			Symbol:           symbol,
+			Side:             side,
+			EntryPrice:       entryPrice,
+			MarkPrice:        markPrice,
+			Quantity:         quantity,
+			Leverage:         leverage,
+			UnrealizedPnL:    unrealizedPnl,
+			UnrealizedPnLPct: pnlPct,
+			PeakPnLPct:       peakPnlPct,
+			LiquidationPrice: liquidationPrice,
+			MarginUsed:       marginUsed,
+			UpdateTime:       updateTime,
+		}
+
+		// Get market data for ATR and support/resistance calculations
+		klines, err := market.GetKlines(symbol, "15m", 50)
+		if err != nil {
+			logger.Infof("⚠️  Failed to get klines for %s: %v", symbol, err)
+			continue
+		}
+
+		// Calculate ATR
+		atr := kernel.CalculateATR(klines, 14)
+
+		// Calculate highest price since entry (for trailing stop)
+		highestPrice := entryPrice
+		if side == "long" {
+			for _, k := range klines {
+				if k.High > highestPrice {
+					highestPrice = k.High
+				}
+			}
+		} else {
+			highestPrice = entryPrice
+			for _, k := range klines {
+				if k.Low < highestPrice {
+					highestPrice = k.Low
+				}
+			}
+		}
+
+		// Find support/resistance levels
+		supportLevel := 0.0
+		resistanceLevel := 0.0
+		if side == "long" {
+			supportLevel = kernel.FindSupportLevel(klines, markPrice, 30)
+		} else {
+			resistanceLevel = kernel.FindResistanceLevel(klines, markPrice, 30)
+		}
+
+		// Check stop loss
+		if stopLossChecker != nil {
+			signal := stopLossChecker.CheckStopLoss(&positionInfo, markPrice, highestPrice, atr, supportLevel)
+			if signal.Triggered {
+				kernel.LogStopLossCheck(symbol, signal)
+				// Execute stop loss
+				if err := at.executeStopLoss(&positionInfo, signal); err != nil {
+					logger.Infof("❌ Failed to execute stop loss for %s: %v", symbol, err)
+				}
+				continue // Skip take profit check if stop loss triggered
+			}
+		}
+
+		// Check take profit
+		if takeProfitChecker != nil {
+			signal := takeProfitChecker.CheckTakeProfit(&positionInfo, markPrice, atr, resistanceLevel)
+			if signal.Triggered {
+				kernel.LogTakeProfitCheck(symbol, signal)
+				// Execute take profit
+				if err := at.executeTakeProfit(&positionInfo, signal); err != nil {
+					logger.Infof("❌ Failed to execute take profit for %s: %v", symbol, err)
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// executeStopLoss executes stop loss for a position
+func (at *AutoTrader) executeStopLoss(position *kernel.PositionInfo, signal *kernel.StopLossSignal) error {
+	logger.Infof("🛑 Executing stop loss for %s %s: %s", position.Symbol, position.Side, signal.Reason)
+
+	// Create close decision
+	action := "close_long"
+	if position.Side == "short" {
+		action = "close_short"
+	}
+
+	decision := kernel.Decision{
+		Symbol:    position.Symbol,
+		Action:    action,
+		Reasoning: fmt.Sprintf("Dynamic stop loss triggered: %s", signal.Reason),
+	}
+
+	// Execute the close order
+	actionRecord := store.DecisionAction{
+		Action:    action,
+		Symbol:    position.Symbol,
+		Reasoning: decision.Reasoning,
+		Timestamp: time.Now().UTC(),
+		Success:   false,
+	}
+
+	if err := at.executeDecisionWithRecord(&decision, &actionRecord); err != nil {
+		return fmt.Errorf("failed to close position: %w", err)
+	}
+
+	logger.Infof("✓ Stop loss executed successfully for %s", position.Symbol)
+	return nil
+}
+
+// executeTakeProfit executes take profit for a position
+func (at *AutoTrader) executeTakeProfit(position *kernel.PositionInfo, signal *kernel.TakeProfitSignal) error {
+	logger.Infof("💰 Executing take profit for %s %s: %s", position.Symbol, position.Side, signal.Reason)
+
+	// Create close decision
+	action := "close_long"
+	if position.Side == "short" {
+		action = "close_short"
+	}
+
+	decision := kernel.Decision{
+		Symbol:    position.Symbol,
+		Action:    action,
+		Reasoning: fmt.Sprintf("Dynamic take profit triggered: %s", signal.Reason),
+	}
+
+	// For partial take profit, we would need to modify quantity
+	// For now, we close the full position (partial close requires exchange-specific implementation)
+	if signal.PartialPercent < 100 {
+		logger.Infof("⚠️  Partial take profit (%.1f%%) not yet implemented, closing full position", signal.PartialPercent)
+	}
+
+	// Execute the close order
+	actionRecord := store.DecisionAction{
+		Action:    action,
+		Symbol:    position.Symbol,
+		Reasoning: decision.Reasoning,
+		Timestamp: time.Now().UTC(),
+		Success:   false,
+	}
+
+	if err := at.executeDecisionWithRecord(&decision, &actionRecord); err != nil {
+		return fmt.Errorf("failed to close position: %w", err)
+	}
+
+	logger.Infof("✓ Take profit executed successfully for %s", position.Symbol)
+	return nil
 }
 
