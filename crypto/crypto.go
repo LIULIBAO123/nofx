@@ -26,8 +26,10 @@ const (
 
 // Environment variable names
 const (
-	EnvDataEncryptionKey = "DATA_ENCRYPTION_KEY" // AES data encryption key (Base64)
-	EnvRSAPrivateKey     = "RSA_PRIVATE_KEY"     // RSA private key (PEM format, use \n for newlines)
+	EnvDataEncryptionKey    = "DATA_ENCRYPTION_KEY"       // AES data encryption key (Base64)
+	EnvRSAPrivateKey        = "RSA_PRIVATE_KEY"           // RSA private key (PEM format, use \n for newlines)
+	EnvRSAPrivateKeyPath    = "RSA_PRIVATE_KEY_PATH"      // RSA private key file path
+	EnvRSAPublicKeyPath     = "RSA_PUBLIC_KEY_PATH"       // RSA public key file path (optional)
 )
 
 type EncryptedPayload struct {
@@ -73,17 +75,48 @@ func NewCryptoService() (*CryptoService, error) {
 	}, nil
 }
 
-// loadRSAPrivateKeyFromEnv loads RSA private key from environment variable
+// loadRSAPrivateKeyFromEnv loads RSA private key from environment variable or file
 func loadRSAPrivateKeyFromEnv() (*rsa.PrivateKey, error) {
-	keyPEM := os.Getenv(EnvRSAPrivateKey)
-	if keyPEM == "" {
-		return nil, fmt.Errorf("environment variable %s not set, please configure RSA private key in .env", EnvRSAPrivateKey)
+	// Method 1: Try to load from file path (recommended)
+	keyPath := os.Getenv(EnvRSAPrivateKeyPath)
+	if keyPath != "" {
+		keyPEM, err := os.ReadFile(keyPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read RSA private key from file %s: %w", keyPath, err)
+		}
+		return ParseRSAPrivateKeyFromPEM(keyPEM)
 	}
-
-	// Handle newlines in environment variable (\n -> actual newline)
-	keyPEM = strings.ReplaceAll(keyPEM, "\\n", "\n")
-
-	return ParseRSAPrivateKeyFromPEM([]byte(keyPEM))
+	
+	// Method 2: Try to load from environment variable (legacy)
+	keyPEM := os.Getenv(EnvRSAPrivateKey)
+	if keyPEM != "" {
+		// Handle newlines in environment variable (\n -> actual newline)
+		keyPEM = strings.ReplaceAll(keyPEM, "\\n", "\n")
+		return ParseRSAPrivateKeyFromPEM([]byte(keyPEM))
+	}
+	
+	// Method 3: Try default file paths
+	defaultPaths := []string{
+		"./keys/private.pem",
+		"/app/keys/private.pem",
+		"./private.pem",
+	}
+	
+	for _, path := range defaultPaths {
+		if _, err := os.Stat(path); err == nil {
+			keyPEM, err := os.ReadFile(path)
+			if err != nil {
+				continue
+			}
+			key, err := ParseRSAPrivateKeyFromPEM(keyPEM)
+			if err == nil {
+				return key, nil
+			}
+		}
+	}
+	
+	return nil, fmt.Errorf("RSA private key not found. Please set %s (file path) or %s (PEM content) environment variable, or place key file at ./keys/private.pem", 
+		EnvRSAPrivateKeyPath, EnvRSAPrivateKey)
 }
 
 // loadDataKeyFromEnv loads AES data encryption key from environment variable
