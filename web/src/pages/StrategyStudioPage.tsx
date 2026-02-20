@@ -241,6 +241,49 @@ export function StrategyStudioPage() {
     }
   }
 
+  // Create optimized strategy (v2.0)
+  const handleCreateOptimizedStrategy = async () => {
+    if (!token) return
+    try {
+      const response = await fetch(
+        `${API_BASE}/api/strategies/create-optimized?lang=${language}`,
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      )
+      if (!response.ok) throw new Error('Failed to create optimized strategy')
+      const result = await response.json()
+      notify.success(language === 'zh' ? '优化策略已创建' : 'Optimized strategy created')
+      await fetchStrategies()
+      // Auto-select the newly created strategy
+      if (result.id && result.config) {
+        const now = new Date().toISOString()
+        const newStrategy = {
+          id: result.id,
+          name: language === 'zh' ? '优化策略 v2.0' : 'Optimized Strategy v2.0',
+          description: language === 'zh' 
+            ? '预配置的优化策略，包含动态止损止盈、仓位管理、回撤控制、多周期分析等高级功能'
+            : 'Pre-configured optimized strategy with dynamic stop-loss/take-profit, position management, drawdown control, and multi-timeframe analysis',
+          is_active: false,
+          is_default: false,
+          is_public: false,
+          config_visible: true,
+          config: result.config,
+          created_at: now,
+          updated_at: now,
+        }
+        setSelectedStrategy(newStrategy)
+        setEditingConfig(result.config)
+        setHasChanges(false)
+      }
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : 'Unknown error'
+      setError(errorMsg)
+      notify.error(errorMsg)
+    }
+  }
+
   // Delete strategy
   const handleDeleteStrategy = async (id: string) => {
     if (!token) return
@@ -488,6 +531,7 @@ export function StrategyStudioPage() {
       subtitle: { zh: '可视化配置和测试交易策略', en: 'Configure and test trading strategies' },
       strategies: { zh: '策略', en: 'Strategies' },
       newStrategy: { zh: '新建', en: 'New' },
+      newOptimized: { zh: '优化策略', en: 'Optimized' },
       strategyType: { zh: '策略类型', en: 'Strategy Type' },
       aiTrading: { zh: 'AI 智能交易', en: 'AI Trading' },
       aiTradingDesc: { zh: 'AI 分析市场并自主决策买卖', en: 'AI analyzes market and makes trading decisions' },
@@ -714,6 +758,13 @@ export function StrategyStudioPage() {
                     className="hidden"
                   />
                 </label>
+                <button
+                  onClick={handleCreateOptimizedStrategy}
+                  className="p-1 rounded hover:bg-white/10 transition-colors text-purple-400"
+                  title={language === 'zh' ? '创建优化策略 v2.0' : 'Create Optimized Strategy v2.0'}
+                >
+                  <Sparkles className="w-4 h-4" />
+                </button>
                 <button
                   onClick={handleCreateStrategy}
                   className="p-1 rounded hover:bg-white/10 transition-colors text-nofx-gold"
