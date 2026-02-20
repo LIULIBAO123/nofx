@@ -660,15 +660,6 @@ You only need to focus on:
 // GetOptimizedStrategyConfig returns the optimized strategy configuration (v2.0) for the given language
 // This configuration includes enhanced position management, drawdown control, and dynamic stop-loss/take-profit
 func GetOptimizedStrategyConfig(lang string) StrategyConfig {
-		}
-	}
-
-	return config
-}
-
-// GetOptimizedStrategyConfig returns the optimized strategy configuration (v2.0) for the given language
-// This configuration includes enhanced position management, drawdown control, and dynamic stop-loss/take-profit
-func GetOptimizedStrategyConfig(lang string) StrategyConfig {
 	// Normalize language to "zh" or "en"
 	normalizedLang := "en"
 	if lang == "zh" {
