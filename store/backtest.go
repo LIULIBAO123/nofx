@@ -70,37 +70,6 @@ type EquityPoint struct {
 	Cycle       int     `json:"cycle"`
 }
 
-// TradeEvent trade event
-type TradeEvent struct {
-	Timestamp       int64          `json:"timestamp"`
-	Symbol          string         `json:"symbol"`
-	Action          string         `json:"action"`
-	Side            string         `json:"side"`
-	Quantity        float64        `json:"quantity"`
-	Price           float64        `json:"price"`
-	Fee             float64        `json:"fee"`
-	Slippage        float64        `json:"slippage"`
-	OrderValue      float64        `json:"order_value"`
-	RealizedPnL     float64        `json:"realized_pnl"`
-	Leverage        int            `json:"leverage"`
-	Cycle           int            `json:"cycle"`
-	PositionAfter   float64        `json:"position_after"`
-	LiquidationFlag bool           `json:"liquidation_flag"`
-	Note            string         `json:"note"`
-	AIAnalysis      *TradeAnalysis `json:"ai_analysis,omitempty"`
-}
-
-// TradeAnalysis AI trade analysis result
-type TradeAnalysis struct {
-	TradeID        int64     `json:"trade_id"`
-	Rating         string    `json:"rating"`           // "excellent", "good", "fair", "poor"
-	Summary        string    `json:"summary"`          // Brief summary
-	ProfitAnalysis string    `json:"profit_analysis"`  // Profit/loss analysis
-	Improvements   []string  `json:"improvements"`     // Improvement suggestions
-	RiskWarnings   []string  `json:"risk_warnings"`    // Risk warnings
-	AnalyzedAt     time.Time `json:"analyzed_at"`
-}
-
 // RunIndexEntry backtest index entry
 type RunIndexEntry struct {
 	RunID          string   `json:"run_id"`
