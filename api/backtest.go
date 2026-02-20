@@ -37,6 +37,8 @@ func (s *Server) registerBacktestRoutes(router *gin.RouterGroup) {
 	router.GET("/decisions", s.handleBacktestDecisions)
 	router.GET("/export", s.handleBacktestExport)
 	router.GET("/klines", s.handleBacktestKlines)
+	router.POST("/analyze-trade", s.handleAnalyzeTrade)
+	router.GET("/trade-analysis", s.handleGetTradeAnalysis)
 }
 
 type backtestStartRequest struct {
@@ -858,4 +860,149 @@ func (s *Server) hydrateBacktestAIConfig(cfg *backtest.BacktestConfig) error {
 	}
 
 	return nil
+}
+
+type analyzeTradeRequest struct {
+	RunID   string `json:"run_id"`
+	TradeID int64  `json:"trade_id"`
+}
+
+func (s *Server) handleAnalyzeTrade(c *gin.Context) {
+	if s.backtestManager == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "backtest manager unavailable"})
+		return
+	}
+
+	userID := normalizeUserID(c.GetString("user_id"))
+
+	var req analyzeTradeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		SafeBadRequest(c, "Invalid request parameters")
+		return
+	}
+
+	if req.RunID == "" {
+		SafeBadRequest(c, "run_id is required")
+		return
+	}
+
+	if _, err := s.ensureBacktestRunOwnership(req.RunID, userID); writeBacktestAccessError(c, err) {
+		return
+	}
+
+	// Load trade events
+	trades, err := s.backtestManager.LoadTrades(req.RunID, 10000)
+	if err != nil {
+		SafeError(c, http.StatusBadRequest, "Failed to load trades", err)
+		return
+	}
+
+	// Find the specific trade
+	var targetTrade *store.TradeEvent
+	for i := range trades {
+		if int64(i+1) == req.TradeID {
+			targetTrade = &trades[i]
+			break
+		}
+	}
+
+	if targetTrade == nil {
+		SafeNotFound(c, "Trade")
+		return
+	}
+
+	// Load backtest config and metrics for context
+	cfg, err := backtest.LoadConfig(req.RunID)
+	if err != nil {
+		SafeError(c, http.StatusBadRequest, "Failed to load config", err)
+		return
+	}
+
+	metrics, _ := s.backtestManager.GetMetrics(req.RunID)
+
+	// Create AI client
+	aiClient, err := backtest.ConfigureMCPClient(*cfg, s.aiClient)
+	if err != nil {
+		SafeError(c, http.StatusBadRequest, "Failed to configure AI client", err)
+		return
+	}
+
+	// Create analyzer
+	analyzer := backtest.NewTradeAnalyzer(aiClient, *cfg)
+
+	// Build context
+	winRate := 0.0
+	if metrics != nil && metrics.TotalTrades > 0 {
+		winRate = float64(metrics.WinningTrades) / float64(metrics.TotalTrades) * 100
+	}
+
+	tradeCtx := backtest.AnalyzeTradeContext{
+		Trade:          *targetTrade,
+		Equity:         metrics.FinalEquity,
+		MaxDrawdown:    metrics.MaxDrawdownPct,
+		TotalTrades:    metrics.TotalTrades,
+		WinRate:        winRate,
+		StrategyConfig: "Backtest strategy", // Could load actual strategy config
+	}
+
+	// Analyze trade
+	analysis, err := analyzer.AnalyzeTrade(c.Request.Context(), tradeCtx)
+	if err != nil {
+		SafeError(c, http.StatusInternalServerError, "AI analysis failed", err)
+		return
+	}
+
+	c.JSON(http.StatusOK, analysis)
+}
+
+func (s *Server) handleGetTradeAnalysis(c *gin.Context) {
+	if s.backtestManager == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "backtest manager unavailable"})
+		return
+	}
+
+	userID := normalizeUserID(c.GetString("user_id"))
+	runID := c.Query("run_id")
+	tradeIDStr := c.Query("trade_id")
+
+	if runID == "" {
+		SafeBadRequest(c, "run_id is required")
+		return
+	}
+
+	if _, err := s.ensureBacktestRunOwnership(runID, userID); writeBacktestAccessError(c, err) {
+		return
+	}
+
+	// Load trades with analysis
+	trades, err := s.backtestManager.LoadTrades(runID, 10000)
+	if err != nil {
+		SafeError(c, http.StatusBadRequest, "Failed to load trades", err)
+		return
+	}
+
+	// If specific trade_id requested
+	if tradeIDStr != "" {
+		tradeID, err := strconv.ParseInt(tradeIDStr, 10, 64)
+		if err != nil {
+			SafeBadRequest(c, "Invalid trade_id")
+			return
+		}
+
+		for i := range trades {
+			if int64(i+1) == tradeID {
+				if trades[i].AIAnalysis != nil {
+					c.JSON(http.StatusOK, trades[i].AIAnalysis)
+					return
+				}
+				SafeNotFound(c, "Trade analysis")
+				return
+			}
+		}
+		SafeNotFound(c, "Trade")
+		return
+	}
+
+	// Return all trades with analysis
+	c.JSON(http.StatusOK, trades)
 }

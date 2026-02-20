@@ -7,9 +7,9 @@ import (
 	"nofx/mcp"
 )
 
-// configureMCPClient creates/clones an MCP client based on configuration (returns mcp.AIClient interface).
+// ConfigureMCPClient creates/clones an MCP client based on configuration (returns mcp.AIClient interface).
 // Note: mcp.New() returns an interface type; here we convert to concrete implementation before copying to avoid concurrent shared state.
-func configureMCPClient(cfg BacktestConfig, base mcp.AIClient) (mcp.AIClient, error) {
+func ConfigureMCPClient(cfg BacktestConfig, base mcp.AIClient) (mcp.AIClient, error) {
 	provider := strings.ToLower(strings.TrimSpace(cfg.AICfg.Provider))
 
 	// DeepSeek

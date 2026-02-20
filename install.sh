@@ -98,7 +98,7 @@ generate_env() {
 
     # Generate RSA private key (2048 bits)
     if command -v openssl &> /dev/null; then
-        RSA_PRIVATE_KEY=$(openssl genrsa 2048 2>/dev/null | tr '\n' '\\' | sed 's/\\/\\n/g' | sed 's/\\n$//')
+    RSA_PRIVATE_KEY=$(openssl genrsa 2048 2>/dev/null | tr '\n' '\\' | sed 's/\\/\\n/g' | sed 's/\\n$//')
     else
         RSA_PRIVATE_KEY="RSA-KEY-NOT-GENERATED-PLEASE-CONFIGURE-MANUALLY"
     fi

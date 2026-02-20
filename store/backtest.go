@@ -72,21 +72,33 @@ type EquityPoint struct {
 
 // TradeEvent trade event
 type TradeEvent struct {
-	Timestamp       int64   `json:"timestamp"`
-	Symbol          string  `json:"symbol"`
-	Action          string  `json:"action"`
-	Side            string  `json:"side"`
-	Quantity        float64 `json:"quantity"`
-	Price           float64 `json:"price"`
-	Fee             float64 `json:"fee"`
-	Slippage        float64 `json:"slippage"`
-	OrderValue      float64 `json:"order_value"`
-	RealizedPnL     float64 `json:"realized_pnl"`
-	Leverage        int     `json:"leverage"`
-	Cycle           int     `json:"cycle"`
-	PositionAfter   float64 `json:"position_after"`
-	LiquidationFlag bool    `json:"liquidation_flag"`
-	Note            string  `json:"note"`
+	Timestamp       int64          `json:"timestamp"`
+	Symbol          string         `json:"symbol"`
+	Action          string         `json:"action"`
+	Side            string         `json:"side"`
+	Quantity        float64        `json:"quantity"`
+	Price           float64        `json:"price"`
+	Fee             float64        `json:"fee"`
+	Slippage        float64        `json:"slippage"`
+	OrderValue      float64        `json:"order_value"`
+	RealizedPnL     float64        `json:"realized_pnl"`
+	Leverage        int            `json:"leverage"`
+	Cycle           int            `json:"cycle"`
+	PositionAfter   float64        `json:"position_after"`
+	LiquidationFlag bool           `json:"liquidation_flag"`
+	Note            string         `json:"note"`
+	AIAnalysis      *TradeAnalysis `json:"ai_analysis,omitempty"`
+}
+
+// TradeAnalysis AI trade analysis result
+type TradeAnalysis struct {
+	TradeID        int64     `json:"trade_id"`
+	Rating         string    `json:"rating"`           // "excellent", "good", "fair", "poor"
+	Summary        string    `json:"summary"`          // Brief summary
+	ProfitAnalysis string    `json:"profit_analysis"`  // Profit/loss analysis
+	Improvements   []string  `json:"improvements"`     // Improvement suggestions
+	RiskWarnings   []string  `json:"risk_warnings"`    // Risk warnings
+	AnalyzedAt     time.Time `json:"analyzed_at"`
 }
 
 // RunIndexEntry backtest index entry
@@ -162,23 +174,26 @@ func (BacktestEquity) TableName() string {
 
 // BacktestTrade GORM model
 type BacktestTrade struct {
-	ID            int64   `gorm:"primaryKey;autoIncrement"`
-	RunID         string  `gorm:"column:run_id;not null;index:idx_backtest_trades_run_ts"`
-	TS            int64   `gorm:"column:ts;type:bigint;not null;index:idx_backtest_trades_run_ts"`
-	Symbol        string  `gorm:"column:symbol;not null"`
-	Action        string  `gorm:"column:action;not null"`
-	Side          string  `gorm:"column:side;default:''"`
-	Qty           float64 `gorm:"column:qty;default:0"`
-	Price         float64 `gorm:"column:price;default:0"`
-	Fee           float64 `gorm:"column:fee;default:0"`
-	Slippage      float64 `gorm:"column:slippage;default:0"`
-	OrderValue    float64 `gorm:"column:order_value;default:0"`
-	RealizedPnL   float64 `gorm:"column:realized_pnl;default:0"`
-	Leverage      int     `gorm:"column:leverage;default:0"`
-	Cycle         int     `gorm:"column:cycle;default:0"`
-	PositionAfter float64 `gorm:"column:position_after;default:0"`
-	Liquidation   bool    `gorm:"column:liquidation;default:false"`
-	Note          string  `gorm:"column:note;default:''"`
+	ID             int64  `gorm:"primaryKey;autoIncrement"`
+	RunID          string `gorm:"column:run_id;not null;index:idx_backtest_trades_run_ts"`
+	TS             int64  `gorm:"column:ts;type:bigint;not null;index:idx_backtest_trades_run_ts"`
+	Symbol         string `gorm:"column:symbol;not null"`
+	Action         string `gorm:"column:action;not null"`
+	Side           string `gorm:"column:side;default:''"`
+	Qty            float64 `gorm:"column:qty;default:0"`
+	Price          float64 `gorm:"column:price;default:0"`
+	Fee            float64 `gorm:"column:fee;default:0"`
+	Slippage       float64 `gorm:"column:slippage;default:0"`
+	OrderValue     float64 `gorm:"column:order_value;default:0"`
+	RealizedPnL    float64 `gorm:"column:realized_pnl;default:0"`
+	Leverage       int     `gorm:"column:leverage;default:0"`
+	Cycle          int     `gorm:"column:cycle;default:0"`
+	PositionAfter  float64 `gorm:"column:position_after;default:0"`
+	Liquidation    bool    `gorm:"column:liquidation;default:false"`
+	Note           string  `gorm:"column:note;default:''"`
+	AIAnalysis     string  `gorm:"column:ai_analysis;type:text;default:''"`
+	AIAnalysisTS   int64   `gorm:"column:ai_analysis_ts;type:bigint;default:0"`
+	AnalysisRating string  `gorm:"column:analysis_rating;default:''"`
 }
 
 func (BacktestTrade) TableName() string {
@@ -369,23 +384,39 @@ func (s *BacktestStore) LoadEquityPoints(runID string) ([]EquityPoint, error) {
 
 // AppendTradeEvent appends trade event
 func (s *BacktestStore) AppendTradeEvent(runID string, event TradeEvent) error {
+	var aiAnalysisJSON string
+	var aiAnalysisTS int64
+	var analysisRating string
+	
+	if event.AIAnalysis != nil {
+		data, err := json.Marshal(event.AIAnalysis)
+		if err == nil {
+			aiAnalysisJSON = string(data)
+			aiAnalysisTS = event.AIAnalysis.AnalyzedAt.Unix()
+			analysisRating = event.AIAnalysis.Rating
+		}
+	}
+	
 	trade := BacktestTrade{
-		RunID:         runID,
-		TS:            event.Timestamp,
-		Symbol:        event.Symbol,
-		Action:        event.Action,
-		Side:          event.Side,
-		Qty:           event.Quantity,
-		Price:         event.Price,
-		Fee:           event.Fee,
-		Slippage:      event.Slippage,
-		OrderValue:    event.OrderValue,
-		RealizedPnL:   event.RealizedPnL,
-		Leverage:      event.Leverage,
-		Cycle:         event.Cycle,
-		PositionAfter: event.PositionAfter,
-		Liquidation:   event.LiquidationFlag,
-		Note:          event.Note,
+		RunID:          runID,
+		TS:             event.Timestamp,
+		Symbol:         event.Symbol,
+		Action:         event.Action,
+		Side:           event.Side,
+		Qty:            event.Quantity,
+		Price:          event.Price,
+		Fee:            event.Fee,
+		Slippage:       event.Slippage,
+		OrderValue:     event.OrderValue,
+		RealizedPnL:    event.RealizedPnL,
+		Leverage:       event.Leverage,
+		Cycle:          event.Cycle,
+		PositionAfter:  event.PositionAfter,
+		Liquidation:    event.LiquidationFlag,
+		Note:           event.Note,
+		AIAnalysis:     aiAnalysisJSON,
+		AIAnalysisTS:   aiAnalysisTS,
+		AnalysisRating: analysisRating,
 	}
 	return s.db.Create(&trade).Error
 }
@@ -400,7 +431,7 @@ func (s *BacktestStore) LoadTradeEvents(runID string) ([]TradeEvent, error) {
 
 	events := make([]TradeEvent, len(trades))
 	for i, trade := range trades {
-		events[i] = TradeEvent{
+		event := TradeEvent{
 			Timestamp:       trade.TS,
 			Symbol:          trade.Symbol,
 			Action:          trade.Action,
@@ -417,6 +448,16 @@ func (s *BacktestStore) LoadTradeEvents(runID string) ([]TradeEvent, error) {
 			LiquidationFlag: trade.Liquidation,
 			Note:            trade.Note,
 		}
+		
+		// Parse AI analysis if exists
+		if trade.AIAnalysis != "" {
+			var analysis TradeAnalysis
+			if err := json.Unmarshal([]byte(trade.AIAnalysis), &analysis); err == nil {
+				event.AIAnalysis = &analysis
+			}
+		}
+		
+		events[i] = event
 	}
 	return events, nil
 }

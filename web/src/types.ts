@@ -339,6 +339,17 @@ export interface BacktestTradeEvent {
   position_after: number;
   liquidation: boolean;
   note?: string;
+  ai_analysis?: TradeAnalysis;
+}
+
+export interface TradeAnalysis {
+  trade_id: number;
+  rating: 'excellent' | 'good' | 'fair' | 'poor';
+  summary: string;
+  profit_analysis: string;
+  improvements: string[];
+  risk_warnings: string[];
+  analyzed_at: string;
 }
 
 export interface BacktestMetrics {

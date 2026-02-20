@@ -61,7 +61,9 @@ docker pull ghcr.io/liulibao123/nofx-frontend:dev
 
 如果您希望使用公开镜像，可以考虑：
 
-1. **将 Fork 转换为独立仓库**（GitHub Settings → General → Danger Zone）
+1. **将 Fork 转换为独立仓库**（推荐）
+   - 📖 详细步骤请参考：[FORK_TO_INDEPENDENT.md](./FORK_TO_INDEPENDENT.md)
+   - 转换后可以将 GHCR 镜像设置为公开，无需 PAT 认证
 2. **推送到 Docker Hub**（公开注册表）
 3. **使用其他公开容器注册表**
 
