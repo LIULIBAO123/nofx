@@ -54,21 +54,26 @@ sudo ./quick-deploy.sh
 
 ## 创建 Personal Access Token
 
-1. **访问 GitHub 设置**
-   - 链接：https://github.com/settings/tokens
-   - 或：GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic)
+📖 **详细步骤请参考**：[如何获取 PAT 完整指南](./HOW_TO_GET_PAT.md)
+
+### 快速步骤
+
+1. **访问 GitHub Token 设置**
+   - 🔗 直接链接：https://github.com/settings/tokens
+   - 或：GitHub → 头像 → Settings → Developer settings → Personal access tokens → Tokens (classic)
 
 2. **生成新 Token**
-   - 点击 "Generate new token (classic)"
-   - 输入 Token 名称（如：`nofx-deploy`）
+   - 点击 **"Generate new token (classic)"**
+   - 输入 Token 名称（如：`NOFX Deploy`）
+   - 选择过期时间（建议 90 天）
 
 3. **设置权限**
-   - ✅ `read:packages` - 读取包（必需）
-   - ✅ `write:packages` - 写入包（可选，如果需要推送）
+   - ✅ **`read:packages`** - 读取包（必需，用于拉取 GHCR 镜像）
 
 4. **生成并复制**
-   - 点击 "Generate token"
-   - **重要**：Token 只显示一次，请立即复制保存
+   - 点击 **"Generate token"**
+   - ⚠️ **重要**：Token 只显示一次，格式类似 `ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`
+   - 立即复制并保存到安全的地方
 
 ## 部署脚本说明
 
