@@ -303,26 +303,65 @@ configure_firewall() {
     fi
 }
 
+# 登录 GHCR (如果需要拉取私有镜像)
+login_ghcr() {
+    log_step "检查是否需要登录 GHCR..."
+    
+    # 检查 docker-compose.prod.yml 是否使用 GHCR 镜像
+    if [ -f "$INSTALL_DIR/docker-compose.prod.yml" ]; then
+        if grep -q "ghcr.io" "$INSTALL_DIR/docker-compose.prod.yml"; then
+            log_info "检测到使用 GHCR 镜像，需要登录认证"
+            read -p "是否使用 Personal Access Token (PAT) 登录 GHCR? [Y/n]: " confirm
+            if [[ ! $confirm == [nN] ]]; then
+                read -sp "请输入您的 GitHub Personal Access Token: " GITHUB_TOKEN
+                echo ""
+                if [ -n "$GITHUB_TOKEN" ]; then
+                    echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$(whoami)" --password-stdin
+                    if [ $? -eq 0 ]; then
+                        log_info "GHCR 登录成功"
+                    else
+                        log_error "GHCR 登录失败，将尝试构建镜像"
+                    fi
+                else
+                    log_warn "未提供 PAT，将尝试构建镜像"
+                fi
+            fi
+        fi
+    fi
+}
+
 # 构建并启动服务
 start_services() {
     log_step "构建并启动服务..."
     
     cd "$INSTALL_DIR"
     
-    # 构建镜像
-    log_info "开始构建 Docker 镜像（这可能需要几分钟）..."
-    docker compose build
+    # 检查是否使用预构建镜像
+    if [ -f "docker-compose.prod.yml" ]; then
+        log_info "检测到 docker-compose.prod.yml，使用预构建镜像"
+        COMPOSE_FILE="docker-compose.prod.yml"
+    else
+        log_info "使用 docker-compose.yml，需要构建镜像"
+        COMPOSE_FILE="docker-compose.yml"
+        # 构建镜像
+        log_info "开始构建 Docker 镜像（这可能需要几分钟）..."
+        docker compose -f "$COMPOSE_FILE" build
+    fi
     
     # 启动服务
     log_info "启动服务..."
-    docker compose up -d
+    docker compose -f "$COMPOSE_FILE" up -d
     
     # 等待服务启动
     log_info "等待服务启动..."
     sleep 10
     
     # 检查服务状态
-    docker compose ps
+    if [ -f "docker-compose.prod.yml" ]; then
+        docker compose -f docker-compose.prod.yml ps
+    else
+        docker compose ps
+    fi
     
     log_info "服务启动完成"
 }
@@ -344,11 +383,19 @@ show_access_info() {
     echo "  API:  http://$SERVER_IP:8080"
     echo ""
     echo "常用命令："
-    echo "  查看日志:   cd $INSTALL_DIR && docker compose logs -f"
-    echo "  停止服务:   cd $INSTALL_DIR && docker compose down"
-    echo "  启动服务:   cd $INSTALL_DIR && docker compose up -d"
-    echo "  重启服务:   cd $INSTALL_DIR && docker compose restart"
-    echo "  查看状态:   cd $INSTALL_DIR && docker compose ps"
+    if [ -f "$INSTALL_DIR/docker-compose.prod.yml" ]; then
+        echo "  查看日志:   cd $INSTALL_DIR && docker compose -f docker-compose.prod.yml logs -f"
+        echo "  停止服务:   cd $INSTALL_DIR && docker compose -f docker-compose.prod.yml down"
+        echo "  启动服务:   cd $INSTALL_DIR && docker compose -f docker-compose.prod.yml up -d"
+        echo "  重启服务:   cd $INSTALL_DIR && docker compose -f docker-compose.prod.yml restart"
+        echo "  查看状态:   cd $INSTALL_DIR && docker compose -f docker-compose.prod.yml ps"
+    else
+        echo "  查看日志:   cd $INSTALL_DIR && docker compose logs -f"
+        echo "  停止服务:   cd $INSTALL_DIR && docker compose down"
+        echo "  启动服务:   cd $INSTALL_DIR && docker compose up -d"
+        echo "  重启服务:   cd $INSTALL_DIR && docker compose restart"
+        echo "  查看状态:   cd $INSTALL_DIR && docker compose ps"
+    fi
     echo ""
     echo "配置文件："
     echo "  环境变量:   $INSTALL_DIR/.env"
@@ -481,6 +528,9 @@ main() {
     
     # 配置环境
     configure_env
+    
+    # 登录 GHCR (如果需要)
+    login_ghcr
     
     # 配置防火墙
     configure_firewall

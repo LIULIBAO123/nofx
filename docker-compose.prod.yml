@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   nofx:
-    image: ghcr.io/liulibao123/nofx-backend:latest
+    image: ghcr.io/liulibao123/nofx-backend:dev
     container_name: nofx-trading
     ports:
       - "${NOFX_BACKEND_PORT:-8080}:8080"
@@ -23,7 +23,7 @@ services:
       start_period: 40s
 
   nofx-frontend:
-    image: ghcr.io/liulibao123/nofx-frontend:latest
+    image: ghcr.io/liulibao123/nofx-frontend:dev
     container_name: nofx-frontend
     ports:
       - "${NOFX_FRONTEND_PORT:-3000}:80"
