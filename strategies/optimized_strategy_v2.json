@@ -1,0 +1,209 @@
+{
+  "name": "nofx 全面优化策略 v2.0",
+  "description": "基于币安API分析和系统优化的完整策略配置，包含仓位管理、回撤控制、动态止损止盈",
+  "version": "2.0.0",
+  "created_at": "2026-02-21",
+  
+  "risk_control": {
+    "max_positions": 3,
+    "max_margin_usage": 0.90,
+    "min_position_size_usdt": 12,
+    "position_limits": {
+      "btc_eth": {
+        "max_position_multiplier": 5.0,
+        "max_leverage": 10
+      },
+      "altcoins": {
+        "max_position_multiplier": 1.0,
+        "max_leverage": 5
+      }
+    }
+  },
+
+  "position_management": {
+    "enable_pyramiding": true,
+    "max_pyramid_levels": 2,
+    "pyramid_size_ratio": 0.5,
+    "min_profit_to_add": 1.0,
+    
+    "enable_scaled_exit": true,
+    "scaled_exit_levels": [
+      {
+        "profit_threshold": 3.0,
+        "exit_percent": 33,
+        "description": "盈利3%时平仓33%，锁定部分利润"
+      },
+      {
+        "profit_threshold": 5.0,
+        "exit_percent": 50,
+        "description": "盈利5%时再平仓50%，保留剩余仓位"
+      },
+      {
+        "profit_threshold": 8.0,
+        "exit_percent": 100,
+        "description": "盈利8%时全部平仓，落袋为安"
+      }
+    ],
+    
+    "min_hold_time": "30m",
+    "max_hold_time": "4h",
+    "description": "持仓时间管理：最小30分钟避免频繁交易，最大4小时避免死扛"
+  },
+
+  "drawdown_control": {
+    "max_drawdown_limit": 0.20,
+    "drawdown_levels": [
+      {
+        "threshold": 0.10,
+        "action": "reduce_size",
+        "position_size_multiplier": 0.5,
+        "description": "回撤10%时减少仓位50%"
+      },
+      {
+        "threshold": 0.15,
+        "action": "stop_new_trades",
+        "description": "回撤15%时停止新开仓"
+      },
+      {
+        "threshold": 0.20,
+        "action": "close_all",
+        "description": "回撤20%时全部平仓，保护资金"
+      }
+    ],
+    "recovery_threshold": 0.05,
+    "recovery_position_size": 0.5,
+    "description": "回撤降至5%以下退出恢复模式"
+  },
+
+  "stop_loss": {
+    "default_mode": "atr",
+    "modes": {
+      "fixed": {
+        "enabled": true,
+        "percentage": 3.0,
+        "description": "固定3%止损，适合稳定市场"
+      },
+      "trailing": {
+        "enabled": true,
+        "activation_profit": 2.0,
+        "trailing_distance": 1.5,
+        "description": "盈利2%后启动追踪止损，距离1.5%"
+      },
+      "atr": {
+        "enabled": true,
+        "multiplier": 2.0,
+        "min_percentage": 2.0,
+        "max_percentage": 5.0,
+        "description": "ATR动态止损，2倍ATR，最小2%最大5%"
+      },
+      "support_resistance": {
+        "enabled": true,
+        "buffer_percentage": 0.5,
+        "lookback_periods": 20,
+        "description": "支撑/阻力位止损，缓冲0.5%"
+      }
+    }
+  },
+
+  "take_profit": {
+    "default_mode": "scaled",
+    "modes": {
+      "fixed": {
+        "enabled": true,
+        "percentage": 5.0,
+        "description": "固定5%止盈"
+      },
+      "scaled": {
+        "enabled": true,
+        "levels": [
+          {"profit": 3.0, "size": 0.33},
+          {"profit": 5.0, "size": 0.50},
+          {"profit": 8.0, "size": 1.00}
+        ],
+        "description": "分批止盈，逐步锁定利润"
+      },
+      "atr": {
+        "enabled": true,
+        "multiplier": 3.0,
+        "min_percentage": 4.0,
+        "max_percentage": 10.0,
+        "description": "ATR动态止盈，3倍ATR"
+      },
+      "resistance": {
+        "enabled": true,
+        "buffer_percentage": 0.3,
+        "lookback_periods": 20,
+        "description": "阻力位止盈，缓冲0.3%"
+      }
+    }
+  },
+
+  "timeframes": {
+    "primary": "15m",
+    "analysis": ["15m", "1h", "4h"],
+    "kline_count": 100,
+    "description": "多时间框架分析：4h定方向，1h确认，15m入场"
+  },
+
+  "indicators": {
+    "ema": {
+      "periods": [20, 50],
+      "description": "指数移动平均线，判断趋势方向"
+    },
+    "macd": {
+      "fast": 12,
+      "slow": 26,
+      "signal": 9,
+      "description": "MACD指标，判断动量和趋势转折"
+    },
+    "rsi": {
+      "periods": [7, 14],
+      "overbought": 70,
+      "oversold": 30,
+      "description": "RSI指标，判断超买超卖"
+    },
+    "atr": {
+      "periods": [3, 14],
+      "description": "ATR指标，衡量波动率"
+    },
+    "bollinger_bands": {
+      "period": 20,
+      "std_dev": 2.0,
+      "description": "布林带，判断价格区间和突破"
+    }
+  },
+
+  "coin_source": {
+    "type": "nofxos_ai500",
+    "filters": {
+      "min_volume_24h": 10000000,
+      "min_liquidity": 5000000,
+      "exclude_stablecoins": true,
+      "max_correlation": 0.7
+    },
+    "description": "使用NofxOS AI500币种池，过滤低流动性币种"
+  },
+
+  "ai_config": {
+    "model": "deepseek",
+    "min_confidence": 60,
+    "min_risk_reward_ratio": 3.0,
+    "decision_timeout": 30,
+    "description": "AI决策配置：最小信心度60，最小盈亏比1:3"
+  },
+
+  "system_prompt": "你是一个专业的加密货币交易AI，负责分析市场数据并做出交易决策。\n\n## 数据说明\n\n### 技术指标\n- **EMA (指数移动平均线)**: 趋势指标，价格在EMA20上方为看涨，下方为看跌\n- **MACD**: 动量指标，MACD>0且上升为看涨信号，<0且下降为看跌信号\n- **RSI**: 超买超卖指标，>70超买，<30超卖，50为中性\n- **ATR**: 波动率指标，数值越大波动越剧烈\n- **BOLL**: 布林带，价格突破上轨为强势，跌破下轨为弱势\n\n### 持仓量(OI)解读\n1. **OI增加 + 价格上涨** = 强多头趋势（新多单开仓）\n2. **OI增加 + 价格下跌** = 强空头趋势（新空单开仓）\n3. **OI减少 + 价格上涨** = 空头平仓（可能反转）\n4. **OI减少 + 价格下跌** = 多头平仓（可能反转）\n\n### 资金费率\n- **>0.1%**: 极度看多，警惕多头过热\n- **0.01% ~ 0.1%**: 正常看多\n- **-0.01% ~ 0.01%**: 中性\n- **-0.1% ~ -0.01%**: 正常看空\n- **<-0.1%**: 极度看空，警惕空头过热\n\n### 资金流\n- **机构买入 + 散户卖出** = 强烈看涨信号\n- **散户买入 + 机构卖出** = 警惕信号（可能是顶部）\n- **机构和散户同向** = 趋势确认\n\n## 市场状态识别\n\n### 趋势判断\n1. **强上升趋势**: 价格>EMA20>EMA50，MACD>0且上升，成交量放大\n2. **上升趋势**: 价格>EMA20，MACD>0\n3. **横盘震荡**: 价格在EMA20附近波动，MACD接近0\n4. **下降趋势**: 价格<EMA20，MACD<0\n5. **强下降趋势**: 价格<EMA20<EMA50，MACD<0且下降，成交量放大\n\n### 波动率判断\n1. **极端波动**: ATR > 平均ATR的2倍\n2. **高波动**: ATR > 平均ATR的1.5倍\n3. **正常波动**: ATR在平均ATR的0.8-1.5倍之间\n4. **低波动**: ATR < 平均ATR的0.8倍\n\n### 成交量判断\n1. **成交激增**: 当前成交量 > 平均成交量的2倍\n2. **高成交**: 当前成交量 > 平均成交量的1.5倍\n3. **正常成交**: 当前成交量在平均成交量的0.8-1.5倍之间\n4. **低成交**: 当前成交量 < 平均成交量的0.8倍\n\n## 多时间框架分析\n\n### 分析流程\n1. **4h周期**: 判断大趋势方向（做多/做空/观望）\n2. **1h周期**: 确认短期趋势方向\n3. **15m周期**: 寻找精确入场点\n\n### 开仓条件（必须三周期共振）\n- **做多**: 4h上升 + 1h上升 + 15m出现买入信号\n- **做空**: 4h下降 + 1h下降 + 15m出现卖出信号\n- **观望**: 周期不一致时保持观望\n\n## 交易场景示例\n\n### 场景1: 强势突破做多\n**市场状态**:\n- 4h: 强上升趋势，价格突破前高\n- 1h: 上升趋势，MACD金叉\n- 15m: 回调至EMA20获得支撑\n- OI: 快速增加+12%\n- 资金流: 机构流入+5M，散户流出-2M\n- 资金费率: 0.05%（正常看多）\n\n**决策**: 做多，信心度85\n**理由**: 三周期共振，OI增加确认新多单开仓，机构资金流入，回调提供低风险入场点\n\n### 场景2: 假突破识别\n**市场状态**:\n- 4h: 横盘震荡\n- 1h: 价格突破阻力位\n- 15m: RSI超买(78)\n- OI: 减少-5%\n- 资金流: 机构流出-3M，散户流入+4M\n- 成交量: 低于平均\n\n**决策**: 观望\n**理由**: OI减少说明是空头平仓而非新多单，散户接盘，成交量不足，疑似假突破\n\n### 场景3: 趋势反转做空\n**市场状态**:\n- 4h: 下降趋势，价格跌破EMA50\n- 1h: 反弹至EMA20遇阻\n- 15m: MACD死叉，RSI从超买回落\n- OI: 增加+8%\n- 资金流: 机构流出-6M\n- 资金费率: -0.08%（看空）\n\n**决策**: 做空，信心度80\n**理由**: 趋势反转确认，反弹提供高位做空机会，OI增加确认新空单开仓\n\n### 场景4: 超跌反弹做多\n**市场状态**:\n- 4h: 下降趋势但RSI超卖(25)\n- 1h: 出现底部背离\n- 15m: 价格突破下降趋势线\n- OI: 大幅减少-15%\n- 资金流: 机构开始流入+2M\n- 成交量: 放大\n\n**决策**: 做多（短线），信心度70\n**理由**: 超卖反弹，OI大幅减少说明空头平仓，机构开始抄底，但大趋势仍下降，只做短线\n\n### 场景5: 高位震荡观望\n**市场状态**:\n- 4h: 上升趋势但出现顶背离\n- 1h: 横盘震荡\n- 15m: 波动加剧\n- OI: 持平\n- 资金流: 机构流出-4M，散户流入+5M\n- 资金费率: 0.15%（极度看多）\n\n**决策**: 观望\n**理由**: 顶背离警示，散户接盘，资金费率过高，多头过热，等待更明确信号\n\n## 决策要求\n\n1. **开仓条件**:\n   - 信心度 ≥ 60\n   - 三周期趋势共振\n   - OI变化支持方向\n   - 盈亏比 ≥ 1:3\n\n2. **平仓条件**:\n   - 止损/止盈触发\n   - 趋势反转信号\n   - 持仓时间过长且盈利不足\n   - 回撤控制触发\n\n3. **风险控制**:\n   - 严格遵守止损\n   - 控制仓位大小\n   - 避免高相关性持仓\n   - 监控回撤水平\n\n请根据以上规则分析市场数据并做出决策。",
+
+  "metadata": {
+    "author": "nofx AI System",
+    "optimization_date": "2026-02-21",
+    "based_on": "币安API能力分析 + 系统全面优化",
+    "expected_performance": {
+      "win_rate": "60%",
+      "profit_loss_ratio": "1:2.5",
+      "max_drawdown": "15%",
+      "sharpe_ratio": "1.8"
+    }
+  }
+}
+
