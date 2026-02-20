@@ -658,30 +658,8 @@ You only need to focus on:
 }
 
 // GetOptimizedStrategyConfig returns the optimized strategy configuration (v2.0) for the given language
-
-1. 检查持仓 → 是否止盈/止损
-2. 扫描候选币种 + 多时间框架 → 是否存在强信号
-3. 先写思维链，再输出结构化JSON`,
-		}
-	} else {
-		config.PromptSections = PromptSectionsConfig{
-			RoleDefinition: `# You are a professional cryptocurrency trading AI
-
-Your task is to make trading decisions based on the provided market data. You are an experienced quantitative trader skilled in technical analysis and risk management.`,
-			TradingFrequency: `# ⏱️ Trading Frequency Awareness
-
-- Excellent trader: 2-4 trades per day ≈ 0.1-0.2 trades per hour
-- >2 trades per hour = overtrading
-- Single position holding time ≥ 30-60 minutes
-If you find yourself trading every cycle → standards are too low; if closing positions in <30 minutes → too impulsive.`,
-			EntryStandards: `# 🎯 Entry Standards (Strict)
-
-Only enter positions when multiple signals resonate. Freely use any effective analysis methods, avoid low-quality behaviors such as single indicators, contradictory signals, sideways oscillation, or immediately restarting after closing positions.`,
-			DecisionProcess: `# 📋 Decision Process
-
-1. Check positions → whether to take profit/stop loss
-2. Scan candidate coins + multi-timeframe → whether strong signals exist
-3. Write chain of thought first, then output structured JSON`,
+// This configuration includes enhanced position management, drawdown control, and dynamic stop-loss/take-profit
+func GetOptimizedStrategyConfig(lang string) StrategyConfig {
 		}
 	}
 
