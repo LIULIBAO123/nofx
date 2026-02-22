@@ -145,7 +145,7 @@ function MessageCard({ msg }: { msg: DebateMessage }) {
 
   return (
     <div
-      className="p-3 rounded-lg hover:bg-nofx-bg-lighter/60 transition-all border border-nofx-gold/20 backdrop-blur-sm bg-nofx-bg-lighter/20"
+      className="p-3 rounded-lg hover:bg-nofx-bg-lighter/60 transition-all border border-teal-400/20 backdrop-blur-sm bg-nofx-bg-lighter/20"
       style={{ borderLeft: `3px solid ${p.color}` }}
     >
       {/* Header - Always visible */}

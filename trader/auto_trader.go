@@ -121,6 +121,7 @@ type AutoTrader struct {
 	config                AutoTraderConfig
 	trader                Trader // Use Trader interface (supports multiple platforms)
 	mcpClient             mcp.AIClient
+	marketClient          *market.APIClient        // Market data client for K-line data
 	store                 *store.Store             // Data storage (decision records, etc.)
 	strategyEngine        *kernel.StrategyEngine // Strategy engine (uses strategy configuration)
 	cycleNumber           int                      // Current cycle number
@@ -338,6 +339,9 @@ func NewAutoTrader(config AutoTraderConfig, st *store.Store, userID string) (*Au
 	strategyEngine := kernel.NewStrategyEngine(config.StrategyConfig)
 	logger.Infof("✓ [%s] Using strategy engine (strategy configuration loaded)", config.Name)
 
+	// Create market data client for K-line data
+	marketClient := market.NewAPIClient()
+
 	return &AutoTrader{
 		id:                    config.ID,
 		name:                  config.Name,
@@ -348,6 +352,7 @@ func NewAutoTrader(config AutoTraderConfig, st *store.Store, userID string) (*Au
 		config:                config,
 		trader:                trader,
 		mcpClient:             mcpClient,
+		marketClient:          marketClient,
 		store:                 st,
 		strategyEngine:        strategyEngine,
 		cycleNumber:           cycleNumber,
@@ -2430,7 +2435,7 @@ func (at *AutoTrader) checkDynamicStopLossTakeProfit() error {
 		}
 
 		// Get market data for ATR and support/resistance calculations
-		klines, err := market.GetKlines(symbol, "15m", 50)
+		klines, err := at.marketClient.GetKlines(symbol, "15m", 50)
 		if err != nil {
 			logger.Infof("⚠️  Failed to get klines for %s: %v", symbol, err)
 			continue

@@ -67,7 +67,13 @@ func (m *Manager) Start(ctx context.Context, cfg BacktestConfig) (*Runner, error
 		return nil, err
 	}
 
-	runner, err := NewRunner(cfg, m.client())
+	// Create MCP client with API key from config
+	mcpClient, err := m.createClientFromConfig(&cfg.AICfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create AI client: %w", err)
+	}
+
+	runner, err := NewRunner(cfg, mcpClient)
 	if err != nil {
 		return nil, err
 	}
@@ -106,7 +112,66 @@ func (m *Manager) client() mcp.AIClient {
 	if m.mcpClient != nil {
 		return m.mcpClient
 	}
-	return mcp.New()
+	// Return nil to force proper client creation with API key
+	return nil
+}
+
+// createClientFromConfig creates an MCP client from AI configuration with API key set
+func (m *Manager) createClientFromConfig(aiCfg *AIConfig) (mcp.AIClient, error) {
+	if aiCfg == nil {
+		return nil, fmt.Errorf("AI config is nil")
+	}
+
+	apiKey := strings.TrimSpace(aiCfg.APIKey)
+	if apiKey == "" {
+		return nil, fmt.Errorf("AI API key not set, please call SetAPIKey first")
+	}
+
+	provider := strings.ToLower(strings.TrimSpace(aiCfg.Provider))
+	baseURL := strings.TrimSpace(aiCfg.BaseURL)
+	model := strings.TrimSpace(aiCfg.Model)
+
+	var client mcp.AIClient
+
+	switch provider {
+	case "deepseek":
+		client = mcp.NewDeepSeekClient()
+	case "qwen":
+		client = mcp.NewQwenClient()
+	case "openai":
+		client = mcp.NewOpenAIClient()
+	case "anthropic", "claude":
+		client = mcp.NewClaudeClient()
+	case "google", "gemini":
+		client = mcp.NewGeminiClient()
+	case "custom":
+		client = mcp.New()
+	default:
+		// Try to infer from model name if provider not specified
+		if model != "" {
+			modelLower := strings.ToLower(model)
+			if strings.Contains(modelLower, "deepseek") {
+				client = mcp.NewDeepSeekClient()
+			} else if strings.Contains(modelLower, "qwen") {
+				client = mcp.NewQwenClient()
+			} else if strings.Contains(modelLower, "gpt") || strings.Contains(modelLower, "openai") {
+				client = mcp.NewOpenAIClient()
+			} else if strings.Contains(modelLower, "claude") {
+				client = mcp.NewClaudeClient()
+			} else if strings.Contains(modelLower, "gemini") {
+				client = mcp.NewGeminiClient()
+			} else {
+				client = mcp.New()
+			}
+		} else {
+			client = mcp.New()
+		}
+	}
+
+	// Set API key and configuration
+	client.SetAPIKey(apiKey, baseURL, model)
+
+	return client, nil
 }
 
 func (m *Manager) GetRunner(runID string) (*Runner, bool) {
@@ -209,7 +274,13 @@ func (m *Manager) Resume(runID string) error {
 		return err
 	}
 
-	restored, err := NewRunner(cfgCopy, m.client())
+	// Create MCP client with API key from config
+	mcpClient, err := m.createClientFromConfig(&cfgCopy.AICfg)
+	if err != nil {
+		return fmt.Errorf("failed to create AI client: %w", err)
+	}
+
+	restored, err := NewRunner(cfgCopy, mcpClient)
 	if err != nil {
 		return err
 	}

@@ -4,6 +4,7 @@ import { useLanguage } from '../contexts/LanguageContext'
 import { t } from '../i18n/translations'
 import { Eye, EyeOff } from 'lucide-react'
 import { DeepVoidBackground } from './DeepVoidBackground'
+import { GrainOverlay } from './ui/GrainOverlay'
 // import { Input } from './ui/input' // Removed unused import
 import { toast } from 'sonner'
 import { useSystemConfig } from '../hooks/useSystemConfig'
@@ -143,6 +144,7 @@ export function LoginPage() {
 
   return (
     <DeepVoidBackground className="min-h-screen flex items-center justify-center py-12 font-mono" disableAnimation>
+      <GrainOverlay />
 
       <div className="w-full max-w-md relative z-10 px-6">
         {/* Navigation - Top Bar (Mobile/Desktop Friendly) */}
@@ -160,7 +162,7 @@ export function LoginPage() {
         <div className="mb-8 text-center">
           <div className="flex justify-center mb-6">
             <div className="relative">
-              <div className="absolute -inset-2 bg-nofx-gold/20 rounded-full blur-xl animate-pulse"></div>
+              <div className="absolute -inset-2 bg-teal-500/20 rounded-full blur-xl animate-pulse"></div>
               <img
                 src="/icons/nofx.svg"
                 alt="NoFx Logo"
@@ -169,7 +171,7 @@ export function LoginPage() {
             </div>
           </div>
           <h1 className="text-3xl font-bold tracking-tighter text-white uppercase mb-2">
-            <span className="text-nofx-gold">SYSTEM</span> ACCESS
+            <span className="text-teal-400">SYSTEM</span> ACCESS
           </h1>
           <p className="text-zinc-500 text-xs tracking-[0.2em] uppercase">
             {step === 'login' ? 'Authentication Protocol v3.0' : 'Multi-Factor Verification'}
@@ -216,12 +218,12 @@ export function LoginPage() {
             {adminMode ? (
               <form onSubmit={handleAdminLogin} className="space-y-5">
                 <div>
-                  <label className="block text-xs uppercase tracking-wider text-nofx-gold mb-1.5 ml-1">Admin Key</label>
+                  <label className="block text-xs uppercase tracking-wider text-teal-400 mb-1.5 ml-1">Admin Key</label>
                   <input
                     type="password"
                     value={adminPassword}
                     onChange={(e) => setAdminPassword(e.target.value)}
-                    className="w-full bg-black/50 border border-zinc-700 rounded px-4 py-3 text-sm focus:border-nofx-gold focus:ring-1 focus:ring-nofx-gold/50 outline-none transition-all placeholder-zinc-700 text-white font-mono"
+                    className="w-full bg-black/50 border border-zinc-700 rounded px-4 py-3 text-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500/50 outline-none transition-all placeholder-zinc-700 text-white font-mono"
                     placeholder="ENTER_ROOT_PASSWORD"
                     required
                   />
@@ -236,7 +238,7 @@ export function LoginPage() {
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full bg-nofx-gold text-black font-bold py-3 px-4 rounded text-sm tracking-wide uppercase hover:bg-yellow-400 transition-all transform active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed font-mono shadow-[0_0_20px_rgba(255,215,0,0.1)] hover:shadow-[0_0_30px_rgba(255,215,0,0.3)]"
+                  className="w-full teal-gradient text-white font-bold py-3 px-4 rounded text-sm tracking-wide uppercase hover:opacity-90 transition-all transform active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed font-mono shadow-glow-teal"
                 >
                   {loading ? '> VERIFYING...' : '> EXECUTE_LOGIN'}
                 </button>
@@ -259,7 +261,7 @@ export function LoginPage() {
                   <div className="mt-4">
                     <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">Backup Secret Key</p>
                     <div className="flex items-center gap-2 justify-center bg-black/50 p-2 rounded border border-zinc-700/50 max-w-[200px] mx-auto">
-                      <code className="text-xs font-mono text-nofx-gold">{otpSecret}</code>
+                      <code className="text-xs font-mono text-teal-400">{otpSecret}</code>
                       <button
                         onClick={() => copyToClipboard(otpSecret)}
                         className="text-zinc-500 hover:text-white transition-colors"
@@ -272,10 +274,10 @@ export function LoginPage() {
 
                 <div className="space-y-4 font-mono text-xs text-zinc-400 bg-black/20 p-4 rounded border border-zinc-800/50">
                   <div className="flex gap-3 items-start">
-                    <span className="text-nofx-gold font-bold mt-0.5">01</span>
+                    <span className="text-teal-400 font-bold mt-0.5">01</span>
                     <div>
                       <p className="font-bold text-white mb-1">Install Authenticator App</p>
-                      <p className="mb-2">Recommended: <span className="text-nofx-gold">Google Authenticator</span>.</p>
+                      <p className="mb-2">Recommended: <span className="text-teal-400">Google Authenticator</span>.</p>
                       <div className="flex gap-2">
                         <span className="px-1.5 py-0.5 bg-zinc-800 rounded text-[10px] text-zinc-300 border border-zinc-700">iOS</span>
                         <span className="px-1.5 py-0.5 bg-zinc-800 rounded text-[10px] text-zinc-300 border border-zinc-700">Android</span>
@@ -286,7 +288,7 @@ export function LoginPage() {
                   <div className="w-full h-px bg-zinc-800/50"></div>
 
                   <div className="flex gap-3 items-start">
-                    <span className="text-nofx-gold font-bold mt-0.5">02</span>
+                    <span className="text-teal-400 font-bold mt-0.5">02</span>
                     <div>
                       <p className="font-bold text-white mb-1">Scan & Verify</p>
                       <p>Scan code above, then enter the 6-digit token below to activate your account.</p>
@@ -296,7 +298,7 @@ export function LoginPage() {
 
                 <button
                   onClick={() => setStep('otp')}
-                  className="w-full bg-nofx-gold text-black font-bold py-3 px-4 rounded text-sm tracking-wide uppercase hover:bg-yellow-400 transition-colors font-mono shadow-lg"
+                  className="w-full teal-gradient text-white font-bold py-3 px-4 rounded text-sm tracking-wide uppercase hover:opacity-90 transition-colors font-mono shadow-glow-teal"
                 >
                   I HAVE SCANNED THE CODE →
                 </button>
@@ -326,7 +328,7 @@ export function LoginPage() {
                         type={showPassword ? 'text' : 'password'}
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
-                        className="w-full bg-black/50 border border-zinc-700 rounded px-4 py-3 text-sm focus:border-nofx-gold focus:ring-1 focus:ring-nofx-gold/50 outline-none transition-all placeholder-zinc-700 text-white font-mono pr-10"
+                        className="w-full bg-black/50 border border-zinc-700 rounded px-4 py-3 text-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500/50 outline-none transition-all placeholder-zinc-700 text-white font-mono pr-10"
                         placeholder="••••••••••••"
                         required
                       />
@@ -342,7 +344,7 @@ export function LoginPage() {
                       <button
                         type="button"
                         onClick={() => window.location.href = '/reset-password'}
-                        className="text-[10px] uppercase tracking-wide text-zinc-500 hover:text-nofx-gold transition-colors"
+                        className="text-[10px] uppercase tracking-wide text-zinc-500 hover:text-teal-400 transition-colors"
                       >
                         &gt; {t('forgotPassword', language)}
                       </button>
@@ -359,7 +361,7 @@ export function LoginPage() {
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full bg-nofx-gold text-black font-bold py-3 px-4 rounded text-sm tracking-wide uppercase hover:bg-yellow-400 transition-all transform active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed font-mono shadow-[0_0_15px_rgba(255,215,0,0.1)] hover:shadow-[0_0_25px_rgba(255,215,0,0.25)] flex items-center justify-center gap-2 group"
+                  className="w-full teal-gradient text-white font-bold py-3 px-4 rounded text-sm tracking-wide uppercase hover:opacity-90 transition-all transform active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed font-mono shadow-glow-teal flex items-center justify-center gap-2 group"
                 >
                   {loading ? (
                     <span className="animate-pulse">PROCESSING...</span>
@@ -384,7 +386,7 @@ export function LoginPage() {
                 </div>
 
                 <div>
-                  <label className="block text-xs uppercase tracking-wider text-nofx-gold mb-2 text-center font-bold">
+                  <label className="block text-xs uppercase tracking-wider text-teal-400 mb-2 text-center font-bold">
                     {t('otpCode', language)}
                   </label>
                   <input
@@ -393,7 +395,7 @@ export function LoginPage() {
                     onChange={(e) =>
                       setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))
                     }
-                    className="w-full bg-black border border-zinc-700 rounded px-4 py-4 text-center text-2xl tracking-[0.5em] font-mono text-white focus:border-nofx-gold focus:ring-1 focus:ring-nofx-gold/50 outline-none transition-all placeholder-zinc-800"
+                    className="w-full bg-black border border-zinc-700 rounded px-4 py-4 text-center text-2xl tracking-[0.5em] font-mono text-white focus:border-teal-500 focus:ring-1 focus:ring-teal-500/50 outline-none transition-all placeholder-zinc-800"
                     placeholder="000000"
                     maxLength={6}
                     required
@@ -418,7 +420,7 @@ export function LoginPage() {
                   <button
                     type="submit"
                     disabled={loading || otpCode.length !== 6}
-                    className="flex-1 bg-nofx-gold text-black font-bold py-3 rounded text-xs font-mono uppercase hover:bg-yellow-400 transition-colors disabled:opacity-50"
+                    className="flex-1 teal-gradient text-white font-bold py-3 rounded text-xs font-mono uppercase hover:opacity-90 transition-colors disabled:opacity-50"
                   >
                     {loading ? 'VERIFYING...' : 'CONFIRM IDENTITY'}
                   </button>
@@ -441,7 +443,7 @@ export function LoginPage() {
               NEW_USER_DETECTED?{' '}
               <button
                 onClick={() => window.location.href = '/register'}
-                className="text-nofx-gold hover:underline hover:text-yellow-300 transition-colors ml-1 uppercase"
+                className="text-teal-400 hover:underline hover:text-teal-300 transition-colors ml-1 uppercase"
               >
                 INITIALIZE REGISTRATION
               </button>

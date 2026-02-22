@@ -7,6 +7,7 @@ import { toast } from 'sonner'
 import { copyWithToast } from '../lib/clipboard'
 import { Eye, EyeOff } from 'lucide-react'
 import { DeepVoidBackground } from './DeepVoidBackground'
+import { GrainOverlay } from './ui/GrainOverlay'
 // import { Input } from './ui/input' // Removed unused import
 import PasswordChecklist from 'react-password-checklist'
 import { RegistrationDisabled } from './RegistrationDisabled'
@@ -150,6 +151,7 @@ export function RegisterPage() {
 
   return (
     <DeepVoidBackground className="min-h-screen flex items-center justify-center py-12 font-mono" disableAnimation>
+      <GrainOverlay />
 
       <div className="w-full max-w-lg relative z-10 px-6">
         {/* Navigation - Top Bar (Mobile/Desktop Friendly) */}
@@ -167,7 +169,7 @@ export function RegisterPage() {
         <div className="mb-8 text-center">
           <div className="flex justify-center mb-6">
             <div className="relative">
-              <div className="absolute -inset-2 bg-nofx-gold/20 rounded-full blur-xl animate-pulse"></div>
+              <div className="absolute -inset-2 bg-teal-500/20 rounded-full blur-xl animate-pulse"></div>
               <img
                 src="/icons/nofx.svg"
                 alt="NoFx Logo"
@@ -176,7 +178,7 @@ export function RegisterPage() {
             </div>
           </div>
           <h1 className="text-3xl font-bold tracking-tighter text-white uppercase mb-2">
-            <span className="text-nofx-gold">NEW_USER</span> ONBOARDING
+            <span className="text-teal-400">NEW_USER</span> ONBOARDING
           </h1>
           <p className="text-zinc-500 text-xs tracking-[0.2em] uppercase">
             {step === 'register' && 'Initializing Registration Sequence...'}
@@ -226,7 +228,7 @@ export function RegisterPage() {
                     type="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    className="w-full bg-black/50 border border-zinc-700 rounded px-4 py-3 text-sm focus:border-nofx-gold focus:ring-1 focus:ring-nofx-gold/50 outline-none transition-all placeholder-zinc-800 text-white font-mono"
+                    className="w-full bg-black/50 border border-zinc-700 rounded px-4 py-3 text-sm focus:border-teal-500 focus:ring-1 focus:ring-nofx-gold/50 outline-none transition-all placeholder-zinc-800 text-white font-mono"
                     placeholder="user@nofx.os"
                     required
                   />

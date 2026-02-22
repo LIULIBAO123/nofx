@@ -15,6 +15,7 @@ import { getExchangeIcon } from './ExchangeIcons'
 import { getModelIcon } from './ModelIcons'
 import { TraderConfigModal } from './TraderConfigModal'
 import { DeepVoidBackground } from './DeepVoidBackground'
+import { GrainOverlay } from './ui/GrainOverlay'
 import { ExchangeConfigModal } from './traders/ExchangeConfigModal'
 import { PunkAvatar, getTraderAvatar } from './PunkAvatar'
 import {
@@ -804,26 +805,27 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
 
   return (
     <DeepVoidBackground className="py-8" disableAnimation>
+      <GrainOverlay />
       <div className="w-full px-4 md:px-8 space-y-8 animate-fade-in">
-        {/* Header - Terminal Style */}
-        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-white/10 pb-6">
+        {/* Header - Meridian Style */}
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 pb-6">
           <div className="flex items-center gap-4">
             <div className="relative group">
-              <div className="absolute -inset-1 bg-nofx-gold/20 rounded-xl blur opacity-0 group-hover:opacity-100 transition duration-500"></div>
-              <div className="w-12 h-12 md:w-14 md:h-14 rounded-xl flex items-center justify-center bg-black border border-nofx-gold/30 text-nofx-gold relative z-10 shadow-[0_0_15px_rgba(240,185,11,0.1)]">
+              <div className="absolute -inset-1 bg-teal-500/20 rounded-xl blur opacity-0 group-hover:opacity-100 transition duration-500"></div>
+              <div className="w-12 h-12 md:w-14 md:h-14 rounded-xl flex items-center justify-center bg-gradient-to-br from-teal-500/10 to-cyan-500/10 border border-teal-500/30 text-teal-400 relative z-10 shadow-glow-teal">
                 <Bot className="w-6 h-6 md:w-7 md:h-7" />
               </div>
             </div>
             <div>
-              <h1 className="text-2xl md:text-3xl font-bold font-mono tracking-tight text-white flex items-center gap-3 uppercase">
+              <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-white flex items-center gap-3">
                 {t('aiTraders', language)}
-                <span className="text-xs font-mono font-normal px-2 py-0.5 rounded bg-nofx-gold/10 text-nofx-gold border border-nofx-gold/20 tracking-wider">
-                  {traders?.length || 0} ACTIVE_NODES
+                <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-teal-500/10 text-teal-400 border border-teal-500/20">
+                  {traders?.length || 0} Active
                 </span>
               </h1>
-              <p className="text-xs font-mono text-zinc-500 uppercase tracking-widest mt-1 ml-1 flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-                SYSTEM_READY
+              <p className="text-sm text-zinc-400 mt-1 flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-teal-500 animate-pulse"></span>
+                System Ready
               </p>
             </div>
           </div>
@@ -831,34 +833,33 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
           <div className="flex gap-2 w-full md:w-auto overflow-x-auto pb-1 md:pb-0 hide-scrollbar">
             <button
               onClick={handleAddModel}
-              className="px-4 py-2 rounded text-xs font-mono uppercase tracking-wider transition-all border border-zinc-700 bg-black/20 text-zinc-400 hover:text-white hover:border-zinc-500 whitespace-nowrap backdrop-blur-sm"
+              className="px-4 py-2 rounded-lg text-sm font-medium transition-all border border-white/10 bg-white/5 text-zinc-300 hover:text-white hover:bg-white/10 hover:border-white/20 whitespace-nowrap backdrop-blur-sm"
             >
               <div className="flex items-center gap-2">
-                <Plus className="w-3 h-3" />
-                <span>MODELS_CONFIG</span>
+                <Plus className="w-4 h-4" />
+                <span>Models</span>
               </div>
             </button>
 
             <button
               onClick={handleAddExchange}
-              className="px-4 py-2 rounded text-xs font-mono uppercase tracking-wider transition-all border border-zinc-700 bg-black/20 text-zinc-400 hover:text-white hover:border-zinc-500 whitespace-nowrap backdrop-blur-sm"
+              className="px-4 py-2 rounded-lg text-sm font-medium transition-all border border-white/10 bg-white/5 text-zinc-300 hover:text-white hover:bg-white/10 hover:border-white/20 whitespace-nowrap backdrop-blur-sm"
             >
               <div className="flex items-center gap-2">
-                <Plus className="w-3 h-3" />
-                <span>EXCHANGE_KEYS</span>
+                <Plus className="w-4 h-4" />
+                <span>Exchanges</span>
               </div>
             </button>
 
             <button
               onClick={() => setShowCreateModal(true)}
               disabled={configuredModels.length === 0 || configuredExchanges.length === 0}
-              className="group relative px-6 py-2 rounded text-xs font-bold font-mono uppercase tracking-wider transition-all disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap overflow-hidden bg-nofx-gold text-black hover:bg-yellow-400 shadow-[0_0_20px_rgba(240,185,11,0.2)] hover:shadow-[0_0_30px_rgba(240,185,11,0.4)]"
+              className="teal-gradient px-6 py-2 rounded-lg text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap shadow-glow-teal hover:shadow-glow-teal-lg"
             >
-              <span className="relative z-10 flex items-center gap-2">
+              <span className="flex items-center gap-2">
                 <Plus className="w-4 h-4" />
                 {t('createTrader', language)}
               </span>
-              <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
             </button>
           </div>
         </div>
@@ -866,10 +867,10 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
         {/* Configuration Status Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* AI Models Card */}
-          <div className="nofx-glass rounded-lg border border-white/5 overflow-hidden">
-            <div className="px-4 py-3 border-b border-white/5 bg-black/20 flex items-center gap-2 backdrop-blur-sm">
-              <Brain className="w-4 h-4 text-nofx-gold" />
-              <h3 className="text-sm font-mono tracking-widest text-zinc-300 uppercase">
+          <div className="modern-card overflow-hidden">
+            <div className="px-4 py-3 border-b border-white/5 bg-white/[0.02] flex items-center gap-2 backdrop-blur-sm">
+              <Brain className="w-4 h-4 text-teal-400" />
+              <h3 className="text-sm font-semibold text-zinc-200">
                 {t('aiModels', language)}
               </h3>
             </div>
@@ -881,14 +882,14 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
                 return (
                   <div
                     key={model.id}
-                    className={`group relative flex items-center justify-between p-3 rounded-md transition-all border border-transparent ${inUse ? 'opacity-80' : 'hover:bg-white/5 hover:border-white/10 cursor-pointer'
-                      } bg-black/20`}
+                    className={`group relative flex items-center justify-between p-3 rounded-lg transition-all border ${inUse ? 'opacity-80 border-white/5' : 'hover:bg-white/5 hover:border-white/10 cursor-pointer border-white/5'
+                      } bg-white/[0.02]`}
                     onClick={() => handleModelClick(model.id)}
                   >
                     <div className="flex items-center gap-4">
                       <div className="relative">
                         <div className="absolute inset-0 bg-indigo-500/20 rounded-full blur-sm group-hover:bg-indigo-500/30 transition-all"></div>
-                        <div className="w-10 h-10 rounded-full flex items-center justify-center bg-black border border-white/10 relative z-10">
+                        <div className="w-10 h-10 rounded-full flex items-center justify-center bg-gradient-to-br from-indigo-500/10 to-purple-500/10 border border-indigo-500/20 relative z-10">
                           {getModelIcon(model.provider || model.id, { width: 20, height: 20 }) || (
                             <span className="text-xs font-bold text-indigo-400">{getShortName(model.name)[0]}</span>
                           )}
@@ -896,10 +897,10 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
                       </div>
 
                       <div className="min-w-0">
-                        <div className="font-mono text-sm text-zinc-200 group-hover:text-nofx-gold transition-colors">
+                        <div className="font-medium text-sm text-zinc-200 group-hover:text-teal-400 transition-colors">
                           {getShortName(model.name)}
                         </div>
-                        <div className="text-[10px] text-zinc-500 font-mono flex items-center gap-2">
+                        <div className="text-xs text-zinc-500 font-mono flex items-center gap-2">
                           {model.customModelName || AI_PROVIDER_CONFIG[model.provider]?.defaultModel || ''}
                         </div>
                       </div>
@@ -907,15 +908,15 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
 
                     <div className="text-right">
                       {usageInfo.totalCount > 0 ? (
-                        <span className={`text-[10px] font-mono px-2 py-1 rounded border ${usageInfo.runningCount > 0
-                          ? 'bg-green-500/10 border-green-500/30 text-green-400'
-                          : 'bg-yellow-500/10 border-yellow-500/30 text-yellow-400'
+                        <span className={`text-xs font-medium px-2 py-1 rounded-full border ${usageInfo.runningCount > 0
+                          ? 'bg-teal-500/10 border-teal-500/30 text-teal-400'
+                          : 'bg-amber-500/10 border-amber-500/30 text-amber-400'
                           }`}>
-                          {usageInfo.runningCount}/{usageInfo.totalCount} ACTIVE
+                          {usageInfo.runningCount}/{usageInfo.totalCount} Active
                         </span>
                       ) : (
-                        <span className="text-[10px] font-mono text-zinc-600 uppercase tracking-wider">
-                          {language === 'zh' ? '就绪' : 'STANDBY'}
+                        <span className="text-xs font-medium text-zinc-600">
+                          {language === 'zh' ? '就绪' : 'Standby'}
                         </span>
                       )}
                     </div>
@@ -924,19 +925,19 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
               })}
 
               {configuredModels.length === 0 && (
-                <div className="text-center py-10 border border-dashed border-zinc-800 rounded-lg bg-black/20">
+                <div className="text-center py-10 border border-dashed border-white/10 rounded-lg bg-white/[0.02]">
                   <Brain className="w-8 h-8 mx-auto mb-3 text-zinc-700" />
-                  <div className="text-xs font-mono text-zinc-500 uppercase tracking-widest">{t('noModelsConfigured', language)}</div>
+                  <div className="text-sm text-zinc-500">{t('noModelsConfigured', language)}</div>
                 </div>
               )}
             </div>
           </div>
 
           {/* Exchanges Card */}
-          <div className="nofx-glass rounded-lg border border-white/5 overflow-hidden">
-            <div className="px-4 py-3 border-b border-white/5 bg-black/20 flex items-center gap-2 backdrop-blur-sm">
-              <Landmark className="w-4 h-4 text-nofx-gold" />
-              <h3 className="text-sm font-mono tracking-widest text-zinc-300 uppercase">
+          <div className="modern-card overflow-hidden">
+            <div className="px-4 py-3 border-b border-white/5 bg-white/[0.02] flex items-center gap-2 backdrop-blur-sm">
+              <Landmark className="w-4 h-4 text-teal-400" />
+              <h3 className="text-sm font-semibold text-zinc-200">
                 {t('exchanges', language)}
               </h3>
             </div>
@@ -948,26 +949,26 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
                 return (
                   <div
                     key={exchange.id}
-                    className={`group relative flex items-center justify-between p-3 rounded-md transition-all border border-transparent ${inUse ? 'opacity-80' : 'hover:bg-white/5 hover:border-white/10 cursor-pointer'
-                      } bg-black/20`}
+                    className={`group relative flex items-center justify-between p-3 rounded-lg transition-all border ${inUse ? 'opacity-80 border-white/5' : 'hover:bg-white/5 hover:border-white/10 cursor-pointer border-white/5'
+                      } bg-white/[0.02]`}
                     onClick={() => handleExchangeClick(exchange.id)}
                   >
                     <div className="flex items-center gap-4 min-w-0">
                       <div className="relative">
-                        <div className="absolute inset-0 bg-yellow-500/20 rounded-full blur-sm group-hover:bg-yellow-500/30 transition-all"></div>
-                        <div className="w-10 h-10 rounded-full flex items-center justify-center bg-black border border-white/10 relative z-10">
+                        <div className="absolute inset-0 bg-amber-500/20 rounded-full blur-sm group-hover:bg-amber-500/30 transition-all"></div>
+                        <div className="w-10 h-10 rounded-full flex items-center justify-center bg-gradient-to-br from-amber-500/10 to-orange-500/10 border border-amber-500/20 relative z-10">
                           {getExchangeIcon(exchange.exchange_type || exchange.id, { width: 20, height: 20 })}
                         </div>
                       </div>
 
                       <div className="min-w-0">
-                        <div className="font-mono text-sm text-zinc-200 group-hover:text-nofx-gold transition-colors truncate">
+                        <div className="font-medium text-sm text-zinc-200 group-hover:text-teal-400 transition-colors truncate">
                           {exchange.exchange_type?.toUpperCase() || getShortName(exchange.name)}
-                          <span className="text-[10px] text-zinc-500 ml-2 border border-zinc-800 px-1 rounded">
+                          <span className="text-xs text-zinc-500 ml-2 border border-white/10 px-1.5 py-0.5 rounded">
                             {exchange.account_name || 'DEFAULT'}
                           </span>
                         </div>
-                        <div className="text-[10px] text-zinc-500 font-mono flex items-center gap-2">
+                        <div className="text-xs text-zinc-500 font-mono flex items-center gap-2">
                           {exchange.type?.toUpperCase() || 'CEX'}
                         </div>
                       </div>
@@ -983,7 +984,7 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
 
                         return (
                           <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                            <span className="text-[10px] font-mono text-zinc-400 bg-black/40 px-1.5 py-0.5 rounded border border-zinc-800">
+                            <span className="text-xs font-mono text-zinc-400 bg-black/40 px-1.5 py-0.5 rounded border border-white/10">
                               {isVisible ? walletAddr : truncateAddress(walletAddr)}
                             </span>
                             <button
@@ -994,24 +995,24 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
                             </button>
                             <button
                               onClick={(e) => { e.stopPropagation(); handleCopyAddress(`exchange-${exchange.id}`, walletAddr) }}
-                              className="text-zinc-600 hover:text-nofx-gold"
+                              className="text-zinc-600 hover:text-teal-400"
                             >
-                              {isCopied ? <Check size={10} className="text-green-500" /> : <Copy size={10} />}
+                              {isCopied ? <Check size={10} className="text-teal-500" /> : <Copy size={10} />}
                             </button>
                           </div>
                         )
                       })()}
 
                       {usageInfo.totalCount > 0 ? (
-                        <span className={`text-[10px] font-mono px-2 py-1 rounded border ${usageInfo.runningCount > 0
-                          ? 'bg-green-500/10 border-green-500/30 text-green-400'
-                          : 'bg-yellow-500/10 border-yellow-500/30 text-yellow-400'
+                        <span className={`text-xs font-medium px-2 py-1 rounded-full border ${usageInfo.runningCount > 0
+                          ? 'bg-teal-500/10 border-teal-500/30 text-teal-400'
+                          : 'bg-amber-500/10 border-amber-500/30 text-amber-400'
                           }`}>
-                          {usageInfo.runningCount}/{usageInfo.totalCount} ACTIVE
+                          {usageInfo.runningCount}/{usageInfo.totalCount} Active
                         </span>
                       ) : (
-                        <span className="text-[10px] font-mono text-zinc-600 uppercase tracking-wider">
-                          {language === 'zh' ? '就绪' : 'STANDBY'}
+                        <span className="text-xs font-medium text-zinc-600">
+                          {language === 'zh' ? '就绪' : 'Standby'}
                         </span>
                       )}
                     </div>
@@ -1019,9 +1020,9 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
                 )
               })}
               {configuredExchanges.length === 0 && (
-                <div className="text-center py-10 border border-dashed border-zinc-800 rounded-lg bg-black/20">
+                <div className="text-center py-10 border border-dashed border-white/10 rounded-lg bg-white/[0.02]">
                   <Landmark className="w-8 h-8 mx-auto mb-3 text-zinc-700" />
-                  <div className="text-xs font-mono text-zinc-500 uppercase tracking-widest">{t('noExchangesConfigured', language)}</div>
+                  <div className="text-sm text-zinc-500">{t('noExchangesConfigured', language)}</div>
                 </div>
               )}
             </div>
@@ -1029,16 +1030,10 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
         </div>
 
         {/* Traders List */}
-        <div className="binance-card p-4 md:p-6">
+        <div className="modern-card p-4 md:p-6">
           <div className="flex items-center justify-between mb-4 md:mb-5">
-            <h2
-              className="text-lg md:text-xl font-bold flex items-center gap-2"
-              style={{ color: '#EAECEF' }}
-            >
-              <Users
-                className="w-5 h-5 md:w-6 md:h-6"
-                style={{ color: '#F0B90B' }}
-              />
+            <h2 className="text-lg md:text-xl font-bold flex items-center gap-2 text-white">
+              <Users className="w-5 h-5 md:w-6 md:h-6 text-teal-400" />
               {t('currentTraders', language)}
             </h2>
           </div>
@@ -1049,20 +1044,19 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
               {[1, 2, 3].map((i) => (
                 <div
                   key={i}
-                  className="flex flex-col md:flex-row md:items-center justify-between p-3 md:p-4 rounded gap-3 md:gap-4 animate-pulse"
-                  style={{ background: '#0B0E11', border: '1px solid #2B3139' }}
+                  className="flex flex-col md:flex-row md:items-center justify-between p-3 md:p-4 rounded-lg gap-3 md:gap-4 animate-pulse bg-white/[0.02] border border-white/5"
                 >
                   <div className="flex items-center gap-3 md:gap-4">
-                    <div className="w-10 h-10 md:w-12 md:h-12 rounded-full skeleton"></div>
+                    <div className="w-10 h-10 md:w-12 md:h-12 rounded-full bg-white/10"></div>
                     <div className="min-w-0 space-y-2">
-                      <div className="skeleton h-5 w-32"></div>
-                      <div className="skeleton h-3 w-24"></div>
+                      <div className="bg-white/10 h-5 w-32 rounded"></div>
+                      <div className="bg-white/10 h-3 w-24 rounded"></div>
                     </div>
                   </div>
                   <div className="flex items-center gap-3 md:gap-4">
-                    <div className="skeleton h-6 w-16"></div>
-                    <div className="skeleton h-6 w-16"></div>
-                    <div className="skeleton h-8 w-20"></div>
+                    <div className="bg-white/10 h-6 w-16 rounded"></div>
+                    <div className="bg-white/10 h-6 w-16 rounded"></div>
+                    <div className="bg-white/10 h-8 w-20 rounded"></div>
                   </div>
                 </div>
               ))}
@@ -1072,8 +1066,7 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
               {traders.map((trader) => (
                 <div
                   key={trader.trader_id}
-                  className="flex flex-col md:flex-row md:items-center justify-between p-3 md:p-4 rounded transition-all hover:translate-y-[-1px] gap-3 md:gap-4"
-                  style={{ background: '#0B0E11', border: '1px solid #2B3139' }}
+                  className="flex flex-col md:flex-row md:items-center justify-between p-3 md:p-4 rounded-lg transition-all hover:bg-white/5 gap-3 md:gap-4 bg-white/[0.02] border border-white/5"
                 >
                   <div className="flex items-center gap-3 md:gap-4">
                     <div className="flex-shrink-0">
@@ -1089,10 +1082,7 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
                       />
                     </div>
                     <div className="min-w-0">
-                      <div
-                        className="font-bold text-base md:text-lg truncate"
-                        style={{ color: '#EAECEF' }}
-                      >
+                      <div className="font-bold text-base md:text-lg truncate text-white">
                         {trader.trader_name}
                       </div>
                       <div
@@ -1112,7 +1102,7 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
                   </div>
 
                   <div className="flex items-center gap-3 md:gap-4 flex-wrap md:flex-nowrap">
-                    {/* Wallet Address for Perp-DEX - placed before status for alignment */}
+                    {/* Wallet Address for Perp-DEX */}
                     {(() => {
                       const exchange = allExchanges.find(e => e.id === trader.exchange_id)
                       const walletAddr = getWalletAddress(exchange)
@@ -1123,14 +1113,8 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
                       const isCopied = copiedId === trader.trader_id
 
                       return (
-                        <div
-                          className="flex items-center gap-1 px-2 py-1 rounded"
-                          style={{
-                            background: 'rgba(240, 185, 11, 0.08)',
-                            border: '1px solid rgba(240, 185, 11, 0.2)',
-                          }}
-                        >
-                          <span className="text-xs font-mono" style={{ color: '#F0B90B' }}>
+                        <div className="flex items-center gap-1 px-2 py-1 rounded bg-teal-500/10 border border-teal-500/20">
+                          <span className="text-xs font-mono text-teal-400">
                             {isVisible ? walletAddr : truncateAddress(walletAddr)}
                           </span>
                           <button
@@ -1139,13 +1123,13 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
                               e.stopPropagation()
                               toggleTraderAddressVisibility(trader.trader_id)
                             }}
-                            className="p-0.5 rounded hover:bg-gray-700 transition-colors"
+                            className="p-0.5 rounded hover:bg-white/10 transition-colors"
                             title={isVisible ? (language === 'zh' ? '隐藏' : 'Hide') : (language === 'zh' ? '显示' : 'Show')}
                           >
                             {isVisible ? (
-                              <EyeOff className="w-3 h-3" style={{ color: '#848E9C' }} />
+                              <EyeOff className="w-3 h-3 text-zinc-400" />
                             ) : (
-                              <Eye className="w-3 h-3" style={{ color: '#848E9C' }} />
+                              <Eye className="w-3 h-3 text-zinc-400" />
                             )}
                           </button>
                           <button
@@ -1154,39 +1138,26 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
                               e.stopPropagation()
                               handleCopyAddress(trader.trader_id, walletAddr)
                             }}
-                            className="p-0.5 rounded hover:bg-gray-700 transition-colors"
+                            className="p-0.5 rounded hover:bg-white/10 transition-colors"
                             title={language === 'zh' ? '复制' : 'Copy'}
                           >
                             {isCopied ? (
-                              <Check className="w-3 h-3" style={{ color: '#0ECB81' }} />
+                              <Check className="w-3 h-3 text-teal-500" />
                             ) : (
-                              <Copy className="w-3 h-3" style={{ color: '#848E9C' }} />
+                              <Copy className="w-3 h-3 text-zinc-400" />
                             )}
                           </button>
                         </div>
                       )
                     })()}
+                    
                     {/* Status */}
                     <div className="text-center">
-                      {/* <div className="text-xs mb-1" style={{ color: '#848E9C' }}>
-                      {t('status', language)}
-                    </div> */}
                       <div
-                        className={`px-2 md:px-3 py-1 rounded text-xs font-bold ${trader.is_running
-                          ? 'bg-green-100 text-green-800'
-                          : 'bg-red-100 text-red-800'
+                        className={`px-2 md:px-3 py-1 rounded-full text-xs font-semibold ${trader.is_running
+                          ? 'bg-teal-500/10 text-teal-400 border border-teal-500/30'
+                          : 'bg-red-500/10 text-red-400 border border-red-500/30'
                           }`}
-                        style={
-                          trader.is_running
-                            ? {
-                              background: 'rgba(14, 203, 129, 0.1)',
-                              color: '#0ECB81',
-                            }
-                            : {
-                              background: 'rgba(246, 70, 93, 0.1)',
-                              color: '#F6465D',
-                            }
-                        }
                       >
                         {trader.is_running
                           ? t('running', language)
@@ -1194,23 +1165,18 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
                       </div>
                     </div>
 
-                    {/* Actions: 禁止换行，超出横向滚动 */}
+                    {/* Actions */}
                     <div className="flex gap-1.5 md:gap-2 flex-nowrap overflow-x-auto items-center">
                       <button
                         onClick={() => {
                           if (onTraderSelect) {
                             onTraderSelect(trader.trader_id)
                           } else {
-                            // 使用 slug 格式: name-id前4位
                             const slug = `${trader.trader_name}-${trader.trader_id.slice(0, 4)}`
                             navigate(`/dashboard?trader=${encodeURIComponent(slug)}`)
                           }
                         }}
-                        className="px-2 md:px-3 py-1.5 md:py-2 rounded text-xs md:text-sm font-semibold transition-all hover:scale-105 flex items-center gap-1 whitespace-nowrap"
-                        style={{
-                          background: 'rgba(99, 102, 241, 0.1)',
-                          color: '#6366F1',
-                        }}
+                        className="px-2 md:px-3 py-1.5 md:py-2 rounded-lg text-xs md:text-sm font-semibold transition-all hover:scale-105 flex items-center gap-1 whitespace-nowrap bg-indigo-500/10 text-indigo-400 border border-indigo-500/20"
                       >
                         <BarChart3 className="w-3 h-3 md:w-4 md:h-4" />
                         {t('view', language)}
@@ -1219,13 +1185,7 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
                       <button
                         onClick={() => handleEditTrader(trader.trader_id)}
                         disabled={trader.is_running}
-                        className="px-2 md:px-3 py-1.5 md:py-2 rounded text-xs md:text-sm font-semibold transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap flex items-center gap-1"
-                        style={{
-                          background: trader.is_running
-                            ? 'rgba(132, 142, 156, 0.1)'
-                            : 'rgba(255, 193, 7, 0.1)',
-                          color: trader.is_running ? '#848E9C' : '#FFC107',
-                        }}
+                        className="px-2 md:px-3 py-1.5 md:py-2 rounded-lg text-xs md:text-sm font-semibold transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap flex items-center gap-1 bg-amber-500/10 text-amber-400 border border-amber-500/20 disabled:bg-white/5 disabled:text-zinc-500 disabled:border-white/5"
                       >
                         <Pencil className="w-3 h-3 md:w-4 md:h-4" />
                         {t('edit', language)}
@@ -1238,18 +1198,10 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
                             trader.is_running || false
                           )
                         }
-                        className="px-2 md:px-3 py-1.5 md:py-2 rounded text-xs md:text-sm font-semibold transition-all hover:scale-105 whitespace-nowrap"
-                        style={
-                          trader.is_running
-                            ? {
-                              background: 'rgba(246, 70, 93, 0.1)',
-                              color: '#F6465D',
-                            }
-                            : {
-                              background: 'rgba(14, 203, 129, 0.1)',
-                              color: '#0ECB81',
-                            }
-                        }
+                        className={`px-2 md:px-3 py-1.5 md:py-2 rounded-lg text-xs md:text-sm font-semibold transition-all hover:scale-105 whitespace-nowrap ${trader.is_running
+                          ? 'bg-red-500/10 text-red-400 border border-red-500/20'
+                          : 'bg-teal-500/10 text-teal-400 border border-teal-500/20'
+                          }`}
                       >
                         {trader.is_running
                           ? t('stop', language)
@@ -1258,18 +1210,10 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
 
                       <button
                         onClick={() => handleToggleCompetition(trader.trader_id, trader.show_in_competition ?? true)}
-                        className="px-2 md:px-3 py-1.5 md:py-2 rounded text-xs md:text-sm font-semibold transition-all hover:scale-105 whitespace-nowrap flex items-center gap-1"
-                        style={
-                          trader.show_in_competition !== false
-                            ? {
-                              background: 'rgba(14, 203, 129, 0.1)',
-                              color: '#0ECB81',
-                            }
-                            : {
-                              background: 'rgba(132, 142, 156, 0.1)',
-                              color: '#848E9C',
-                            }
-                        }
+                        className={`px-2 md:px-3 py-1.5 md:py-2 rounded-lg text-xs md:text-sm font-semibold transition-all hover:scale-105 whitespace-nowrap flex items-center gap-1 ${trader.show_in_competition !== false
+                          ? 'bg-teal-500/10 text-teal-400 border border-teal-500/20'
+                          : 'bg-white/5 text-zinc-500 border border-white/10'
+                          }`}
                         title={trader.show_in_competition !== false ? '在竞技场显示' : '在竞技场隐藏'}
                       >
                         {trader.show_in_competition !== false ? (
@@ -1281,11 +1225,7 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
 
                       <button
                         onClick={() => handleDeleteTrader(trader.trader_id)}
-                        className="px-2 md:px-3 py-1.5 md:py-2 rounded text-xs md:text-sm font-semibold transition-all hover:scale-105"
-                        style={{
-                          background: 'rgba(246, 70, 93, 0.1)',
-                          color: '#F6465D',
-                        }}
+                        className="px-2 md:px-3 py-1.5 md:py-2 rounded-lg text-xs md:text-sm font-semibold transition-all hover:scale-105 bg-red-500/10 text-red-400 border border-red-500/20"
                       >
                         <Trash2 className="w-3 h-3 md:w-4 md:h-4" />
                       </button>
@@ -1295,10 +1235,7 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
               ))}
             </div>
           ) : (
-            <div
-              className="text-center py-12 md:py-16"
-              style={{ color: '#848E9C' }}
-            >
+            <div className="text-center py-12 md:py-16 text-zinc-400">
               <Bot className="w-16 h-16 md:w-24 md:h-24 mx-auto mb-3 md:mb-4 opacity-50" />
               <div className="text-base md:text-lg font-semibold mb-2">
                 {t('noTraders', language)}
@@ -1308,7 +1245,7 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
               </div>
               {(configuredModels.length === 0 ||
                 configuredExchanges.length === 0) && (
-                  <div className="text-xs md:text-sm text-yellow-500">
+                  <div className="text-xs md:text-sm text-amber-400">
                     {configuredModels.length === 0 &&
                       configuredExchanges.length === 0
                       ? t('configureModelsAndExchangesFirst', language)

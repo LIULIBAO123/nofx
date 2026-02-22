@@ -891,18 +891,19 @@ func (s *Server) handleAnalyzeTrade(c *gin.Context) {
 		return
 	}
 
-	// Load trade events
-	trades, err := s.backtestManager.LoadTrades(req.RunID, 10000)
+	// Load trade events from backtest
+	backtestTrades, err := s.backtestManager.LoadTrades(req.RunID, 10000)
 	if err != nil {
 		SafeError(c, http.StatusBadRequest, "Failed to load trades", err)
 		return
 	}
 
-	// Find the specific trade
-	var targetTrade *store.TradeEvent
-	for i := range trades {
-		if trades[i].ID == req.TradeID {
-			targetTrade = &trades[i]
+	// Find the specific trade by matching timestamp and symbol
+	var targetTrade *backtest.TradeEvent
+	for i := range backtestTrades {
+		// Use timestamp as ID since backtest.TradeEvent doesn't have ID field
+		if backtestTrades[i].Timestamp == req.TradeID {
+			targetTrade = &backtestTrades[i]
 			break
 		}
 	}
@@ -912,15 +913,22 @@ func (s *Server) handleAnalyzeTrade(c *gin.Context) {
 		return
 	}
 
-	// Get backtest run to access AI config
-	run, err := s.store.Backtest().GetRun(req.RunID)
+	// Load backtest metadata to get AI config
+	meta, err := s.backtestManager.LoadMetadata(req.RunID)
 	if err != nil {
-		SafeError(c, http.StatusInternalServerError, "Failed to load backtest run", err)
+		SafeError(c, http.StatusInternalServerError, "Failed to load backtest metadata", err)
+		return
+	}
+
+	// Load config to get AI settings
+	cfg, err := backtest.LoadConfig(req.RunID)
+	if err != nil {
+		SafeError(c, http.StatusInternalServerError, "Failed to load backtest config", err)
 		return
 	}
 
 	// Create MCP client for AI analysis
-	mcpClient, err := s.createMCPClientFromBacktestConfig(run)
+	mcpClient, err := s.createMCPClientFromAIConfig(&cfg.AICfg)
 	if err != nil {
 		SafeError(c, http.StatusInternalServerError, "Failed to create AI client", err)
 		return
@@ -941,6 +949,7 @@ func (s *Server) handleAnalyzeTrade(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"analysis": analysis,
 		"trade":    targetTrade,
+		"run_id":   meta.RunID,
 	})
 }
 
@@ -991,39 +1000,33 @@ func (s *Server) handleGetTradeAnalysis(c *gin.Context) {
 	})
 }
 
-// createMCPClientFromBacktestConfig creates an MCP client from backtest run configuration
-func (s *Server) createMCPClientFromBacktestConfig(run *store.BacktestRun) (*mcp.Client, error) {
-	var config backtest.BacktestConfig
-	if err := json.Unmarshal([]byte(run.Config), &config); err != nil {
-		return nil, fmt.Errorf("failed to parse backtest config: %w", err)
+// createMCPClientFromAIConfig creates an MCP client from AI configuration
+func (s *Server) createMCPClientFromAIConfig(aiCfg *backtest.AIConfig) (mcp.AIClient, error) {
+	if aiCfg == nil {
+		return nil, fmt.Errorf("AI config is nil")
 	}
 
-	// Create MCP client based on AI config
-	aiCfg := config.AICfg
-	
-	var mcpClient *mcp.Client
-	var err error
+	var mcpClient mcp.AIClient
 
 	switch aiCfg.Provider {
 	case "deepseek":
-		mcpClient, err = mcp.NewDeepSeekClient(aiCfg.APIKey)
+		mcpClient = mcp.NewDeepSeekClient()
+		mcpClient.SetAPIKey(aiCfg.APIKey, aiCfg.BaseURL, aiCfg.Model)
 	case "qwen":
-		mcpClient, err = mcp.NewQwenClient(aiCfg.APIKey)
+		mcpClient = mcp.NewQwenClient()
+		mcpClient.SetAPIKey(aiCfg.APIKey, aiCfg.BaseURL, aiCfg.Model)
 	case "custom":
-		mcpClient, err = mcp.NewCustomClient(aiCfg.BaseURL, aiCfg.APIKey, aiCfg.Model)
+		mcpClient = mcp.New()
+		mcpClient.SetAPIKey(aiCfg.APIKey, aiCfg.BaseURL, aiCfg.Model)
 	default:
 		return nil, fmt.Errorf("unsupported AI provider: %s", aiCfg.Provider)
-	}
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to create MCP client: %w", err)
 	}
 
 	return mcpClient, nil
 }
 
 // analyzeTradeWithAI performs AI analysis on a trade
-func (s *Server) analyzeTradeWithAI(trade *store.TradeEvent, mcpClient *mcp.Client) (*store.AIAnalysis, error) {
+func (s *Server) analyzeTradeWithAI(trade *backtest.TradeEvent, mcpClient mcp.AIClient) (*store.TradeAnalysis, error) {
 	// Build analysis prompt
 	systemPrompt := `You are a professional trading analyst. Analyze the following trade and provide insights on:
 1. Entry timing and price level
@@ -1044,24 +1047,23 @@ Provide your analysis in the following JSON format:
 	userPrompt := fmt.Sprintf(`Analyze this trade:
 
 Symbol: %s
+Action: %s
 Side: %s
-Entry Price: %.4f
-Exit Price: %.4f
-Entry Time: %s
-Exit Time: %s
-Realized PnL: %.2f USDT (%.2f%%)
-Hold Duration: %s
+Quantity: %.4f
+Price: %.4f
+Realized PnL: %.2f USDT
+Leverage: %dx
+Timestamp: %s
 
 Please provide your analysis in JSON format:`, 
 		trade.Symbol,
+		trade.Action,
 		trade.Side,
-		trade.EntryPrice,
-		trade.ExitPrice,
-		time.Unix(trade.Timestamp, 0).Format("2006-01-02 15:04:05"),
-		time.Unix(trade.Timestamp, 0).Add(time.Hour).Format("2006-01-02 15:04:05"), // Approximate exit time
+		trade.Quantity,
+		trade.Price,
 		trade.RealizedPnL,
-		(trade.RealizedPnL / (trade.Price * trade.Quantity)) * 100,
-		"N/A",
+		trade.Leverage,
+		time.Unix(trade.Timestamp/1000, 0).Format("2006-01-02 15:04:05"),
 	)
 
 	// Call AI
@@ -1071,10 +1073,10 @@ Please provide your analysis in JSON format:`,
 	}
 
 	// Parse JSON response
-	var analysis store.AIAnalysis
+	var analysis store.TradeAnalysis
 	if err := json.Unmarshal([]byte(response), &analysis); err != nil {
 		// If JSON parsing fails, use the raw response as summary
-		analysis = store.AIAnalysis{
+		analysis = store.TradeAnalysis{
 			Rating:  "fair",
 			Summary: response,
 		}

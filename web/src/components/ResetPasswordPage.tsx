@@ -69,7 +69,7 @@ export function ResetPasswordPage() {
               window.history.pushState({}, '', '/login')
               window.dispatchEvent(new PopStateEvent('popstate'))
             }}
-            className="flex items-center gap-2 mb-6 text-sm hover:text-[#F0B90B] transition-colors"
+            className="flex items-center gap-2 mb-6 text-sm hover:text-[#14b8a6] transition-colors"
             style={{ color: '#848E9C' }}
           >
             <ArrowLeft className="w-4 h-4" />

@@ -40,7 +40,7 @@ interface PublicStrategy {
 
 const strategyStyles: Record<string, { color: string; border: string; glow: string; shadow: string; icon: any; bg: string }> = {
   scalper: {
-    color: 'text-[#F0B90B]',
+    color: 'text-[#14b8a6]',
     border: 'border-[#F0B90B]/30',
     glow: 'shadow-[0_0_20px_rgba(240,185,11,0.15)]',
     shadow: 'hover:shadow-[0_0_30px_rgba(240,185,11,0.25)]',
@@ -241,7 +241,7 @@ export function StrategyMarketPage() {
 
             <div className="flex items-center gap-4 mb-4">
               <div className="bg-zinc-900 border border-zinc-700 p-3 rounded-none relative group overflow-hidden">
-                <div className="absolute inset-0 bg-nofx-gold/20 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                <div className="absolute inset-0 bg-teal-400/20 opacity-0 group-hover:opacity-100 transition-opacity"></div>
                 <Database className="w-8 h-8 text-nofx-gold relative z-10" />
               </div>
               <div>

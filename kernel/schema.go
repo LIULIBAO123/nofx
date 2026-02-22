@@ -250,8 +250,8 @@ var DataDictionary = map[string]map[string]BilingualFieldDef{
 			Unit:      "USDT",
 			FormulaZH: "ATR = MA14(max(高-低, |高-昨收|, |低-昨收|))",
 			FormulaEN: "ATR = MA14(max(High-Low, |High-PrevClose|, |Low-PrevClose|))",
-			DescZH:    "波动率指标。ATR越大=波动越大。用于设置止损距离：止损=入场价±(2~3)×ATR",
-			DescEN:    "Volatility indicator. Higher ATR = higher volatility. Used for stop-loss: SL = Entry ± (2~3)×ATR",
+			DescZH:    "波动率指标。ATR越大=波动越大。系统支持动态ATR倍数：止损1.5-2.5倍，止盈2.5-4.0倍，AI需根据市场波动率和币种特性选择合适倍数",
+			DescEN:    "Volatility indicator. Higher ATR = higher volatility. System supports dynamic ATR multipliers: stop-loss 1.5-2.5x, take-profit 2.5-4.0x, AI should choose appropriate multiplier based on market volatility and coin characteristics",
 		},
 		"BOLL": {
 			NameZH:    "布林带",
@@ -711,6 +711,87 @@ func getMarketRegimeGuideZH() string {
 - **缩量**: 当前成交量 < 平均成交量的0.7倍，趋势可能反转
 - **天量**: 当前成交量 > 平均成交量的3倍，警惕反转
 
+## 🎯 动态止损止盈（ATR 自适应）
+
+系统支持基于 ATR 的动态止损止盈，你需要根据市场情况在允许的范围内选择合适的 ATR 倍数：
+
+### 止损 ATR 倍数选择（允许范围：1.5-2.5倍）
+
+**高波动市场（ATR > 1.5倍平均）**：
+- 建议使用 2.0-2.5 倍 ATR
+- 原因：避免正常波动触发止损，给趋势足够空间
+
+**正常波动市场（ATR 0.8-1.5倍平均）**：
+- 建议使用 1.5-2.0 倍 ATR
+- 原因：平衡风险控制和止损空间
+
+**低波动市场（ATR < 0.8倍平均）**：
+- 建议使用 1.5-1.8 倍 ATR
+- 原因：低波动时收紧止损，提高资金效率
+
+**币种差异**：
+- BTC/ETH：建议使用较大倍数（2.0-2.5倍），价格波动相对稳定
+- 主流山寨币：建议使用中等倍数（1.8-2.2倍）
+- 小市值山寨币：建议使用较小倍数（1.5-2.0倍），波动剧烈需严控风险
+
+### 止盈 ATR 倍数选择（允许范围：2.5-4.0倍）
+
+**强趋势市场（多周期共振+OI持续增加）**：
+- 建议使用 3.5-4.0 倍 ATR
+- 原因：让利润充分奔跑，捕捉大行情
+
+**正常趋势市场（趋势明确但动能一般）**：
+- 建议使用 2.8-3.5 倍 ATR
+- 原因：平衡止盈目标和回撤风险
+
+**弱趋势/震荡市场（方向不明确）**：
+- 建议使用 2.5-3.0 倍 ATR
+- 原因：快速止盈，避免利润回吐
+
+**币种差异**：
+- BTC/ETH：可以使用较大倍数（3.0-4.0倍），趋势持续性好
+- 山寨币：建议使用较小倍数（2.5-3.5倍），快速止盈锁定利润
+
+### 实战示例
+
+**示例1：BTC 高波动突破做多**
+- 当前 ATR: 450 USDT，平均 ATR: 300 USDT（1.5倍平均，高波动）
+- 入场价: 95000 USDT
+- 市场状态: 4h强上升趋势，OI持续增加，机构资金流入
+- 止损倍数选择: 2.5倍（高波动+BTC）
+- 止损价: 95000 - 2.5×450 = 93875 USDT
+- 止盈倍数选择: 4.0倍（强趋势+BTC）
+- 止盈价: 95000 + 4.0×450 = 96800 USDT
+- 理由: BTC高波动用大倍数避免震出，强趋势让利润充分奔跑
+
+**示例2：山寨币正常波动做多**
+- 当前 ATR: 0.05 USDT，平均 ATR: 0.05 USDT（1.0倍平均，正常波动）
+- 入场价: 1.50 USDT
+- 市场状态: 1h上升趋势，OI增加，但4h震荡
+- 止损倍数选择: 1.8倍（正常波动+山寨币）
+- 止损价: 1.50 - 1.8×0.05 = 1.41 USDT
+- 止盈倍数选择: 3.0倍（正常趋势+山寨币）
+- 止盈价: 1.50 + 3.0×0.05 = 1.65 USDT
+- 理由: 山寨币波动大用中等倍数，4h震荡所以止盈不宜过大
+
+**示例3：小市值币低波动做多**
+- 当前 ATR: 0.008 USDT，平均 ATR: 0.012 USDT（0.67倍平均，低波动）
+- 入场价: 0.50 USDT
+- 市场状态: 15m突破，但1h和4h方向不明
+- 止损倍数选择: 1.5倍（低波动+小市值+弱趋势）
+- 止损价: 0.50 - 1.5×0.008 = 0.488 USDT
+- 止盈倍数选择: 2.5倍（弱趋势+快速止盈）
+- 止盈价: 0.50 + 2.5×0.008 = 0.52 USDT
+- 理由: 低波动收紧止损，弱趋势快速止盈避免反转
+
+### 重要提醒
+
+1. **必须在允许范围内选择**: 止损1.5-2.5倍，止盈2.5-4.0倍，不能超出范围
+2. **综合考虑多个因素**: 波动率、币种特性、趋势强度、多周期共振
+3. **动态调整**: 不同市场状态使用不同倍数，不要固定使用某个值
+4. **风险优先**: 不确定时选择较小倍数，控制风险
+5. **记录理由**: 在reasoning中说明为什么选择该倍数
+
 `
 }
 
@@ -733,6 +814,87 @@ func getMarketRegimeGuideEN() string {
 - **Volume Surge**: Current volume > 1.5× average, trend is reliable
 - **Volume Decline**: Current volume < 0.7× average, trend may reverse
 - **Climax Volume**: Current volume > 3× average, watch for reversal
+
+## 🎯 Dynamic Stop-Loss & Take-Profit (ATR Adaptive)
+
+The system supports ATR-based dynamic stop-loss and take-profit. You need to choose appropriate ATR multipliers within the allowed ranges based on market conditions:
+
+### Stop-Loss ATR Multiplier Selection (Allowed Range: 1.5-2.5x)
+
+**High Volatility Market (ATR > 1.5× average)**:
+- Recommend using 2.0-2.5× ATR
+- Reason: Avoid stop-out from normal volatility, give trend enough room
+
+**Normal Volatility Market (ATR 0.8-1.5× average)**:
+- Recommend using 1.5-2.0× ATR
+- Reason: Balance risk control and stop-loss room
+
+**Low Volatility Market (ATR < 0.8× average)**:
+- Recommend using 1.5-1.8× ATR
+- Reason: Tighten stop-loss in low volatility, improve capital efficiency
+
+**Coin Differences**:
+- BTC/ETH: Recommend larger multipliers (2.0-2.5x), relatively stable price movement
+- Major altcoins: Recommend medium multipliers (1.8-2.2x)
+- Small-cap altcoins: Recommend smaller multipliers (1.5-2.0x), high volatility requires strict risk control
+
+### Take-Profit ATR Multiplier Selection (Allowed Range: 2.5-4.0x)
+
+**Strong Trend Market (Multi-timeframe alignment + OI continuously increasing)**:
+- Recommend using 3.5-4.0× ATR
+- Reason: Let profits run, capture big moves
+
+**Normal Trend Market (Clear trend but moderate momentum)**:
+- Recommend using 2.8-3.5× ATR
+- Reason: Balance take-profit target and pullback risk
+
+**Weak Trend/Choppy Market (Direction unclear)**:
+- Recommend using 2.5-3.0× ATR
+- Reason: Quick take-profit, avoid profit giveback
+
+**Coin Differences**:
+- BTC/ETH: Can use larger multipliers (3.0-4.0x), good trend persistence
+- Altcoins: Recommend smaller multipliers (2.5-3.5x), quick profit-taking to lock gains
+
+### Practical Examples
+
+**Example 1: BTC High Volatility Breakout Long**
+- Current ATR: 450 USDT, Average ATR: 300 USDT (1.5x average, high volatility)
+- Entry Price: 95000 USDT
+- Market State: 4h strong uptrend, OI continuously increasing, institutional inflow
+- Stop-Loss Multiplier: 2.5x (high volatility + BTC)
+- Stop-Loss Price: 95000 - 2.5×450 = 93875 USDT
+- Take-Profit Multiplier: 4.0x (strong trend + BTC)
+- Take-Profit Price: 95000 + 4.0×450 = 96800 USDT
+- Reason: BTC high volatility uses large multiplier to avoid shake-out, strong trend lets profits run
+
+**Example 2: Altcoin Normal Volatility Long**
+- Current ATR: 0.05 USDT, Average ATR: 0.05 USDT (1.0x average, normal volatility)
+- Entry Price: 1.50 USDT
+- Market State: 1h uptrend, OI increasing, but 4h sideways
+- Stop-Loss Multiplier: 1.8x (normal volatility + altcoin)
+- Stop-Loss Price: 1.50 - 1.8×0.05 = 1.41 USDT
+- Take-Profit Multiplier: 3.0x (normal trend + altcoin)
+- Take-Profit Price: 1.50 + 3.0×0.05 = 1.65 USDT
+- Reason: Altcoin high volatility uses medium multiplier, 4h sideways so take-profit not too large
+
+**Example 3: Small-Cap Coin Low Volatility Long**
+- Current ATR: 0.008 USDT, Average ATR: 0.012 USDT (0.67x average, low volatility)
+- Entry Price: 0.50 USDT
+- Market State: 15m breakout, but 1h and 4h direction unclear
+- Stop-Loss Multiplier: 1.5x (low volatility + small-cap + weak trend)
+- Stop-Loss Price: 0.50 - 1.5×0.008 = 0.488 USDT
+- Take-Profit Multiplier: 2.5x (weak trend + quick profit)
+- Take-Profit Price: 0.50 + 2.5×0.008 = 0.52 USDT
+- Reason: Low volatility tightens stop-loss, weak trend quick profit to avoid reversal
+
+### Important Reminders
+
+1. **Must choose within allowed ranges**: Stop-loss 1.5-2.5x, take-profit 2.5-4.0x, cannot exceed ranges
+2. **Consider multiple factors**: Volatility, coin characteristics, trend strength, multi-timeframe alignment
+3. **Dynamic adjustment**: Use different multipliers for different market states, don't fix on one value
+4. **Risk first**: When uncertain, choose smaller multipliers to control risk
+5. **Document reasoning**: Explain in reasoning why you chose that multiplier
 
 `
 }

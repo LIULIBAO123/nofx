@@ -1,5 +1,9 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');
+/* ========================================
+   MERIDIAN DESIGN SYSTEM - Fonts
+   ======================================== */
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -11,52 +15,644 @@ html {
 }
 
 :root {
-  /* NoFX Neo-Gold Design System */
+  /* NoFX 浅色主题 - 参考币安/OKX交易所 */
   --nofx-gold: #F0B90B;
-  --nofx-bg: #05070A;
-  --nofx-accent: #00F0FF;
-  --nofx-glass: rgba(5, 7, 10, 0.7);
-  --nofx-border: rgba(240, 185, 11, 0.2);
+  --nofx-gold-light: #FCD535;
+  --nofx-gold-dark: #D9A00A;
+  
+  /* 浅色背景 */
+  --background: #FAFAFA;
+  --header-bg: rgba(255, 255, 255, 0.95);
+  --panel-bg: #FFFFFF;
+  --panel-bg-hover: #F5F5F5;
+  --panel-border: #EAECEF;
+  --panel-border-hover: rgba(240, 185, 11, 0.3);
 
-  /* Cinematic Glows */
-  --glow-primary: 0 0 20px rgba(240, 185, 11, 0.3);
-  --glow-accent: 0 0 20px rgba(0, 240, 255, 0.3);
-  --glow-text: 0 0 10px rgba(240, 185, 11, 0.5);
+  /* 文字颜色 */
+  --foreground: #1E2329;
+  --text-primary: #1E2329;
+  --text-secondary: #707A8A;
+  --text-tertiary: #B7BDC6;
+  --text-disabled: #D1D5DB;
 
-  --background: #05070A;
-  --header-bg: rgba(2, 3, 4, 0.85);
-  /* Deep Abyssal */
-
-  --glass-bg: rgba(5, 7, 10, 0.4);
-  --glass-border: rgba(255, 255, 255, 0.08);
-
-  --panel-bg: rgba(14, 18, 23, 0.6);
-  --panel-bg-hover: rgba(20, 24, 29, 0.8);
-  --panel-border: rgba(255, 255, 255, 0.1);
-  --panel-border-hover: rgba(240, 185, 11, 0.5);
-
-  --foreground: #EAECEF;
-  --text-primary: #EAECEF;
-  --text-secondary: #848E9C;
-  --text-tertiary: #5E6673;
-  --text-disabled: #474D57;
-
-  /* Trading Colors */
+  /* 交易颜色 */
   --binance-green: #0ECB81;
-  --binance-green-bg: rgba(14, 203, 129, 0.12);
-  --binance-green-border: rgba(14, 203, 129, 0.3);
+  --binance-green-bg: rgba(14, 203, 129, 0.1);
+  --binance-green-border: rgba(14, 203, 129, 0.2);
   --binance-red: #F6465D;
-  --binance-red-bg: rgba(246, 70, 93, 0.12);
-  --binance-red-border: rgba(246, 70, 93, 0.3);
+  --binance-red-bg: rgba(246, 70, 93, 0.1);
+  --binance-red-border: rgba(246, 70, 93, 0.2);
   --binance-yellow: #F0B90B;
+  --binance-yellow-bg: rgba(240, 185, 11, 0.1);
 
-  /* Shadows */
-  --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.2);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
-  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.6);
-  --shadow-glow: 0 0 30px rgba(240, 185, 11, 0.15);
+  /* 阴影 */
+  --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
+  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --shadow-card-hover: 0 4px 16px rgba(0, 0, 0, 0.12);
 
-  font-family: 'IBM Plex Mono', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  line-height: 1.6;
+  font-weight: 400;
+  color-scheme: light;
+  color: var(--foreground);
+  background-color: var(--background);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background-color: var(--background);
+  background-image: linear-gradient(180deg, #FFFFFF 0%, #FAFAFA 100%);
+  background-attachment: fixed;
+}
+
+/* 选中文本样式 */
+::selection {
+  background: rgba(240, 185, 11, 0.2);
+  color: var(--text-primary);
+}
+
+#root {
+  width: 100%;
+  margin: 0 auto;
+}
+
+/* 滚动条 - 浅色主题 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--background);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--panel-border);
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--nofx-gold);
+}
+
+/* 动画 */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes marquee {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+.animate-marquee {
+  animation: marquee 30s linear infinite;
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out;
+}
+
+.animate-slide-in {
+  animation: slideIn 0.4s ease-out;
+}
+
+.animate-scale-in {
+  animation: scaleIn 0.3s ease-out;
+}
+
+/* 头部导航栏 */
+.header-bar {
+  background: var(--header-bg);
+  border-bottom: 1px solid var(--panel-border);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Toast 通知样式 */
+.sonner-toaster {
+  z-index: 9999;
+}
+
+.nofx-toast {
+  background: var(--panel-bg) !important;
+  border: 1px solid var(--panel-border) !important;
+  color: var(--text-primary) !important;
+  box-shadow: var(--shadow-lg) !important;
+  border-radius: 8px !important;
+}
+
+.nofx-toast .sonner-title {
+  color: var(--text-primary) !important;
+  font-weight: 600;
+}
+
+.nofx-toast .sonner-description {
+  color: var(--text-secondary) !important;
+}
+
+.nofx-toast[data-type='success'] {
+  border-left: 3px solid var(--binance-green) !important;
+}
+
+.nofx-toast[data-type='error'] {
+  border-left: 3px solid var(--binance-red) !important;
+}
+
+.nofx-toast[data-type='warning'],
+.nofx-toast[data-type='info'] {
+  border-left: 3px solid var(--binance-yellow) !important;
+}
+
+/* 等宽数字 */
+.mono {
+  font-family: 'JetBrains Mono', 'Courier New', monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 按钮样式 */
+button {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  font-weight: 600;
+}
+
+button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+
+button:active:not(:disabled) {
+  transform: scale(0.98) translateY(0);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 按钮变体 */
+.btn-primary {
+  background: var(--nofx-gold);
+  color: #000;
+  border: none;
+  box-shadow: var(--shadow-sm);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--nofx-gold-light);
+  box-shadow: var(--shadow-md);
+}
+
+.btn-success {
+  background: var(--binance-green-bg);
+  color: var(--binance-green);
+  border: 1px solid var(--binance-green-border);
+}
+
+.btn-success:hover:not(:disabled) {
+  background: rgba(14, 203, 129, 0.15);
+}
+
+.btn-danger {
+  background: var(--binance-red-bg);
+  color: var(--binance-red);
+  border: 1px solid var(--binance-red-border);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: rgba(246, 70, 93, 0.15);
+}
+
+.btn-outline {
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--panel-border);
+}
+
+.btn-outline:hover:not(:disabled) {
+  border-color: var(--nofx-gold);
+  color: var(--nofx-gold);
+  background: var(--binance-yellow-bg);
+}
+
+/* 输入框样式 */
+input,
+select,
+textarea {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  background-color: var(--panel-bg);
+  color: var(--text-primary);
+  border: 1px solid var(--panel-border);
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--binance-yellow);
+  box-shadow: 0 0 0 3px rgba(240, 185, 11, 0.1);
+  outline: none;
+  background-color: #FFFFFF;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-tertiary);
+}
+
+.premium-input {
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 14px;
+  color: var(--text-primary);
+  transition: all 0.2s ease;
+}
+
+.premium-input:hover {
+  border-color: var(--panel-border-hover);
+  background: #FFFFFF;
+}
+
+.premium-input:focus {
+  border-color: var(--binance-yellow);
+  box-shadow: 0 0 0 3px rgba(240, 185, 11, 0.1);
+  background: #FFFFFF;
+}
+
+/* 卡片样式 - 参考币安 */
+.binance-card {
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+
+.binance-card:hover {
+  border-color: var(--panel-border-hover);
+  box-shadow: var(--shadow-card-hover);
+  transform: translateY(-2px);
+}
+
+.binance-card-no-hover {
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-sm);
+}
+
+/* 渐变背景 */
+.binance-gradient {
+  background: linear-gradient(135deg, var(--nofx-gold) 0%, var(--nofx-gold-light) 100%);
+}
+
+.binance-gradient-subtle {
+  background: linear-gradient(135deg, rgba(240, 185, 11, 0.1) 0%, rgba(252, 213, 53, 0.05) 100%);
+  border: 1px solid rgba(240, 185, 11, 0.2);
+}
+
+/* 状态颜色 */
+.text-profit {
+  color: var(--binance-green);
+  font-weight: 700;
+}
+
+.text-loss {
+  color: var(--binance-red);
+  font-weight: 700;
+}
+
+.bg-profit {
+  background-color: var(--binance-green-bg);
+  color: var(--binance-green);
+  border: 1px solid var(--binance-green-border);
+}
+
+.bg-loss {
+  background-color: var(--binance-red-bg);
+  color: var(--binance-red);
+  border: 1px solid var(--binance-red-border);
+}
+
+/* 骨架屏加载 */
+.skeleton {
+  background: var(--panel-bg-hover);
+  background-image: linear-gradient(90deg, transparent, rgba(240, 185, 11, 0.08), transparent);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 4px;
+}
+
+/* 表格样式 */
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th {
+  color: var(--text-secondary);
+  font-weight: 600;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.75rem 0;
+}
+
+td {
+  color: var(--text-primary);
+  padding: 0.75rem 0;
+}
+
+tr {
+  border-bottom: 1px solid var(--panel-border);
+  transition: background 0.2s ease;
+}
+
+tr:last-child {
+  border-bottom: none;
+}
+
+tr:hover {
+  background: var(--panel-bg-hover);
+}
+
+/* 徽章样式 */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.625rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  border: 1px solid;
+  transition: all 0.2s ease;
+}
+
+.badge-yellow {
+  background: var(--binance-yellow-bg);
+  border-color: rgba(240, 185, 11, 0.3);
+  color: var(--nofx-gold-dark);
+}
+
+.badge-green {
+  background: var(--binance-green-bg);
+  border-color: var(--binance-green-border);
+  color: var(--binance-green);
+}
+
+.badge-red {
+  background: var(--binance-red-bg);
+  border-color: var(--binance-red-border);
+  color: var(--binance-red);
+}
+
+/* 数字格式化 */
+.number-up {
+  color: var(--binance-green);
+}
+
+.number-down {
+  color: var(--binance-red);
+}
+
+/* 隐藏滚动条 */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* 分割线 */
+.divider {
+  height: 1px;
+  background: var(--panel-border);
+  margin: 1rem 0;
+}
+
+/* 加载动画 */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spinner {
+  border: 2px solid var(--panel-border);
+  border-top-color: var(--binance-yellow);
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  animation: spin 0.6s linear infinite;
+}
+
+/* 统计卡片 */
+.stat-card {
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 1.25rem;
+  transition: all 0.2s ease;
+  position: relative;
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+
+.stat-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, transparent, var(--binance-yellow), transparent);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.stat-card:hover::before {
+  opacity: 1;
+}
+
+.stat-card:hover {
+  border-color: rgba(240, 185, 11, 0.3);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+}
+
+/* 图表容器 */
+.chart-container {
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 1.25rem;
+  box-shadow: var(--shadow-sm);
+}
+
+/* 响应式 */
+@media (max-width: 768px) {
+  .binance-card {
+    padding: 1rem;
+  }
+
+  .stat-card {
+    padding: 1rem;
+  }
+}
+
+/* 强制显示滚动条以确保所有页面布局一致 */
+html {
+  overflow-y: scroll;
+}
+
+:root {
+  /* ============================================
+     MERIDIAN CYAN THEME - Primary Colors
+     ============================================ */
+  
+  /* Teal/Cyan Primary (OKLCH) */
+  --color-teal-400: oklch(0.60 0.16 180);
+  --color-teal-500: oklch(0.55 0.18 180);
+  --color-teal-600: oklch(0.50 0.16 180);
+  
+  /* Azure Accent */
+  --color-azure-400: oklch(0.65 0.15 240);
+  --color-azure-500: oklch(0.60 0.18 240);
+  
+  /* Emerald (Success) */
+  --color-emerald-400: oklch(0.70 0.16 150);
+  --color-emerald-500: oklch(0.65 0.18 145);
+  
+  /* Rose (Danger) */
+  --color-rose-400: oklch(0.65 0.20 15);
+  --color-rose-500: oklch(0.60 0.22 12);
+  
+  /* Amber (Legacy Gold) */
+  --color-amber-400: oklch(0.75 0.15 80);
+  --color-amber-500: oklch(0.70 0.18 75);
+  
+  /* Slate (Neutrals) */
+  --color-slate-50: oklch(0.98 0.002 260);
+  --color-slate-400: oklch(0.62 0.010 260);
+  --color-slate-500: oklch(0.50 0.012 260);
+  --color-slate-700: oklch(0.35 0.010 260);
+  --color-slate-800: oklch(0.27 0.008 260);
+  --color-slate-900: oklch(0.18 0.006 260);
+  --color-slate-950: oklch(0.11 0.008 260);
+  
+  /* ============================================
+     SEMANTIC TOKENS
+     ============================================ */
+  
+  /* Primary Theme Colors */
+  --nofx-primary: var(--color-teal-500);
+  --nofx-accent: var(--color-azure-500);
+  --nofx-gold: var(--color-amber-500); /* Legacy support */
+  
+  /* Backgrounds - Obsidian Base */
+  --background: var(--color-slate-950);
+  --nofx-bg: var(--color-slate-950);
+  --header-bg: oklch(0.09 0.008 260 / 0.85);
+  
+  --glass-bg: oklch(0.11 0.008 260 / 0.4);
+  --glass-border: oklch(0.98 0.002 260 / 0.08);
+  
+  --panel-bg: oklch(0.13 0.008 260 / 0.6);
+  --panel-bg-hover: oklch(0.15 0.008 260 / 0.8);
+  --panel-border: oklch(0.98 0.002 260 / 0.1);
+  --panel-border-hover: oklch(0.55 0.18 180 / 0.5);
+  
+  /* Text Colors */
+  --foreground: var(--color-slate-50);
+  --text-primary: var(--color-slate-50);
+  --text-secondary: var(--color-slate-400);
+  --text-tertiary: var(--color-slate-500);
+  --text-disabled: oklch(0.42 0.012 260);
+  
+  /* Financial Colors */
+  --binance-green: var(--color-emerald-500);
+  --binance-green-bg: oklch(0.65 0.18 145 / 0.12);
+  --binance-green-border: oklch(0.65 0.18 145 / 0.3);
+  
+  --binance-red: var(--color-rose-500);
+  --binance-red-bg: oklch(0.60 0.22 12 / 0.12);
+  --binance-red-border: oklch(0.60 0.22 12 / 0.3);
+  
+  --binance-yellow: var(--color-amber-500);
+  --binance-yellow-bg: oklch(0.70 0.18 75 / 0.12);
+  
+  /* Shadows & Glows */
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+  --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+  
+  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.08);
+  --shadow-card-hover: 0 8px 24px rgba(0, 0, 0, 0.16), 0 2px 8px rgba(0, 0, 0, 0.12);
+  
+  --glow-teal: 0 0 20px oklch(0.55 0.18 180 / 0.4), 0 0 40px oklch(0.55 0.18 180 / 0.2);
+  --glow-teal-sm: 0 0 10px oklch(0.55 0.18 180 / 0.3);
+  --glow-amber: 0 0 20px oklch(0.70 0.18 75 / 0.4), 0 0 40px oklch(0.70 0.18 75 / 0.2);
+  
+  /* Typography */
+  font-family: 'DM Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   line-height: 1.6;
   font-weight: 400;
   color-scheme: dark;
@@ -136,14 +732,18 @@ body {
   min-width: 320px;
   min-height: 100vh;
   background-color: var(--background);
-  background-image: radial-gradient(circle at 50% 0%, #151921 0%, #05070a 60%);
+  /* Meridian-inspired gradient background */
+  background-image: 
+    radial-gradient(circle at 20% 10%, oklch(0.15 0.05 180 / 0.15) 0%, transparent 50%),
+    radial-gradient(circle at 80% 80%, oklch(0.15 0.05 240 / 0.1) 0%, transparent 50%),
+    radial-gradient(circle at 50% 50%, oklch(0.13 0.008 260) 0%, oklch(0.11 0.008 260) 100%);
   background-attachment: fixed;
 }
 
-/* Premium Selection Styles */
+/* Premium Selection Styles - Teal Theme */
 ::selection {
-  background: rgba(255, 88, 0, 0.3);
-  color: #FFFFFF;
+  background: oklch(0.55 0.18 180 / 0.3);
+  color: var(--color-slate-50);
 }
 
 #root {
@@ -950,4 +1550,448 @@ tr:hover {
       rgba(240, 185, 11, 0.1) 360deg);
   mix-blend-mode: overlay;
   background-blend-mode: overlay, normal;
+}
+
+/* ========================================
+   现代化优化样式 - 2024
+   ======================================== */
+
+/* 改进的字体系统 */
+.font-display {
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.font-body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.font-mono {
+  font-family: 'JetBrains Mono', 'Courier New', monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ========================================
+   MERIDIAN CARDS - Glassmorphism
+   ======================================== */
+.modern-card {
+  background: oklch(0.13 0.008 260 / 0.5);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid oklch(0.98 0.002 260 / 0.08);
+  border-radius: 16px;
+  box-shadow: 
+    0 4px 6px -1px rgba(0, 0, 0, 0.1),
+    0 2px 4px -1px rgba(0, 0, 0, 0.06),
+    inset 0 1px 0 0 oklch(0.98 0.002 260 / 0.05);
+  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
+  overflow: hidden;
+  will-change: transform;
+}
+
+.modern-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, 
+    transparent 0%, 
+    oklch(0.55 0.18 180 / 0.6) 50%, 
+    transparent 100%);
+  opacity: 0;
+  transition: opacity 0.4s ease;
+}
+
+.modern-card:hover {
+  background: oklch(0.15 0.008 260 / 0.7);
+  border-color: oklch(0.55 0.18 180 / 0.3);
+  box-shadow: 
+    0 20px 25px -5px rgba(0, 0, 0, 0.2),
+    0 10px 10px -5px rgba(0, 0, 0, 0.1),
+    0 0 0 1px oklch(0.55 0.18 180 / 0.1),
+    inset 0 1px 0 0 oklch(0.98 0.002 260 / 0.1);
+  transform: translateY(-4px) scale(1.01);
+}
+
+.modern-card:hover::before {
+  opacity: 1;
+}
+
+/* 改进的按钮样式 - 更流畅的动画 */
+.modern-btn {
+  position: relative;
+  overflow: hidden;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.modern-btn::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.2);
+  transform: translate(-50%, -50%);
+  transition: width 0.6s ease, height 0.6s ease;
+}
+
+.modern-btn:hover::before {
+  width: 300px;
+  height: 300px;
+}
+
+.modern-btn:active {
+  transform: scale(0.96);
+}
+
+/* Teal 渐变按钮 - Meridian 主题 */
+.btn-teal-gradient {
+  background: linear-gradient(135deg, oklch(0.55 0.18 180) 0%, oklch(0.60 0.16 180) 100%);
+  color: oklch(0.11 0.008 260);
+  border: none;
+  font-weight: 700;
+  box-shadow: 
+    0 4px 6px -1px oklch(0.55 0.18 180 / 0.3),
+    0 2px 4px -1px oklch(0.55 0.18 180 / 0.2),
+    inset 0 1px 0 0 oklch(0.98 0.002 260 / 0.3);
+}
+
+.btn-teal-gradient:hover {
+  background: linear-gradient(135deg, oklch(0.60 0.16 180) 0%, oklch(0.55 0.18 180) 100%);
+  box-shadow: 
+    0 10px 15px -3px oklch(0.55 0.18 180 / 0.4),
+    0 4px 6px -2px oklch(0.55 0.18 180 / 0.3),
+    inset 0 1px 0 0 oklch(0.98 0.002 260 / 0.4),
+    var(--glow-teal-sm);
+  transform: translateY(-2px);
+}
+
+/* 金色渐变按钮 - Legacy */
+.btn-gold-gradient {
+  background: linear-gradient(135deg, oklch(0.70 0.18 75) 0%, oklch(0.75 0.15 80) 100%);
+  color: oklch(0.11 0.008 260);
+  border: none;
+  font-weight: 700;
+  box-shadow: 
+    0 4px 6px -1px oklch(0.70 0.18 75 / 0.3),
+    0 2px 4px -1px oklch(0.70 0.18 75 / 0.2),
+    inset 0 1px 0 0 oklch(0.98 0.002 260 / 0.3);
+}
+
+.btn-gold-gradient:hover {
+  background: linear-gradient(135deg, oklch(0.75 0.15 80) 0%, oklch(0.70 0.18 75) 100%);
+  box-shadow: 
+    0 10px 15px -3px oklch(0.70 0.18 75 / 0.4),
+    0 4px 6px -2px oklch(0.70 0.18 75 / 0.3),
+    inset 0 1px 0 0 oklch(0.98 0.002 260 / 0.4);
+  transform: translateY(-2px);
+}
+
+/* 微交互 - 输入框聚焦动画 Meridian 风格 */
+.modern-input {
+  background: oklch(0.11 0.008 260 / 0.6);
+  border: 1.5px solid oklch(0.98 0.002 260 / 0.1);
+  border-radius: 12px;
+  padding: 0.75rem 1rem;
+  color: var(--text-primary);
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
+}
+
+.modern-input:hover {
+  border-color: oklch(0.55 0.18 180 / 0.3);
+  background: oklch(0.11 0.008 260 / 0.8);
+}
+
+.modern-input:focus {
+  border-color: oklch(0.55 0.18 180 / 0.6);
+  background: oklch(0.11 0.008 260 / 0.9);
+  box-shadow: 
+    0 0 0 3px oklch(0.55 0.18 180 / 0.1),
+    var(--glow-teal-sm);
+  outline: none;
+  transform: translateY(-1px);
+}
+
+/* 改进的统计卡片 - Meridian 风格 */
+.stat-card-modern {
+  background: oklch(0.13 0.008 260 / 0.4);
+  backdrop-filter: blur(16px);
+  border: 1px solid oklch(0.98 0.002 260 / 0.08);
+  border-radius: 16px;
+  padding: 1.5rem;
+  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
+  overflow: hidden;
+  will-change: transform;
+}
+
+.stat-card-modern::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, 
+    transparent 0%, 
+    oklch(0.55 0.18 180 / 0.8) 50%, 
+    transparent 100%);
+  transform: translateX(-100%);
+  transition: transform 0.6s ease;
+}
+
+.stat-card-modern:hover {
+  background: oklch(0.15 0.008 260 / 0.6);
+  border-color: oklch(0.55 0.18 180 / 0.3);
+  box-shadow: 
+    0 10px 20px -5px rgba(0, 0, 0, 0.3),
+    0 0 0 1px oklch(0.55 0.18 180 / 0.1),
+    var(--glow-teal-sm);
+  transform: translateY(-4px);
+}
+
+.stat-card-modern:hover::after {
+  transform: translateX(0);
+}
+
+/* 脉冲动画 - 用于实时数据 */
+@keyframes pulse-modern {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.8;
+    transform: scale(1.02);
+  }
+}
+
+.pulse-live {
+  animation: pulse-modern 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* 渐变文字效果 - Teal */
+.text-gradient-teal {
+  background: linear-gradient(135deg, 
+    oklch(0.55 0.18 180) 0%, 
+    oklch(0.60 0.18 240) 50%, 
+    oklch(0.55 0.18 180) 100%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: gradient-shift 3s ease infinite;
+}
+
+/* 渐变文字效果 - Gold (Legacy) */
+.text-gradient-gold {
+  background: linear-gradient(135deg, 
+    oklch(0.70 0.18 75) 0%, 
+    oklch(0.75 0.15 80) 50%, 
+    oklch(0.70 0.18 75) 100%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: gradient-shift 3s ease infinite;
+}
+
+@keyframes gradient-shift {
+  0%, 100% {
+    background-position: 0% center;
+  }
+  50% {
+    background-position: 100% center;
+  }
+}
+
+/* 改进的标签页切换 - Meridian 风格 */
+.modern-tab {
+  position: relative;
+  padding: 0.75rem 1.5rem;
+  color: var(--text-secondary);
+  font-weight: 600;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  cursor: pointer;
+  border-radius: 8px 8px 0 0;
+}
+
+.modern-tab:hover {
+  color: var(--text-primary);
+  background: oklch(0.55 0.18 180 / 0.05);
+}
+
+.modern-tab.active {
+  color: oklch(0.55 0.18 180);
+  background: oklch(0.55 0.18 180 / 0.1);
+}
+
+.modern-tab.active::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, 
+    transparent 0%, 
+    oklch(0.55 0.18 180) 50%, 
+    transparent 100%);
+}
+
+/* 加载骨架屏 - 更流畅 Meridian 风格 */
+@keyframes shimmer-modern {
+  0% {
+    background-position: -1000px 0;
+  }
+  100% {
+    background-position: 1000px 0;
+  }
+}
+
+.skeleton-modern {
+  background: linear-gradient(
+    90deg,
+    oklch(0.13 0.008 260 / 0.4) 0%,
+    oklch(0.55 0.18 180 / 0.1) 50%,
+    oklch(0.13 0.008 260 / 0.4) 100%
+  );
+  background-size: 1000px 100%;
+  animation: shimmer-modern 2s infinite;
+  border-radius: 8px;
+}
+
+/* 悬浮提示 - 改进样式 Meridian 风格 */
+.modern-tooltip {
+  background: oklch(0.11 0.008 260 / 0.95);
+  backdrop-filter: blur(12px);
+  border: 1px solid oklch(0.55 0.18 180 / 0.3);
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  box-shadow: 
+    0 10px 15px -3px rgba(0, 0, 0, 0.5),
+    0 0 0 1px oklch(0.55 0.18 180 / 0.1);
+  animation: fadeIn 0.2s ease;
+}
+
+/* 徽章 - 现代化 Meridian 风格 */
+.badge-modern {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.75rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.025em;
+  border: 1px solid;
+  transition: all 0.3s ease;
+}
+
+.badge-modern.badge-teal {
+  background: oklch(0.55 0.18 180 / 0.15);
+  border-color: oklch(0.55 0.18 180 / 0.4);
+  color: oklch(0.55 0.18 180);
+  box-shadow: 0 0 10px oklch(0.55 0.18 180 / 0.2);
+}
+
+.badge-modern.badge-teal:hover {
+  background: oklch(0.55 0.18 180 / 0.25);
+  box-shadow: 0 0 15px oklch(0.55 0.18 180 / 0.3);
+  transform: scale(1.05);
+}
+
+.badge-modern.badge-gold {
+  background: oklch(0.70 0.18 75 / 0.15);
+  border-color: oklch(0.70 0.18 75 / 0.4);
+  color: oklch(0.70 0.18 75);
+  box-shadow: 0 0 10px oklch(0.70 0.18 75 / 0.2);
+}
+
+.badge-modern.badge-gold:hover {
+  background: oklch(0.70 0.18 75 / 0.25);
+  box-shadow: 0 0 15px oklch(0.70 0.18 75 / 0.3);
+  transform: scale(1.05);
+}
+
+/* 分隔线 - 渐变效果 */
+.divider-modern {
+  height: 1px;
+  background: linear-gradient(90deg, 
+    transparent 0%, 
+    rgba(255, 255, 255, 0.1) 50%, 
+    transparent 100%);
+  margin: 1.5rem 0;
+}
+
+/* 滚动条 - 现代化 Meridian 风格 */
+.modern-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.modern-scrollbar::-webkit-scrollbar-track {
+  background: oklch(0.13 0.008 260 / 0.3);
+  border-radius: 3px;
+}
+
+.modern-scrollbar::-webkit-scrollbar-thumb {
+  background: oklch(0.55 0.18 180 / 0.3);
+  border-radius: 3px;
+  transition: background 0.3s ease;
+}
+
+.modern-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: oklch(0.55 0.18 180 / 0.5);
+}
+
+/* 响应式间距优化 */
+@media (min-width: 768px) {
+  .modern-card {
+    padding: 1.5rem;
+  }
+  
+  .stat-card-modern {
+    padding: 2rem;
+  }
+}
+
+@media (max-width: 767px) {
+  .modern-card {
+    padding: 1rem;
+    border-radius: 12px;
+  }
+  
+  .stat-card-modern {
+    padding: 1.25rem;
+    border-radius: 12px;
+  }
+}
+
+/* 性能优化 - 使用 will-change */
+.modern-card,
+.modern-btn,
+.stat-card-modern {
+  will-change: transform;
+}
+
+/* 减少动画在低性能设备上的影响 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

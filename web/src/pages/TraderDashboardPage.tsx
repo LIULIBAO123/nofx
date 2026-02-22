@@ -10,6 +10,7 @@ import { formatPrice, formatQuantity } from '../utils/format'
 import { t, type Language } from '../i18n/translations'
 import { LogOut, Loader2, Eye, EyeOff, Copy, Check } from 'lucide-react'
 import { DeepVoidBackground } from '../components/DeepVoidBackground'
+import { GrainOverlay } from '../components/ui/GrainOverlay'
 import { GridRiskPanel } from '../components/strategy/GridRiskPanel'
 import type {
     SystemStatus,
@@ -348,16 +349,17 @@ export function TraderDashboardPage({
 
     return (
         <DeepVoidBackground className="min-h-screen pb-12" disableAnimation>
+            <GrainOverlay />
             <div className="w-full px-4 md:px-8 relative z-10 pt-6">
                 {/* Trader Header */}
                 <div
-                    className="mb-6 rounded-lg p-6 animate-scale-in nofx-glass group"
+                    className="mb-6 rounded-lg p-6 animate-scale-in modern-card group"
                     style={{
                         background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.6) 0%, rgba(15, 23, 42, 0.4) 100%)',
                     }}
                 >
                     <div className="flex items-start justify-between mb-4">
-                        <h2 className="text-2xl font-bold flex items-center gap-4 text-nofx-text-main">
+                        <h2 className="text-2xl font-bold flex items-center gap-4 text-white">
                             <div className="relative">
                                 <PunkAvatar
                                     seed={getTraderAvatar(
@@ -365,16 +367,16 @@ export function TraderDashboardPage({
                                         selectedTrader.trader_name
                                     )}
                                     size={56}
-                                    className="rounded-xl border-2 border-nofx-gold/30 shadow-[0_0_15px_rgba(240,185,11,0.2)]"
+                                    className="rounded-xl border-2 border-teal-500/30 shadow-glow-teal"
                                 />
-                                <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-nofx-green rounded-full border-2 border-[#0B0E11] shadow-[0_0_8px_rgba(14,203,129,0.8)] animate-pulse" />
+                                <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-teal-500 rounded-full border-2 border-zinc-950 shadow-glow-teal animate-pulse" />
                             </div>
                             <div className="flex flex-col">
-                                <span className="text-3xl tracking-tight text-nofx-text font-semibold">
+                                <span className="text-3xl tracking-tight text-white font-semibold">
                                     {selectedTrader.trader_name}
                                 </span>
-                                <span className="text-xs font-mono text-nofx-text-muted opacity-60 flex items-center gap-2">
-                                    <div className="w-1.5 h-1.5 bg-nofx-gold rounded-full" />
+                                <span className="text-xs font-mono text-zinc-400 opacity-60 flex items-center gap-2">
+                                    <div className="w-1.5 h-1.5 bg-teal-400 rounded-full" />
                                     ID: {selectedTrader.trader_id.slice(0, 8)}...
                                 </span>
                             </div>
@@ -383,14 +385,14 @@ export function TraderDashboardPage({
                         <div className="flex items-center gap-4">
                             {/* Trader Selector */}
                             {traders && traders.length > 0 && (
-                                <div className="flex items-center gap-2 nofx-glass px-1 py-1 rounded-lg border border-white/5">
+                                <div className="flex items-center gap-2 modern-card px-1 py-1 rounded-lg border border-white/5">
                                     <select
                                         value={selectedTraderId}
                                         onChange={(e) => onTraderSelect(e.target.value)}
-                                        className="bg-transparent text-sm font-medium cursor-pointer transition-colors text-nofx-text-main focus:outline-none px-2 py-1"
+                                        className="bg-transparent text-sm font-medium cursor-pointer transition-colors text-white focus:outline-none px-2 py-1"
                                     >
                                         {traders.map((trader) => (
-                                            <option key={trader.trader_id} value={trader.trader_id} className="bg-[#0B0E11]">
+                                            <option key={trader.trader_id} value={trader.trader_id} className="bg-zinc-950">
                                                 {trader.trader_name}
                                             </option>
                                         ))}
@@ -400,10 +402,10 @@ export function TraderDashboardPage({
 
                             {/* Wallet Address Display for Perp-DEX */}
                             {exchanges && isPerpDex && (
-                                <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg nofx-glass border border-nofx-gold/20">
+                                <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg modern-card border border-teal-500/20">
                                     {walletAddress ? (
                                         <>
-                                            <span className="text-xs font-mono text-nofx-gold">
+                                            <span className="text-xs font-mono text-teal-400">
                                                 {showWalletAddress
                                                     ? walletAddress
                                                     : truncateAddress(walletAddress)}
@@ -423,9 +425,9 @@ export function TraderDashboardPage({
                                                 }
                                             >
                                                 {showWalletAddress ? (
-                                                    <EyeOff className="w-3.5 h-3.5 text-nofx-text-muted" />
+                                                    <EyeOff className="w-3.5 h-3.5 text-zinc-400" />
                                                 ) : (
-                                                    <Eye className="w-3.5 h-3.5 text-nofx-text-muted" />
+                                                    <Eye className="w-3.5 h-3.5 text-zinc-400" />
                                                 )}
                                             </button>
                                             <button
@@ -435,14 +437,14 @@ export function TraderDashboardPage({
                                                 title={language === 'zh' ? '复制地址' : 'Copy address'}
                                             >
                                                 {copiedAddress ? (
-                                                    <Check className="w-3.5 h-3.5 text-nofx-green" />
+                                                    <Check className="w-3.5 h-3.5 text-teal-500" />
                                                 ) : (
-                                                    <Copy className="w-3.5 h-3.5 text-nofx-text-muted" />
+                                                    <Copy className="w-3.5 h-3.5 text-zinc-400" />
                                                 )}
                                             </button>
                                         </>
                                     ) : (
-                                        <span className="text-xs text-nofx-text-muted">
+                                        <span className="text-xs text-zinc-400">
                                             {language === 'zh' ? '未配置地址' : 'No address configured'}
                                         </span>
                                     )}
@@ -450,7 +452,7 @@ export function TraderDashboardPage({
                             )}
                         </div>
                     </div>
-                    <div className="flex items-center gap-6 text-sm flex-wrap text-nofx-text-muted font-mono pl-2">
+                    <div className="flex items-center gap-6 text-sm flex-wrap text-zinc-400 font-mono pl-2">
                         <span className="flex items-center gap-2">
                             <span className="opacity-60">AI Model:</span>
                             <span
@@ -470,7 +472,7 @@ export function TraderDashboardPage({
                         <span className="w-px h-3 bg-white/10 hidden md:block" />
                         <span className="flex items-center gap-2">
                             <span className="opacity-60">Exchange:</span>
-                            <span className="text-nofx-text-main font-semibold">
+                            <span className="text-white font-semibold">
                                 {getExchangeDisplayNameFromList(
                                     selectedTrader.exchange_id,
                                     exchanges
@@ -480,16 +482,16 @@ export function TraderDashboardPage({
                         <span className="w-px h-3 bg-white/10 hidden md:block" />
                         <span className="flex items-center gap-2">
                             <span className="opacity-60">Strategy:</span>
-                            <span className="text-nofx-gold font-semibold tracking-wide">
+                            <span className="text-teal-400 font-semibold tracking-wide">
                                 {selectedTrader.strategy_name || 'No Strategy'}
                             </span>
                         </span>
                         {status && (
                             <div className="hidden md:contents">
                                 <span className="w-px h-3 bg-white/10" />
-                                <span>Cycles: <span className="text-nofx-text-main">{status.call_count}</span></span>
+                                <span>Cycles: <span className="text-white">{status.call_count}</span></span>
                                 <span className="w-px h-3 bg-white/10" />
-                                <span>Runtime: <span className="text-nofx-text-main">{status.runtime_minutes} min</span></span>
+                                <span>Runtime: <span className="text-white">{status.runtime_minutes} min</span></span>
                             </div>
                         )}
                     </div>

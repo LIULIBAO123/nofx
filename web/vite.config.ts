@@ -13,4 +13,14 @@ export default defineConfig({
       },
     },
   },
+  build: {
+    rollupOptions: {
+      onwarn(warning, warn) {
+        // Suppress certain warnings
+        if (warning.code === 'MODULE_LEVEL_DIRECTIVE') return
+        warn(warning)
+      },
+    },
+    chunkSizeWarningLimit: 1000,
+  },
 })

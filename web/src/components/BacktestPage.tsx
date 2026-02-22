@@ -28,7 +28,7 @@ import {
   ArrowDownRight,
   CandlestickChart as CandlestickIcon,
 } from 'lucide-react'
-import { DeepVoidBackground } from './DeepVoidBackground'
+import { ModernBackground } from './ModernBackground'
 import {
   ResponsiveContainer,
   AreaChart,
@@ -59,7 +59,7 @@ import type {
 
 // ============ Types ============
 type WizardStep = 1 | 2 | 3
-type ViewTab = 'overview' | 'chart' | 'trades' | 'decisions' | 'compare'
+type ViewTab = 'overview' | 'chart' | 'trades' | 'decisions' | 'analysis'
 
 const TIMEFRAME_OPTIONS = ['1m', '3m', '5m', '15m', '30m', '1h', '4h', '1d']
 const POPULAR_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'DOGEUSDT']
@@ -100,13 +100,10 @@ function StatCard({
   }
 
   return (
-    <div
-      className="p-4 rounded-xl"
-      style={{ background: 'rgba(30, 35, 41, 0.6)', border: '1px solid #2B3139' }}
-    >
+    <div className="stat-card-modern">
       <div className="flex items-center gap-2 mb-2">
         <Icon className="w-4 h-4" style={{ color: '#F0B90B' }} />
-        <span className="text-xs" style={{ color: '#848E9C' }}>
+        <span className="text-xs font-medium" style={{ color: '#848E9C' }}>
           {label}
         </span>
         {metricKey && (
@@ -114,11 +111,11 @@ function StatCard({
         )}
       </div>
       <div className="flex items-baseline gap-1">
-        <span className="text-xl font-bold" style={{ color }}>
+        <span className="text-2xl font-bold font-display" style={{ color }}>
           {value}
         </span>
         {suffix && (
-          <span className="text-xs" style={{ color: '#848E9C' }}>
+          <span className="text-xs font-medium" style={{ color: '#848E9C' }}>
             {suffix}
           </span>
         )}
@@ -540,7 +537,7 @@ function CandlestickChartComponent({
 }
 
 // Trade Timeline Component
-function TradeTimeline({ trades }: { trades: BacktestTradeEvent[] }) {
+function TradeTimeline({ trades, language }: { trades: BacktestTradeEvent[]; language: string }) {
   const recentTrades = useMemo(() => [...trades].slice(-20).reverse(), [trades])
 
   if (recentTrades.length === 0) {
@@ -559,6 +556,7 @@ function TradeTimeline({ trades }: { trades: BacktestTradeEvent[] }) {
         const bgColor = isOpen ? 'rgba(14, 203, 129, 0.1)' : 'rgba(246, 70, 93, 0.1)'
         const borderColor = isOpen ? 'rgba(14, 203, 129, 0.3)' : 'rgba(246, 70, 93, 0.3)'
         const iconColor = isOpen ? '#0ECB81' : '#F6465D'
+        const hasAnalysis = trade.ai_analysis && !trade.ai_analysis.analysis_error
 
         return (
           <motion.div
@@ -566,55 +564,463 @@ function TradeTimeline({ trades }: { trades: BacktestTradeEvent[] }) {
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: idx * 0.05 }}
-            className="p-3 rounded-lg flex items-center gap-3"
+            className="p-3 rounded-lg"
             style={{ background: bgColor, border: `1px solid ${borderColor}` }}
           >
-            <div
-              className="w-8 h-8 rounded-full flex items-center justify-center"
-              style={{ background: `${iconColor}20` }}
-            >
-              {isLong ? (
-                <TrendingUp className="w-4 h-4" style={{ color: iconColor }} />
-              ) : (
-                <TrendingDown className="w-4 h-4" style={{ color: iconColor }} />
-              )}
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="font-mono font-bold text-sm" style={{ color: '#EAECEF' }}>
-                  {trade.symbol.replace('USDT', '')}
-                </span>
-                <span
-                  className="px-2 py-0.5 rounded text-xs font-medium"
-                  style={{ background: `${iconColor}20`, color: iconColor }}
-                >
-                  {trade.action.replace('_', ' ').toUpperCase()}
-                </span>
-                {trade.leverage && (
-                  <span className="text-xs" style={{ color: '#848E9C' }}>
-                    {trade.leverage}x
-                  </span>
+            <div className="flex items-center gap-3">
+              <div
+                className="w-8 h-8 rounded-full flex items-center justify-center"
+                style={{ background: `${iconColor}20` }}
+              >
+                {isLong ? (
+                  <TrendingUp className="w-4 h-4" style={{ color: iconColor }} />
+                ) : (
+                  <TrendingDown className="w-4 h-4" style={{ color: iconColor }} />
                 )}
               </div>
-              <div className="text-xs mt-1" style={{ color: '#848E9C' }}>
-                {new Date(trade.ts).toLocaleString()} · Qty: {trade.qty.toFixed(4)} · ${trade.price.toFixed(2)}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="font-mono font-bold text-sm" style={{ color: '#EAECEF' }}>
+                    {trade.symbol.replace('USDT', '')}
+                  </span>
+                  <span
+                    className="px-2 py-0.5 rounded text-xs font-medium"
+                    style={{ background: `${iconColor}20`, color: iconColor }}
+                  >
+                    {trade.action.replace('_', ' ').toUpperCase()}
+                  </span>
+                  {trade.leverage && (
+                    <span className="text-xs" style={{ color: '#848E9C' }}>
+                      {trade.leverage}x
+                    </span>
+                  )}
+                  {hasAnalysis && trade.ai_analysis && (
+                    <span
+                      className="px-1.5 py-0.5 rounded text-xs font-medium flex items-center gap-1"
+                      style={{ background: '#F0B90B20', color: '#F0B90B' }}
+                    >
+                      <Brain className="w-3 h-3" />
+                      {trade.ai_analysis.overall_score?.toFixed(1)}/10
+                    </span>
+                  )}
+                </div>
+                <div className="text-xs mt-1" style={{ color: '#848E9C' }}>
+                  {new Date(trade.ts).toLocaleString()} · Qty: {trade.qty.toFixed(4)} · ${trade.price.toFixed(2)}
+                </div>
+              </div>
+              <div className="text-right">
+                <div
+                  className="font-mono font-bold"
+                  style={{ color: trade.realized_pnl >= 0 ? '#0ECB81' : '#F6465D' }}
+                >
+                  {trade.realized_pnl >= 0 ? '+' : ''}
+                  {trade.realized_pnl.toFixed(2)}
+                </div>
+                <div className="text-xs" style={{ color: '#848E9C' }}>
+                  USDT
+                </div>
               </div>
             </div>
-            <div className="text-right">
-              <div
-                className="font-mono font-bold"
-                style={{ color: trade.realized_pnl >= 0 ? '#0ECB81' : '#F6465D' }}
-              >
-                {trade.realized_pnl >= 0 ? '+' : ''}
-                {trade.realized_pnl.toFixed(2)}
+            
+            {/* AI Analysis Section */}
+            {hasAnalysis && trade.ai_analysis && (
+              <div className="mt-2 pt-2 border-t" style={{ borderColor: 'rgba(43, 49, 57, 0.5)' }}>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  {trade.ai_analysis.entry_quality && (
+                    <div>
+                      <span style={{ color: '#848E9C' }}>{language === 'zh' ? '入场质量: ' : 'Entry: '}</span>
+                      <span style={{ color: '#EAECEF' }}>{trade.ai_analysis.entry_quality}</span>
+                    </div>
+                  )}
+                  {trade.ai_analysis.exit_quality && (
+                    <div>
+                      <span style={{ color: '#848E9C' }}>{language === 'zh' ? '出场质量: ' : 'Exit: '}</span>
+                      <span style={{ color: '#EAECEF' }}>{trade.ai_analysis.exit_quality}</span>
+                    </div>
+                  )}
+                  {trade.ai_analysis.risk_management && (
+                    <div className="col-span-2">
+                      <span style={{ color: '#848E9C' }}>{language === 'zh' ? '风险管理: ' : 'Risk: '}</span>
+                      <span style={{ color: '#EAECEF' }}>{trade.ai_analysis.risk_management}</span>
+                    </div>
+                  )}
+                  {trade.ai_analysis.improvement && (
+                    <div className="col-span-2">
+                      <span style={{ color: '#F0B90B' }}>{language === 'zh' ? '💡 建议: ' : '💡 Tip: '}</span>
+                      <span style={{ color: '#EAECEF' }}>{trade.ai_analysis.improvement}</span>
+                    </div>
+                  )}
+                </div>
               </div>
-              <div className="text-xs" style={{ color: '#848E9C' }}>
-                USDT
-              </div>
-            </div>
+            )}
           </motion.div>
         )
       })}
+    </div>
+  )
+}
+
+// AI Analysis Display Component
+function AIAnalysisDisplay({ trades, language }: { trades: BacktestTradeEvent[]; language: string }) {
+  // Filter trades with AI analysis
+  const analyzedTrades = useMemo(() => {
+    return trades.filter((t) => t.ai_analysis && !t.ai_analysis.analysis_error)
+  }, [trades])
+
+  // Calculate statistics
+  const stats = useMemo(() => {
+    if (analyzedTrades.length === 0) return null
+
+    const scores = analyzedTrades
+      .map((t) => t.ai_analysis?.overall_score)
+      .filter((s): s is number => s !== undefined)
+
+    const avgScore = scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : 0
+    const maxScore = scores.length > 0 ? Math.max(...scores) : 0
+    const minScore = scores.length > 0 ? Math.min(...scores) : 0
+
+    // Count quality ratings
+    const entryQuality = { excellent: 0, good: 0, fair: 0, poor: 0 }
+    const exitQuality = { excellent: 0, good: 0, fair: 0, poor: 0 }
+
+    analyzedTrades.forEach((t) => {
+      const entry = t.ai_analysis?.entry_quality?.toLowerCase() || ''
+      const exit = t.ai_analysis?.exit_quality?.toLowerCase() || ''
+
+      if (entry.includes('excellent') || entry.includes('优秀')) entryQuality.excellent++
+      else if (entry.includes('good') || entry.includes('良好')) entryQuality.good++
+      else if (entry.includes('fair') || entry.includes('一般')) entryQuality.fair++
+      else if (entry.includes('poor') || entry.includes('较差')) entryQuality.poor++
+
+      if (exit.includes('excellent') || exit.includes('优秀')) exitQuality.excellent++
+      else if (exit.includes('good') || exit.includes('良好')) exitQuality.good++
+      else if (exit.includes('fair') || exit.includes('一般')) exitQuality.fair++
+      else if (exit.includes('poor') || exit.includes('较差')) exitQuality.poor++
+    })
+
+    return { avgScore, maxScore, minScore, entryQuality, exitQuality }
+  }, [analyzedTrades])
+
+  if (analyzedTrades.length === 0) {
+    return (
+      <div className="py-12 text-center" style={{ color: '#5E6673' }}>
+        <Brain className="w-12 h-12 mx-auto mb-4 opacity-30" />
+        <p>{language === 'zh' ? '暂无AI分析数据' : 'No AI analysis data available'}</p>
+        <p className="text-xs mt-2">
+          {language === 'zh' ? '请在回测配置中启用"交易AI分析"功能' : 'Enable "Trade AI Analysis" in backtest config'}
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Statistics Overview */}
+      {stats && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="p-3 rounded-lg" style={{ background: 'rgba(30, 35, 41, 0.6)', border: '1px solid #2B3139' }}>
+            <div className="flex items-center gap-2 mb-1">
+              <Brain className="w-4 h-4" style={{ color: '#F0B90B' }} />
+              <span className="text-xs" style={{ color: '#848E9C' }}>
+                {language === 'zh' ? '分析交易数' : 'Analyzed Trades'}
+              </span>
+            </div>
+            <div className="text-xl font-bold" style={{ color: '#EAECEF' }}>
+              {analyzedTrades.length}
+            </div>
+          </div>
+
+          <div className="p-3 rounded-lg" style={{ background: 'rgba(30, 35, 41, 0.6)', border: '1px solid #2B3139' }}>
+            <div className="flex items-center gap-2 mb-1">
+              <Target className="w-4 h-4" style={{ color: '#F0B90B' }} />
+              <span className="text-xs" style={{ color: '#848E9C' }}>
+                {language === 'zh' ? '平均评分' : 'Avg Score'}
+              </span>
+            </div>
+            <div className="text-xl font-bold" style={{ color: '#EAECEF' }}>
+              {stats.avgScore.toFixed(1)}/10
+            </div>
+          </div>
+
+          <div className="p-3 rounded-lg" style={{ background: 'rgba(30, 35, 41, 0.6)', border: '1px solid #2B3139' }}>
+            <div className="flex items-center gap-2 mb-1">
+              <TrendingUp className="w-4 h-4" style={{ color: '#0ECB81' }} />
+              <span className="text-xs" style={{ color: '#848E9C' }}>
+                {language === 'zh' ? '最高评分' : 'Max Score'}
+              </span>
+            </div>
+            <div className="text-xl font-bold" style={{ color: '#0ECB81' }}>
+              {stats.maxScore.toFixed(1)}/10
+            </div>
+          </div>
+
+          <div className="p-3 rounded-lg" style={{ background: 'rgba(30, 35, 41, 0.6)', border: '1px solid #2B3139' }}>
+            <div className="flex items-center gap-2 mb-1">
+              <TrendingDown className="w-4 h-4" style={{ color: '#F6465D' }} />
+              <span className="text-xs" style={{ color: '#848E9C' }}>
+                {language === 'zh' ? '最低评分' : 'Min Score'}
+              </span>
+            </div>
+            <div className="text-xl font-bold" style={{ color: '#F6465D' }}>
+              {stats.minScore.toFixed(1)}/10
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Quality Distribution */}
+      {stats && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="p-4 rounded-lg" style={{ background: 'rgba(30, 35, 41, 0.6)', border: '1px solid #2B3139' }}>
+            <h4 className="text-sm font-medium mb-3 flex items-center gap-2" style={{ color: '#EAECEF' }}>
+              <ArrowDownRight className="w-4 h-4" style={{ color: '#0ECB81' }} />
+              {language === 'zh' ? '入场质量分布' : 'Entry Quality Distribution'}
+            </h4>
+            <div className="space-y-2">
+              {Object.entries(stats.entryQuality).map(([key, count]) => (
+                <div key={key} className="flex items-center justify-between">
+                  <span className="text-xs" style={{ color: '#848E9C' }}>
+                    {language === 'zh'
+                      ? { excellent: '优秀', good: '良好', fair: '一般', poor: '较差' }[key]
+                      : key.charAt(0).toUpperCase() + key.slice(1)}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <div
+                      className="h-2 rounded-full"
+                      style={{
+                        width: `${Math.max((count / analyzedTrades.length) * 100, 5)}px`,
+                        background:
+                          key === 'excellent'
+                            ? '#0ECB81'
+                            : key === 'good'
+                              ? '#F0B90B'
+                              : key === 'fair'
+                                ? '#848E9C'
+                                : '#F6465D',
+                      }}
+                    />
+                    <span className="text-xs font-mono" style={{ color: '#EAECEF', minWidth: '30px' }}>
+                      {count}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="p-4 rounded-lg" style={{ background: 'rgba(30, 35, 41, 0.6)', border: '1px solid #2B3139' }}>
+            <h4 className="text-sm font-medium mb-3 flex items-center gap-2" style={{ color: '#EAECEF' }}>
+              <ArrowUpRight className="w-4 h-4" style={{ color: '#F6465D' }} />
+              {language === 'zh' ? '出场质量分布' : 'Exit Quality Distribution'}
+            </h4>
+            <div className="space-y-2">
+              {Object.entries(stats.exitQuality).map(([key, count]) => (
+                <div key={key} className="flex items-center justify-between">
+                  <span className="text-xs" style={{ color: '#848E9C' }}>
+                    {language === 'zh'
+                      ? { excellent: '优秀', good: '良好', fair: '一般', poor: '较差' }[key]
+                      : key.charAt(0).toUpperCase() + key.slice(1)}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <div
+                      className="h-2 rounded-full"
+                      style={{
+                        width: `${Math.max((count / analyzedTrades.length) * 100, 5)}px`,
+                        background:
+                          key === 'excellent'
+                            ? '#0ECB81'
+                            : key === 'good'
+                              ? '#F0B90B'
+                              : key === 'fair'
+                                ? '#848E9C'
+                                : '#F6465D',
+                      }}
+                    />
+                    <span className="text-xs font-mono" style={{ color: '#EAECEF', minWidth: '30px' }}>
+                      {count}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Detailed Analysis List */}
+      <div>
+        <h4 className="text-sm font-medium mb-3 flex items-center gap-2" style={{ color: '#EAECEF' }}>
+          <Activity className="w-4 h-4" style={{ color: '#F0B90B' }} />
+          {language === 'zh' ? '详细分析列表' : 'Detailed Analysis'}
+        </h4>
+        <div className="space-y-3 max-h-[500px] overflow-y-auto pr-2">
+          {analyzedTrades.slice().reverse().map((trade, idx) => {
+            const isLong = trade.action.includes('long')
+            const analysis = trade.ai_analysis!
+
+            return (
+              <motion.div
+                key={`${trade.ts}-${trade.symbol}-${idx}`}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: idx * 0.03 }}
+                className="p-4 rounded-lg"
+                style={{ background: 'rgba(30, 35, 41, 0.8)', border: '1px solid #2B3139' }}
+              >
+                {/* Trade Header */}
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-3">
+                    <div
+                      className="w-10 h-10 rounded-lg flex items-center justify-center"
+                      style={{
+                        background: isLong ? 'rgba(14, 203, 129, 0.1)' : 'rgba(246, 70, 93, 0.1)',
+                        border: `1px solid ${isLong ? 'rgba(14, 203, 129, 0.3)' : 'rgba(246, 70, 93, 0.3)'}`,
+                      }}
+                    >
+                      {isLong ? (
+                        <TrendingUp className="w-5 h-5" style={{ color: '#0ECB81' }} />
+                      ) : (
+                        <TrendingDown className="w-5 h-5" style={{ color: '#F6465D' }} />
+                      )}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono font-bold" style={{ color: '#EAECEF' }}>
+                          {trade.symbol.replace('USDT', '')}
+                        </span>
+                        <span
+                          className="px-2 py-0.5 rounded text-xs font-medium"
+                          style={{
+                            background: isLong ? 'rgba(14, 203, 129, 0.15)' : 'rgba(246, 70, 93, 0.15)',
+                            color: isLong ? '#0ECB81' : '#F6465D',
+                          }}
+                        >
+                          {trade.action.replace('_', ' ').toUpperCase()}
+                        </span>
+                      </div>
+                      <div className="text-xs mt-1" style={{ color: '#848E9C' }}>
+                        {new Date(trade.ts).toLocaleString()} · ${trade.price.toFixed(2)}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    {analysis.overall_score !== undefined && (
+                      <div
+                        className="px-3 py-1.5 rounded-lg flex items-center gap-2"
+                        style={{ background: '#F0B90B20', border: '1px solid #F0B90B40' }}
+                      >
+                        <Brain className="w-4 h-4" style={{ color: '#F0B90B' }} />
+                        <span className="text-lg font-bold" style={{ color: '#F0B90B' }}>
+                          {analysis.overall_score.toFixed(1)}
+                        </span>
+                        <span className="text-xs" style={{ color: '#848E9C' }}>
+                          /10
+                        </span>
+                      </div>
+                    )}
+                    <div
+                      className="text-sm font-mono font-bold mt-1"
+                      style={{ color: trade.realized_pnl >= 0 ? '#0ECB81' : '#F6465D' }}
+                    >
+                      {trade.realized_pnl >= 0 ? '+' : ''}${trade.realized_pnl.toFixed(2)}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Analysis Details */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {analysis.entry_quality && (
+                    <div className="p-3 rounded" style={{ background: 'rgba(14, 203, 129, 0.05)' }}>
+                      <div className="flex items-center gap-2 mb-1">
+                        <ArrowDownRight className="w-3.5 h-3.5" style={{ color: '#0ECB81' }} />
+                        <span className="text-xs font-medium" style={{ color: '#848E9C' }}>
+                          {language === 'zh' ? '入场质量' : 'Entry Quality'}
+                        </span>
+                      </div>
+                      <p className="text-sm" style={{ color: '#EAECEF' }}>
+                        {analysis.entry_quality}
+                      </p>
+                    </div>
+                  )}
+
+                  {analysis.exit_quality && (
+                    <div className="p-3 rounded" style={{ background: 'rgba(246, 70, 93, 0.05)' }}>
+                      <div className="flex items-center gap-2 mb-1">
+                        <ArrowUpRight className="w-3.5 h-3.5" style={{ color: '#F6465D' }} />
+                        <span className="text-xs font-medium" style={{ color: '#848E9C' }}>
+                          {language === 'zh' ? '出场质量' : 'Exit Quality'}
+                        </span>
+                      </div>
+                      <p className="text-sm" style={{ color: '#EAECEF' }}>
+                        {analysis.exit_quality}
+                      </p>
+                    </div>
+                  )}
+
+                  {analysis.risk_management && (
+                    <div className="p-3 rounded" style={{ background: 'rgba(240, 185, 11, 0.05)' }}>
+                      <div className="flex items-center gap-2 mb-1">
+                        <AlertTriangle className="w-3.5 h-3.5" style={{ color: '#F0B90B' }} />
+                        <span className="text-xs font-medium" style={{ color: '#848E9C' }}>
+                          {language === 'zh' ? '风险管理' : 'Risk Management'}
+                        </span>
+                      </div>
+                      <p className="text-sm" style={{ color: '#EAECEF' }}>
+                        {analysis.risk_management}
+                      </p>
+                    </div>
+                  )}
+
+                  {analysis.market_condition && (
+                    <div className="p-3 rounded" style={{ background: 'rgba(132, 142, 156, 0.05)' }}>
+                      <div className="flex items-center gap-2 mb-1">
+                        <Activity className="w-3.5 h-3.5" style={{ color: '#848E9C' }} />
+                        <span className="text-xs font-medium" style={{ color: '#848E9C' }}>
+                          {language === 'zh' ? '市场环境' : 'Market Condition'}
+                        </span>
+                      </div>
+                      <p className="text-sm" style={{ color: '#EAECEF' }}>
+                        {analysis.market_condition}
+                      </p>
+                    </div>
+                  )}
+
+                  {analysis.profit_loss_reason && (
+                    <div className="col-span-full p-3 rounded" style={{ background: 'rgba(132, 142, 156, 0.05)' }}>
+                      <div className="flex items-center gap-2 mb-1">
+                        <BarChart3 className="w-3.5 h-3.5" style={{ color: '#848E9C' }} />
+                        <span className="text-xs font-medium" style={{ color: '#848E9C' }}>
+                          {language === 'zh' ? '盈亏原因' : 'P&L Reason'}
+                        </span>
+                      </div>
+                      <p className="text-sm" style={{ color: '#EAECEF' }}>
+                        {analysis.profit_loss_reason}
+                      </p>
+                    </div>
+                  )}
+
+                  {analysis.improvement && (
+                    <div
+                      className="col-span-full p-3 rounded"
+                      style={{ background: 'rgba(240, 185, 11, 0.1)', border: '1px solid rgba(240, 185, 11, 0.2)' }}
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <Zap className="w-3.5 h-3.5" style={{ color: '#F0B90B' }} />
+                        <span className="text-xs font-medium" style={{ color: '#F0B90B' }}>
+                          {language === 'zh' ? '💡 改进建议' : '💡 Improvement Suggestions'}
+                        </span>
+                      </div>
+                      <p className="text-sm" style={{ color: '#EAECEF' }}>
+                        {analysis.improvement}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            )
+          })}
+        </div>
+      </div>
     </div>
   )
 }
@@ -779,6 +1185,7 @@ export function BacktestPage() {
     overridePrompt: false,
     cacheAI: true,
     replayOnly: false,
+    enableTradeAnalysis: true, // Enable AI analysis after each trade
     aiModelId: '',
     strategyId: '', // Optional: use saved strategy from Strategy Studio
   })
@@ -946,6 +1353,7 @@ export function BacktestPage() {
         override_prompt: formState.overridePrompt,
         cache_ai: formState.cacheAI,
         replay_only: formState.replayOnly,
+        enable_trade_analysis: formState.enableTradeAnalysis,
         ai_model_id: formState.aiModelId,
         leverage: {
           btc_eth_leverage: formState.btcEthLeverage,
@@ -1069,7 +1477,7 @@ export function BacktestPage() {
 
   // Render
   return (
-    <DeepVoidBackground className="py-8" disableAnimation>
+    <ModernBackground className="py-8" variant="trading">
       <div className="w-full px-4 md:px-8 space-y-6">
         {/* Toast */}
         <AnimatePresence>
@@ -1108,8 +1516,7 @@ export function BacktestPage() {
           </div>
           <button
             onClick={() => setWizardStep(1)}
-            className="px-4 py-2 rounded-lg font-medium flex items-center gap-2 transition-all hover:opacity-90"
-            style={{ background: '#F0B90B', color: '#0B0E11' }}
+            className="modern-btn btn-gold-gradient px-6 py-2.5 rounded-xl font-semibold flex items-center gap-2 shadow-lg"
           >
             <Play className="w-4 h-4" />
             {language === 'zh' ? '新建回测' : 'New Backtest'}
@@ -1120,7 +1527,7 @@ export function BacktestPage() {
           {/* Left Panel - Config / History */}
           <div className="space-y-4">
             {/* Wizard */}
-            <div className="binance-card p-5">
+            <div className="modern-card p-5">
               <div className="flex items-center gap-2 mb-4">
                 {[1, 2, 3].map((step) => (
                   <div key={step} className="flex items-center">
@@ -1567,6 +1974,15 @@ export function BacktestPage() {
                           />
                           {tr('form.replayOnlyLabel')}
                         </label>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={formState.enableTradeAnalysis}
+                            onChange={(e) => handleFormChange('enableTradeAnalysis', e.target.checked)}
+                            className="accent-[#F0B90B]"
+                          />
+                          {language === 'zh' ? '启用交易AI分析' : 'Enable Trade AI Analysis'}
+                        </label>
                       </div>
 
                       <div className="flex gap-2">
@@ -1600,7 +2016,7 @@ export function BacktestPage() {
             </div>
 
             {/* Run History */}
-            <div className="binance-card p-4">
+            <div className="modern-card p-4">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-sm font-bold flex items-center gap-2" style={{ color: '#EAECEF' }}>
                   <Layers className="w-4 h-4" style={{ color: '#F0B90B' }} />
@@ -1684,7 +2100,7 @@ export function BacktestPage() {
             ) : (
               <>
                 {/* Status Bar */}
-                <div className="binance-card p-4">
+                <div className="modern-card p-4">
                   <div className="flex flex-wrap items-center justify-between gap-4">
                     <div className="flex items-center gap-4">
                       <ProgressRing progress={status?.progress_pct ?? selectedRun?.summary.progress_pct ?? 0} size={80} />
@@ -1818,14 +2234,13 @@ export function BacktestPage() {
                 </div>
 
                 {/* Tabs */}
-                <div className="binance-card">
-                  <div className="flex border-b" style={{ borderColor: '#2B3139' }}>
-                    {(['overview', 'chart', 'trades', 'decisions'] as ViewTab[]).map((tab) => (
+                <div className="modern-card">
+                  <div className="flex border-b overflow-x-auto" style={{ borderColor: '#2B3139' }}>
+                    {(['overview', 'chart', 'trades', 'decisions', 'analysis'] as ViewTab[]).map((tab) => (
                       <button
                         key={tab}
                         onClick={() => setViewTab(tab)}
-                        className="px-4 py-3 text-sm font-medium transition-all relative"
-                        style={{ color: viewTab === tab ? '#F0B90B' : '#848E9C' }}
+                        className={`modern-tab ${viewTab === tab ? 'active' : ''}`}
                       >
                         {tab === 'overview'
                           ? language === 'zh'
@@ -1839,9 +2254,13 @@ export function BacktestPage() {
                               ? language === 'zh'
                                 ? '交易'
                                 : 'Trades'
-                              : language === 'zh'
-                                ? 'AI决策'
-                                : 'Decisions'}
+                              : tab === 'decisions'
+                                ? language === 'zh'
+                                  ? 'AI决策'
+                                  : 'Decisions'
+                                : language === 'zh'
+                                  ? 'AI分析'
+                                  : 'AI Analysis'}
                         {viewTab === tab && (
                           <motion.div
                             layoutId="tab-indicator"
@@ -1956,7 +2375,7 @@ export function BacktestPage() {
                           animate={{ opacity: 1 }}
                           exit={{ opacity: 0 }}
                         >
-                          <TradeTimeline trades={trades ?? []} />
+                          <TradeTimeline trades={trades ?? []} language={language} />
                         </motion.div>
                       )}
 
@@ -1983,6 +2402,17 @@ export function BacktestPage() {
                           )}
                         </motion.div>
                       )}
+
+                      {viewTab === 'analysis' && (
+                        <motion.div
+                          key="analysis"
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          exit={{ opacity: 0 }}
+                        >
+                          <AIAnalysisDisplay trades={trades ?? []} language={language} />
+                        </motion.div>
+                      )}
                     </AnimatePresence>
                   </div>
                 </div>
@@ -1991,6 +2421,6 @@ export function BacktestPage() {
           </div>
         </div>
       </div>
-    </DeepVoidBackground>
+    </ModernBackground>
   )
 }

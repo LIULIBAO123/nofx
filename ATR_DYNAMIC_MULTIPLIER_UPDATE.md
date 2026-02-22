@@ -301,4 +301,3 @@ DynamicTakeProfit: &DynamicTakeProfitConfig{
 **更新时间**: 2026-02-22  
 **更新人员**: AI Assistant  
 **影响范围**: AI 提示词系统、策略配置
-

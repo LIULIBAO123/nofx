@@ -60,21 +60,35 @@ type EquityPoint struct {
 
 // TradeEvent records a trade execution result or special event (such as liquidation).
 type TradeEvent struct {
-	Timestamp       int64   `json:"ts"`
-	Symbol          string  `json:"symbol"`
-	Action          string  `json:"action"`
-	Side            string  `json:"side,omitempty"`
-	Quantity        float64 `json:"qty"`
-	Price           float64 `json:"price"`
-	Fee             float64 `json:"fee"`
-	Slippage        float64 `json:"slippage"`
-	OrderValue      float64 `json:"order_value"`
-	RealizedPnL     float64 `json:"realized_pnl"`
-	Leverage        int     `json:"leverage,omitempty"`
-	Cycle           int     `json:"cycle"`
-	PositionAfter   float64 `json:"position_after"`
-	LiquidationFlag bool    `json:"liquidation"`
-	Note            string  `json:"note,omitempty"`
+	Timestamp       int64          `json:"ts"`
+	Symbol          string         `json:"symbol"`
+	Action          string         `json:"action"`
+	Side            string         `json:"side,omitempty"`
+	Quantity        float64        `json:"qty"`
+	Price           float64        `json:"price"`
+	Fee             float64        `json:"fee"`
+	Slippage        float64        `json:"slippage"`
+	OrderValue      float64        `json:"order_value"`
+	RealizedPnL     float64        `json:"realized_pnl"`
+	Leverage        int            `json:"leverage,omitempty"`
+	Cycle           int            `json:"cycle"`
+	PositionAfter   float64        `json:"position_after"`
+	LiquidationFlag bool           `json:"liquidation"`
+	Note            string         `json:"note,omitempty"`
+	AIAnalysis      *TradeAnalysis `json:"ai_analysis,omitempty"` // AI analysis of this trade
+}
+
+// TradeAnalysis contains AI-generated analysis of a trade
+type TradeAnalysis struct {
+	EntryQuality      string  `json:"entry_quality,omitempty"`       // Quality assessment of entry timing
+	ExitQuality       string  `json:"exit_quality,omitempty"`        // Quality assessment of exit timing
+	RiskManagement    string  `json:"risk_management,omitempty"`     // Risk management evaluation
+	MarketCondition   string  `json:"market_condition,omitempty"`    // Market environment match
+	ProfitLossReason  string  `json:"profit_loss_reason,omitempty"`  // Why profit/loss occurred
+	Improvement       string  `json:"improvement,omitempty"`         // Suggestions for improvement
+	OverallScore      float64 `json:"overall_score,omitempty"`       // Overall trade quality score (0-10)
+	GeneratedAt       int64   `json:"generated_at,omitempty"`        // Timestamp of analysis
+	AnalysisError     string  `json:"analysis_error,omitempty"`      // Error if analysis failed
 }
 
 // Metrics summarizes backtest performance metrics.

@@ -39,6 +39,7 @@ import { PromptSectionsEditor } from '../components/strategy/PromptSectionsEdito
 import { PublishSettingsEditor } from '../components/strategy/PublishSettingsEditor'
 import { GridConfigEditor, defaultGridConfig } from '../components/strategy/GridConfigEditor'
 import { DeepVoidBackground } from '../components/DeepVoidBackground'
+import { GrainOverlay } from '../components/ui/GrainOverlay'
 
 const API_BASE = import.meta.env.VITE_API_BASE || ''
 
@@ -609,7 +610,7 @@ export function StrategyStudioPage() {
     {
       key: 'coinSource' as const,
       icon: Target,
-      color: '#F0B90B',
+      color: '#14b8a6',
       title: t('coinSource'),
       forStrategyType: 'ai_trading' as const,
       content: editingConfig && (
@@ -716,23 +717,23 @@ export function StrategyStudioPage() {
   )
 
   return (
-    <DeepVoidBackground className="h-[calc(100vh-64px)] flex flex-col bg-nofx-bg relative overflow-hidden">
+    <DeepVoidBackground className="h-[calc(100vh-64px)] flex flex-col bg-zinc-950 relative overflow-hidden">
+      <GrainOverlay />
 
       {/* Header */}
-      {/* Header */}
-      <div className="flex-shrink-0 px-4 py-3 border-b border-nofx-gold/20 bg-nofx-bg/60 backdrop-blur-md z-10">
+      <div className="flex-shrink-0 px-4 py-3 border-b border-white/10 bg-white/[0.02] backdrop-blur-md z-10">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-gradient-to-br from-nofx-gold to-yellow-500">
-              <Sparkles className="w-5 h-5 text-black" />
+            <div className="p-2 rounded-lg bg-gradient-to-br from-teal-500 to-cyan-500 shadow-glow-teal">
+              <Sparkles className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h1 className="text-lg font-bold text-nofx-text">{t('strategyStudio')}</h1>
-              <p className="text-xs text-nofx-text-muted">{t('subtitle')}</p>
+              <h1 className="text-lg font-bold text-white">{t('strategyStudio')}</h1>
+              <p className="text-xs text-zinc-400">{t('subtitle')}</p>
             </div>
           </div>
           {error && (
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs bg-nofx-danger/10 text-nofx-danger">
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs bg-red-500/10 text-red-400 border border-red-500/20">
               {error}
               <button onClick={() => setError(null)} className="hover:underline">×</button>
             </div>
@@ -743,14 +744,14 @@ export function StrategyStudioPage() {
       {/* Main Content - Three Columns */}
       <div className="flex-1 flex overflow-hidden">
         {/* Left Column - Strategy List */}
-        <div className="w-48 flex-shrink-0 border-r border-nofx-gold/20 overflow-y-auto bg-nofx-bg/30 backdrop-blur-sm z-10">
+        <div className="w-48 flex-shrink-0 border-r border-white/10 overflow-y-auto bg-white/[0.02] backdrop-blur-sm z-10">
           <div className="p-2">
             <div className="flex items-center justify-between mb-2 px-2">
-              <span className="text-xs font-medium text-nofx-text-muted">{t('strategies')}</span>
+              <span className="text-xs font-semibold text-zinc-400 uppercase tracking-wide">{t('strategies')}</span>
               <div className="flex items-center gap-1">
-                {/* Import button with hidden file input */}
-                <label className="p-1 rounded hover:bg-white/10 transition-colors cursor-pointer text-nofx-text-muted hover:text-white" title={language === 'zh' ? '导入策略' : 'Import Strategy'}>
-                  <Upload className="w-4 h-4" />
+                {/* Import button */}
+                <label className="p-1.5 rounded-md hover:bg-white/10 transition-all cursor-pointer text-zinc-400 hover:text-white hover:shadow-sm" title={language === 'zh' ? '导入策略' : 'Import Strategy'}>
+                  <Upload className="w-3.5 h-3.5" />
                   <input
                     type="file"
                     accept=".json"
@@ -758,19 +759,21 @@ export function StrategyStudioPage() {
                     className="hidden"
                   />
                 </label>
+                {/* 优化策略按钮 */}
                 <button
                   onClick={handleCreateOptimizedStrategy}
-                  className="p-1 rounded hover:bg-white/10 transition-colors text-purple-400"
-                  title={language === 'zh' ? '创建优化策略 v2.0' : 'Create Optimized Strategy v2.0'}
+                  className="p-1.5 rounded-md transition-all bg-gradient-to-br from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white shadow-sm hover:shadow-md hover:scale-105 active:scale-95"
+                  title={language === 'zh' ? '创建优化策略 v2.1 (25U小资金专用)' : 'Create Optimized Strategy v2.1 (For 25U)'}
                 >
-                  <Sparkles className="w-4 h-4" />
+                  <Sparkles className="w-3.5 h-3.5" />
                 </button>
+                {/* 新建按钮 */}
                 <button
                   onClick={handleCreateStrategy}
-                  className="p-1 rounded hover:bg-white/10 transition-colors text-nofx-gold"
+                  className="p-1.5 rounded-md transition-all teal-gradient text-white shadow-sm hover:shadow-md hover:scale-105 active:scale-95"
                   title={language === 'zh' ? '新建策略' : 'New Strategy'}
                 >
-                  <Plus className="w-4 h-4" />
+                  <Plus className="w-3.5 h-3.5" />
                 </button>
               </div>
             </div>
@@ -786,12 +789,12 @@ export function StrategyStudioPage() {
                     setAiTestResult(null)
                   }}
                   className={`group px-2 py-2 rounded-lg cursor-pointer transition-all ${selectedStrategy?.id === strategy.id
-                    ? 'ring-1 ring-nofx-gold/50 bg-nofx-gold/10 shadow-[0_0_15px_rgba(240,185,11,0.1)]'
-                    : 'hover:bg-nofx-bg-lighter/60 hover:ring-1 hover:ring-nofx-gold/20 bg-transparent'
+                    ? 'ring-1 ring-teal-500/50 bg-teal-500/10 shadow-glow-teal'
+                    : 'hover:bg-white/5 hover:ring-1 hover:ring-white/20 bg-transparent'
                     }`}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-sm truncate text-nofx-text">{strategy.name}</span>
+                    <span className="text-sm truncate text-white">{strategy.name}</span>
                     <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button
                         onClick={(e) => { e.stopPropagation(); handleExportStrategy(strategy) }}
@@ -827,7 +830,7 @@ export function StrategyStudioPage() {
                       </span>
                     )}
                     {strategy.is_default && (
-                      <span className="px-1.5 py-0.5 text-[10px] rounded bg-nofx-gold/15 text-nofx-gold">
+                      <span className="px-1.5 py-0.5 text-[10px] rounded bg-teal-400/15 text-nofx-gold">
                         {t('default')}
                       </span>
                     )}
@@ -880,9 +883,9 @@ export function StrategyStudioPage() {
                   {!selectedStrategy.is_active && (
                     <button
                       onClick={() => handleActivateStrategy(selectedStrategy.id)}
-                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs transition-colors bg-nofx-success/10 border border-nofx-success/30 text-nofx-success hover:bg-nofx-success/20"
+                      className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all bg-nofx-success/10 border border-nofx-success/30 text-nofx-success hover:bg-nofx-success/20 hover:border-nofx-success/50 hover:shadow-md active:scale-95"
                     >
-                      <Check className="w-3 h-3" />
+                      <Check className="w-4 h-4" />
                       {t('activate')}
                     </button>
                   )}
@@ -890,22 +893,22 @@ export function StrategyStudioPage() {
                     <button
                       onClick={handleSaveStrategy}
                       disabled={isSaving || !hasChanges}
-                      className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-50
-                        ${hasChanges ? 'bg-nofx-gold text-black hover:bg-yellow-500' : 'bg-nofx-bg-lighter text-nofx-text-muted cursor-not-allowed'}`}
+                      className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-all shadow-sm hover:shadow-md active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-sm disabled:active:scale-100
+                        ${hasChanges ? 'bg-nofx-gold hover:bg-nofx-gold-light text-black' : 'bg-nofx-bg-lighter text-nofx-text-muted border border-nofx-border'}`}
                     >
-                      <Save className="w-3 h-3" />
+                      <Save className="w-4 h-4" />
                       {isSaving ? t('saving') : t('save')}
                     </button>
                   )}
                 </div>
               </div>
 
-              {/* Strategy Type Selector */}
+              {/* Strategy Type Selector - 币安风格 */}
               {editingConfig && (
-                <div className="mb-4 p-4 rounded-lg bg-nofx-bg-lighter border border-nofx-gold/20">
+                <div className="mb-4 p-4 rounded-xl bg-nofx-bg-lighter border border-nofx-border shadow-sm">
                   <div className="flex items-center gap-2 mb-3">
-                    <Zap className="w-4 h-4" style={{ color: '#F0B90B' }} />
-                    <span className="text-sm font-medium text-nofx-text">{t('strategyType')}</span>
+                    <Zap className="w-4 h-4 text-nofx-gold" />
+                    <span className="text-sm font-semibold text-nofx-text">{t('strategyType')}</span>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <button
@@ -917,17 +920,17 @@ export function StrategyStudioPage() {
                         }
                       }}
                       disabled={selectedStrategy?.is_default}
-                      className={`p-3 rounded-lg border transition-all ${
+                      className={`p-4 rounded-lg border-2 transition-all hover:shadow-md active:scale-98 ${
                         (!editingConfig.strategy_type || editingConfig.strategy_type === 'ai_trading')
-                          ? 'border-nofx-gold bg-nofx-gold/10'
-                          : 'border-nofx-border hover:border-nofx-gold/50'
+                          ? 'border-nofx-gold bg-nofx-gold/10 shadow-sm'
+                          : 'border-nofx-border hover:border-nofx-gold/50 bg-white'
                       }`}
                     >
-                      <div className="flex items-center gap-2 mb-1">
-                        <Bot className="w-4 h-4" style={{ color: '#F0B90B' }} />
-                        <span className="text-sm font-medium text-nofx-text">{t('aiTrading')}</span>
+                      <div className="flex items-center gap-2 mb-2">
+                        <Bot className="w-5 h-5 text-nofx-gold" />
+                        <span className="text-sm font-semibold text-nofx-text">{t('aiTrading')}</span>
                       </div>
-                      <p className="text-xs text-nofx-text-muted text-left">{t('aiTradingDesc')}</p>
+                      <p className="text-xs text-nofx-text-muted text-left leading-relaxed">{t('aiTradingDesc')}</p>
                     </button>
                     <button
                       onClick={() => {
@@ -940,17 +943,17 @@ export function StrategyStudioPage() {
                         }
                       }}
                       disabled={selectedStrategy?.is_default}
-                      className={`p-3 rounded-lg border transition-all ${
+                      className={`p-4 rounded-lg border-2 transition-all hover:shadow-md active:scale-98 ${
                         editingConfig.strategy_type === 'grid_trading'
-                          ? 'border-nofx-gold bg-nofx-gold/10'
-                          : 'border-nofx-border hover:border-nofx-gold/50'
+                          ? 'border-nofx-success bg-nofx-success/10 shadow-sm'
+                          : 'border-nofx-border hover:border-nofx-success/50 bg-white'
                       }`}
                     >
-                      <div className="flex items-center gap-2 mb-1">
-                        <Activity className="w-4 h-4" style={{ color: '#0ECB81' }} />
-                        <span className="text-sm font-medium text-nofx-text">{t('gridTrading')}</span>
+                      <div className="flex items-center gap-2 mb-2">
+                        <Activity className="w-5 h-5 text-nofx-success" />
+                        <span className="text-sm font-semibold text-nofx-text">{t('gridTrading')}</span>
                       </div>
-                      <p className="text-xs text-nofx-text-muted text-left">{t('gridTradingDesc')}</p>
+                      <p className="text-xs text-nofx-text-muted text-left leading-relaxed">{t('gridTradingDesc')}</p>
                     </button>
                   </div>
                 </div>

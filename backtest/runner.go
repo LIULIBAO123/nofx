@@ -443,7 +443,45 @@ func (r *Runner) stepOnce() error {
 		return err
 	}
 
+	// Perform AI analysis on trades and save with analysis
+	accountBeforeEquity, _, _ := r.account.TotalEquity(priceMap)
+	accountBefore := kernel.AccountInfo{
+		TotalEquity:      accountBeforeEquity,
+		AvailableBalance: r.account.Cash(),
+		MarginUsed:       r.totalMarginUsed(),
+	}
+	
 	for _, evt := range tradeEvents {
+		// Perform AI analysis for this trade (async to avoid blocking)
+		if !evt.LiquidationFlag && r.cfg.EnableTradeAnalysis {
+			accountAfter := kernel.AccountInfo{
+				TotalEquity:      snapshot.Equity,
+				AvailableBalance: snapshot.Cash,
+				MarginUsed:       r.totalMarginUsed(),
+			}
+			
+			// Build market data context for analysis
+			marketDataCtx := make(map[string]interface{})
+			if md, ok := marketData[evt.Symbol]; ok {
+				marketDataCtx["symbol"] = evt.Symbol
+				marketDataCtx["current_price"] = md.CurrentPrice
+				// Add more context if available
+			}
+			
+			// Get decision context if available
+			decisionCtx := ""
+			if record != nil && record.InputPrompt != "" {
+				decisionCtx = record.InputPrompt
+			}
+			
+			// Analyze trade
+			analysis := r.AnalyzeTrade(evt, accountBefore, accountAfter, marketDataCtx, decisionCtx)
+			if analysis != nil {
+				evt.AIAnalysis = analysis
+				logger.Infof("📊 Trade analysis: %s %s - Score: %.1f/10", evt.Symbol, evt.Action, analysis.OverallScore)
+			}
+		}
+		
 		if err := appendTradeEvent(r.cfg.RunID, evt); err != nil {
 			return err
 		}

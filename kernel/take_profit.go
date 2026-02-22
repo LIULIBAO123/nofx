@@ -74,7 +74,7 @@ func (c *TakeProfitChecker) CheckTakeProfit(
 		return &TakeProfitSignal{Triggered: false}
 	}
 
-	// Default to "any" logic: any condition triggers = take profit
+	// Default: "any" logic - any condition triggers = take profit
 	// Return first triggered signal
 	return signals[0]
 }

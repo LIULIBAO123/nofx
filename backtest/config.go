@@ -46,6 +46,7 @@ type BacktestConfig struct {
 	OverrideBasePrompt   bool     `json:"override_prompt"`
 	CacheAI              bool     `json:"cache_ai"`
 	ReplayOnly           bool     `json:"replay_only"`
+	EnableTradeAnalysis  bool     `json:"enable_trade_analysis"` // Enable AI analysis after each trade
 
 	AICfg    AIConfig       `json:"ai"`
 	Leverage LeverageConfig `json:"leverage"`
@@ -151,6 +152,13 @@ func (cfg *BacktestConfig) Validate() error {
 	}
 	if cfg.Leverage.AltcoinLeverage <= 0 {
 		cfg.Leverage.AltcoinLeverage = 5
+	}
+
+	// Enable trade analysis by default (Go bool defaults to false, so we set it explicitly)
+	// Users can disable it by setting enable_trade_analysis: false in the request
+	if !cfg.ReplayOnly {
+		// Only enable for non-replay runs to avoid unnecessary AI calls
+		cfg.EnableTradeAnalysis = true
 	}
 
 	return nil
