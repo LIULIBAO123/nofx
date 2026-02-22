@@ -34,6 +34,35 @@ var (
 )
 
 // ============================================================================
+// AI API Call with Prompt Caching
+// ============================================================================
+
+// callAIWithCaching calls AI API with prompt caching enabled for system prompt
+func callAIWithCaching(mcpClient mcp.AIClient, systemPrompt, userPrompt string) (string, error) {
+	// Try to use the advanced Request API with caching
+	// If the client doesn't support it, fall back to simple CallWithMessages
+	
+	// Build request with caching enabled for system prompt
+	systemMsg := mcp.NewSystemMessageWithCache(systemPrompt)
+	userMsg := mcp.NewUserMessage(userPrompt)
+	
+	req := mcp.NewRequestBuilder().
+		AddMessage(systemMsg).
+		AddMessage(userMsg).
+		Build()
+	
+	// Try to call with Request API (supports caching)
+	result, err := mcpClient.CallWithRequest(req)
+	if err != nil {
+		// If Request API fails, fall back to simple API
+		logger.Infof("⚠️  Request API failed, falling back to simple API: %v", err)
+		return mcpClient.CallWithMessages(systemPrompt, userPrompt)
+	}
+	
+	return result, nil
+}
+
+// ============================================================================
 // Type Definitions
 // ============================================================================
 
@@ -285,16 +314,16 @@ func GetFullDecisionWithStrategy(ctx *Context, mcpClient mcp.AIClient, engine *S
 		}
 	}
 
-	// 2. Build System Prompt using strategy engine
+	// 2. Build System Prompt using strategy engine (includes Schema for caching)
 	riskConfig := engine.GetRiskControlConfig()
 	systemPrompt := engine.BuildSystemPrompt(ctx.Account.TotalEquity, variant)
 
 	// 3. Build User Prompt using strategy engine
 	userPrompt := engine.BuildUserPrompt(ctx)
 
-	// 4. Call AI API
+	// 4. Call AI API with prompt caching enabled
 	aiCallStart := time.Now()
-	aiResponse, err := mcpClient.CallWithMessages(systemPrompt, userPrompt)
+	aiResponse, err := callAIWithCaching(mcpClient, systemPrompt, userPrompt)
 	aiCallDuration := time.Since(aiCallStart)
 	if err != nil {
 		return nil, fmt.Errorf("AI API call failed: %w", err)
@@ -919,12 +948,13 @@ func (e *StrategyEngine) FetchPriceRankingData() *nofxos.PriceRankingData {
 // ============================================================================
 
 // BuildSystemPrompt builds System Prompt according to strategy configuration
+// This includes Schema prompt for better prompt caching efficiency
 func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string) string {
 	var sb strings.Builder
 	riskControl := e.config.RiskControl
 	promptSections := e.config.PromptSections
 
-	// 0. Data Dictionary & Schema (ensure AI understands all fields)
+	// 0. Data Dictionary & Schema (static content, will be cached)
 	lang := e.GetLanguage()
 	schemaPrompt := GetSchemaPrompt(lang)
 	sb.WriteString(schemaPrompt)

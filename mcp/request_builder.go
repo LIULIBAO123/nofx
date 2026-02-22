@@ -88,8 +88,14 @@ func (b *RequestBuilder) AddAssistantMessage(content string) *RequestBuilder {
 	return b
 }
 
-// AddMessage adds message with custom role
-func (b *RequestBuilder) AddMessage(role, content string) *RequestBuilder {
+// AddMessage adds a custom message object (supports cache_control)
+func (b *RequestBuilder) AddMessage(msg Message) *RequestBuilder {
+	b.messages = append(b.messages, msg)
+	return b
+}
+
+// AddMessageWithRole adds message with custom role
+func (b *RequestBuilder) AddMessageWithRole(role, content string) *RequestBuilder {
 	if content != "" {
 		b.messages = append(b.messages, NewMessage(role, content))
 	}

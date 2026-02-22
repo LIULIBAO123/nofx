@@ -280,7 +280,7 @@ func formatCandidateCoinsZH(ctx *Context) string {
 
 				// K线数据（多时间框架）
 				if mdata.TimeframeData != nil {
-					sb.WriteString(formatKlineDataZH(coin.Symbol, mdata.TimeframeData, ctx.Timeframes))
+					sb.WriteString(formatKlineDataZH(coin.Symbol, mdata.TimeframeData, ctx.Timeframes, ctx))
 				}
 			}
 		}
@@ -315,7 +315,7 @@ func formatCandidateCoinsZH(ctx *Context) string {
 }
 
 // formatKlineDataZH 格式化K线数据（中文）
-func formatKlineDataZH(symbol string, tfData map[string]*market.TimeframeSeriesData, timeframes []string) string {
+func formatKlineDataZH(symbol string, tfData map[string]*market.TimeframeSeriesData, timeframes []string, ctx *Context) string {
 	var sb strings.Builder
 
 	for _, tf := range timeframes {
@@ -324,10 +324,18 @@ func formatKlineDataZH(symbol string, tfData map[string]*market.TimeframeSeriesD
 			sb.WriteString("```\n")
 			sb.WriteString("时间(UTC)      开盘      最高      最低      收盘      成交量\n")
 
-			// 只显示最近30根K线
+			// 显示用户配置的K线数量（从Context获取，默认20根）
+			maxKlines := 20
+			if ctx != nil && len(ctx.Timeframes) > 0 {
+				// 使用实际返回的K线数量作为上限
+				maxKlines = len(data.Klines)
+				if maxKlines > 20 {
+					maxKlines = 20 // 默认最多20根
+				}
+			}
 			startIdx := 0
-			if len(data.Klines) > 30 {
-				startIdx = len(data.Klines) - 30
+			if len(data.Klines) > maxKlines {
+				startIdx = len(data.Klines) - maxKlines
 			}
 
 			for i := startIdx; i < len(data.Klines); i++ {
@@ -544,7 +552,7 @@ func formatCandidateCoinsEN(ctx *Context) string {
 				sb.WriteString(fmt.Sprintf("Current Price: %.4f\n\n", mdata.CurrentPrice))
 
 				if mdata.TimeframeData != nil {
-					sb.WriteString(formatKlineDataEN(coin.Symbol, mdata.TimeframeData, ctx.Timeframes))
+					sb.WriteString(formatKlineDataEN(coin.Symbol, mdata.TimeframeData, ctx.Timeframes, ctx))
 				}
 			}
 		}
@@ -577,7 +585,7 @@ func formatCandidateCoinsEN(ctx *Context) string {
 }
 
 // formatKlineDataEN 格式化K线数据（英文）
-func formatKlineDataEN(symbol string, tfData map[string]*market.TimeframeSeriesData, timeframes []string) string {
+func formatKlineDataEN(symbol string, tfData map[string]*market.TimeframeSeriesData, timeframes []string, ctx *Context) string {
 	var sb strings.Builder
 
 	// Sort timeframes for consistent output
@@ -591,9 +599,11 @@ func formatKlineDataEN(symbol string, tfData map[string]*market.TimeframeSeriesD
 			sb.WriteString("```\n")
 			sb.WriteString("Time(UTC)      Open      High      Low       Close     Volume\n")
 
+			// 显示用户配置的K线数量（默认20根）
+			maxKlines := 20
 			startIdx := 0
-			if len(data.Klines) > 30 {
-				startIdx = len(data.Klines) - 30
+			if len(data.Klines) > maxKlines {
+				startIdx = len(data.Klines) - maxKlines
 			}
 
 			for i := startIdx; i < len(data.Klines); i++ {

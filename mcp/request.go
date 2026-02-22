@@ -4,6 +4,14 @@ package mcp
 type Message struct {
 	Role    string `json:"role"`    // "system", "user", "assistant"
 	Content string `json:"content"` // Message content
+	
+	// Prompt Caching support (OpenAI, Anthropic Claude, etc.)
+	CacheControl *CacheControl `json:"cache_control,omitempty"`
+}
+
+// CacheControl controls prompt caching behavior
+type CacheControl struct {
+	Type string `json:"type"` // "ephemeral" for OpenAI/Claude
 }
 
 // Tool represents a tool/function that AI can call
@@ -52,6 +60,17 @@ func NewSystemMessage(content string) Message {
 	return Message{
 		Role:    "system",
 		Content: content,
+	}
+}
+
+// NewSystemMessageWithCache creates a system message with caching enabled
+func NewSystemMessageWithCache(content string) Message {
+	return Message{
+		Role:    "system",
+		Content: content,
+		CacheControl: &CacheControl{
+			Type: "ephemeral",
+		},
 	}
 }
 

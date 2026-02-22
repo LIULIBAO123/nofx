@@ -192,17 +192,24 @@ func (client *Client) setAuthHeader(reqHeader http.Header) {
 
 func (client *Client) buildMCPRequestBody(systemPrompt, userPrompt string) map[string]any {
 	// Build messages array
-	messages := []map[string]string{}
+	messages := []map[string]any{}
 
-	// If system prompt exists, add system message
+	// If system prompt exists, add system message with caching
 	if systemPrompt != "" {
-		messages = append(messages, map[string]string{
+		systemMsg := map[string]any{
 			"role":    "system",
 			"content": systemPrompt,
-		})
+		}
+		// Enable prompt caching for system prompt (static content)
+		if client.Provider == ProviderOpenAI || client.Provider == "anthropic" {
+			systemMsg["cache_control"] = map[string]string{
+				"type": "ephemeral",
+			}
+		}
+		messages = append(messages, systemMsg)
 	}
-	// Add user message
-	messages = append(messages, map[string]string{
+	// Add user message (dynamic content, no caching)
+	messages = append(messages, map[string]any{
 		"role":    "user",
 		"content": userPrompt,
 	})
@@ -480,12 +487,19 @@ func (client *Client) callWithRequest(req *Request) (string, error) {
 // buildRequestBodyFromRequest builds request body from Request object
 func (client *Client) buildRequestBodyFromRequest(req *Request) map[string]any {
 	// Convert Message to API format
-	messages := make([]map[string]string, 0, len(req.Messages))
+	messages := make([]map[string]any, 0, len(req.Messages))
 	for _, msg := range req.Messages {
-		messages = append(messages, map[string]string{
+		msgMap := map[string]any{
 			"role":    msg.Role,
 			"content": msg.Content,
-		})
+		}
+		// Add cache_control if present
+		if msg.CacheControl != nil {
+			msgMap["cache_control"] = map[string]string{
+				"type": msg.CacheControl.Type,
+			}
+		}
+		messages = append(messages, msgMap)
 	}
 
 	// Build basic request body
