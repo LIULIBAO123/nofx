@@ -50,7 +50,7 @@ func callAIWithCaching(mcpClient mcp.AIClient, systemPrompt, userPrompt, runID s
 	req, buildErr := mcp.NewRequestBuilder().
 		AddMessage(systemMsg).
 		AddMessage(userMsg).
-		WithStream(true). // 流式输出，避免思维链等长输出受单次响应长度限制
+		WithStream(false). // 非流式：便于返回完整 usage（含 Prompt 缓存读取/创建），大模型已支持足够输出长度
 		Build()
 	if buildErr != nil {
 		logger.Infof("⚠️  Request build failed, falling back to simple API: %v", buildErr)
@@ -432,6 +432,8 @@ func fetchMarketDataWithStrategy(ctx *Context, engine *StrategyEngine) error {
 	}
 
 	candidateCoinsAdded := 0
+	skippedFetchFail := 0
+	skippedOILow := 0
 	for _, coin := range ctx.CandidateCoins {
 		if _, exists := ctx.MarketDataMap[coin.Symbol]; exists {
 			continue
@@ -448,6 +450,7 @@ func fetchMarketDataWithStrategy(ctx *Context, engine *StrategyEngine) error {
 		data, err := market.GetWithTimeframes(coin.Symbol, timeframes, primaryTimeframe, klineCount)
 		if err != nil {
 			logger.Infof("⚠️  Failed to fetch market data for %s: %v", coin.Symbol, err)
+			skippedFetchFail++
 			continue
 		}
 
@@ -459,6 +462,7 @@ func fetchMarketDataWithStrategy(ctx *Context, engine *StrategyEngine) error {
 			if oiValueInMillions < minOIThresholdMillions {
 				logger.Infof("⚠️  %s OI value too low (%.2fM USD < %.1fM), skipping coin",
 					coin.Symbol, oiValueInMillions, minOIThresholdMillions)
+				skippedOILow++
 				continue
 			}
 		}
@@ -467,8 +471,9 @@ func fetchMarketDataWithStrategy(ctx *Context, engine *StrategyEngine) error {
 		candidateCoinsAdded++
 	}
 
-	logger.Infof("📊 Successfully fetched multi-timeframe market data for %d coins (positions + up to %d candidates)",
-		len(ctx.MarketDataMap), maxCandidateCoinsForPrompt)
+	// 实际写入 Prompt 的候选数可能小于「写入 Prompt 的候选币数」：候选列表不足、拉取失败或 OI 过滤会导致更少
+	logger.Infof("📊 Market data: %d positions + %d candidate coins in prompt (max candidates=%d; total candidates=%d; skipped: fetch_fail=%d, OI_low=%d)",
+		len(positionSymbols), candidateCoinsAdded, maxCandidateCoinsForPrompt, len(ctx.CandidateCoins), skippedFetchFail, skippedOILow)
 	return nil
 }
 

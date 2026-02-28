@@ -422,6 +422,44 @@ func (s *PositionStore) GetOpenPositionBySymbol(traderID, symbol, side string) (
 	return nil, err
 }
 
+// CreateOrphanClosedPosition creates a CLOSED position record when we have a close trade but no matching OPEN position.
+// This ensures平仓记录 are never lost (e.g. DB cleared after open, or sync order issues).
+func (s *PositionStore) CreateOrphanClosedPosition(
+	traderID, exchangeID, exchangeType, symbol, side string,
+	quantity, exitPrice float64, exitTimeMs int64, exitOrderID string,
+	realizedPnL, fee float64, closeReason string,
+) error {
+	nowMs := time.Now().UTC().UnixMilli()
+	entryTime := exitTimeMs - 3600000 // 1 hour before close for display
+	if entryTime <= 0 {
+		entryTime = exitTimeMs
+	}
+	pos := &TraderPosition{
+		TraderID:           traderID,
+		ExchangeID:         exchangeID,
+		ExchangeType:       exchangeType,
+		ExchangePositionID: fmt.Sprintf("orphan_close_%s_%d", exitOrderID, exitTimeMs),
+		Symbol:             symbol,
+		Side:               side,
+		EntryQuantity:      quantity,
+		Quantity:           quantity,
+		EntryPrice:         exitPrice,
+		EntryOrderID:       "",
+		EntryTime:          entryTime,
+		ExitPrice:          exitPrice,
+		ExitOrderID:        exitOrderID,
+		ExitTime:           exitTimeMs,
+		RealizedPnL:        realizedPnL,
+		Fee:                fee,
+		Status:             "CLOSED",
+		CloseReason:        closeReason,
+		Source:             "sync",
+		CreatedAt:          nowMs,
+		UpdatedAt:          nowMs,
+	}
+	return s.db.Create(pos).Error
+}
+
 // GetClosedPositions gets closed positions
 func (s *PositionStore) GetClosedPositions(traderID string, limit int) ([]*TraderPosition, error) {
 	var positions []*TraderPosition

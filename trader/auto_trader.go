@@ -442,7 +442,7 @@ func (at *AutoTrader) Run() error {
 			openPositions, err := at.store.Position().GetOpenPositions(at.id)
 			if err == nil && len(openPositions) > 0 {
 				for _, pos := range openPositions {
-					pt.RestoreOpenPosition(pos.Symbol, pos.Side, pos.Quantity, pos.EntryPrice, pos.Leverage)
+					pt.RestoreOpenPosition(pos.Symbol, pos.Side, pos.Quantity, pos.EntryPrice, pos.Leverage, pos.EntryTime)
 				}
 				logger.Infof("📊 [%s] Restored %d paper positions from store (same logic as live)", at.name, len(openPositions))
 			}
@@ -2060,6 +2060,29 @@ func getPosFloat(pos map[string]interface{}, primary, fallback string) float64 {
 	return 0
 }
 
+// getPosInt64 gets int64 from position map (e.g. update_time for entry time in ms). Tries keys in order.
+func getPosInt64(pos map[string]interface{}, keys ...string) int64 {
+	for _, k := range keys {
+		if v := pos[k]; v != nil {
+			switch val := v.(type) {
+			case int64:
+				if val > 0 {
+					return val
+				}
+			case int:
+				if val > 0 {
+					return int64(val)
+				}
+			case float64:
+				if val > 0 {
+					return int64(val)
+				}
+			}
+		}
+	}
+	return 0
+}
+
 // toFloat64 converts various numeric types to float64
 func toFloat64(v interface{}) float64 {
 	switch val := v.(type) {
@@ -3202,6 +3225,9 @@ func (at *AutoTrader) checkDynamicStopLossTakeProfit() error {
 	}
 	if takeProfitConfig != nil && takeProfitConfig.Enabled {
 		takeProfitChecker = kernel.NewTakeProfitChecker(takeProfitConfig)
+		scaledOn := takeProfitConfig.ScaledEnabled != nil && *takeProfitConfig.ScaledEnabled
+		levelCount := len(takeProfitConfig.ScaledLevels)
+		logger.Infof("📋 Take profit checker created: enabled=true, scaled_enabled=%v, scaled_levels=%d", scaledOn, levelCount)
 	}
 
 	currentPositionKeys := make(map[string]bool) // for cleaning slConfirmCount when position is closed
@@ -3213,6 +3239,8 @@ func (at *AutoTrader) checkDynamicStopLossTakeProfit() error {
 		}
 		side := getPosStr(pos, "side", "position_side")
 		side = strings.ToLower(side)
+		// 便于排查分层止盈：确认每个仓位都进入 SL/TP 检查
+		logger.Infof("📋 TP/SL: checking position %s %s", symbol, side)
 		entryPrice := getPosFloat(pos, "entryPrice", "entry_price")
 		markPrice := getPosFloat(pos, "markPrice", "mark_price")
 		quantity := getPosFloat(pos, "positionAmt", "position_amt")
@@ -3238,9 +3266,41 @@ func (at *AutoTrader) checkDynamicStopLossTakeProfit() error {
 		pnlPct := calculatePnLPercentage(unrealizedPnl, marginUsed)
 
 		// Get position update time (posKey must match positionFirstSeenTime: symbol_side lowercase)
+		// 优先用持仓 map 的 update_time（纸面恢复后 GetPositions 会带真实入场时间），否则查 DB，避免重启后被误判为刚开仓导致最小持仓跳过、分层止盈不触发
 		posKey := symbol + "_" + side
 		currentPositionKeys[posKey] = true
-		updateTime := at.positionFirstSeenTime[posKey]
+		updateTime := getPosInt64(pos, "update_time", "updateTime", "entry_time", "createdTime")
+		if updateTime > 0 {
+			if at.positionFirstSeenTime[posKey] == 0 {
+				at.positionFirstSeenTime[posKey] = updateTime
+			}
+		} else {
+			updateTime = at.positionFirstSeenTime[posKey]
+		}
+		if updateTime == 0 && at.store != nil {
+			normalizedSymbol := market.Normalize(symbol)
+			sideUpper := strings.ToUpper(side)
+			dbPos, dbErr := at.store.Position().GetOpenPositionBySymbol(at.id, normalizedSymbol, sideUpper)
+			if dbErr == nil && dbPos != nil && dbPos.EntryTime > 0 {
+				updateTime = dbPos.EntryTime
+				at.positionFirstSeenTime[posKey] = updateTime
+				logger.Infof("📋 TP/SL: got entry time from DB for %s %s: entryTime=%d", symbol, side, updateTime)
+			} else if at.config.IsSimulation {
+				// Fallback: match from all open positions (handles symbol format differences)
+				openList, _ := at.store.Position().GetOpenPositions(at.id)
+				for _, o := range openList {
+					if market.Normalize(o.Symbol) == normalizedSymbol && strings.ToUpper(o.Side) == sideUpper && o.EntryTime > 0 {
+						updateTime = o.EntryTime
+						at.positionFirstSeenTime[posKey] = updateTime
+						logger.Infof("📋 TP/SL: got entry time from DB (list) for %s %s: entryTime=%d", symbol, side, updateTime)
+						break
+					}
+				}
+				if updateTime == 0 {
+					logger.Infof("📋 TP/SL: no DB entry for %s %s (err=%v), using now as entry time", symbol, side, dbErr)
+				}
+			}
+		}
 		if updateTime == 0 {
 			updateTime = time.Now().UnixMilli()
 		}
@@ -3259,6 +3319,7 @@ func (at *AutoTrader) checkDynamicStopLossTakeProfit() error {
 			}
 		}
 		if minHoldMs > 0 && float64(holdDurationMs) < minHoldMs {
+			logger.Infof("📋 TP/SL: skip %s %s due to min hold: holdDurationMs=%d, minHoldMs=%.0f (%.1f min left)", symbol, side, holdDurationMs, minHoldMs, (minHoldMs-float64(holdDurationMs))/60000)
 			continue
 		}
 
@@ -3417,6 +3478,10 @@ func (at *AutoTrader) checkDynamicStopLossTakeProfit() error {
 			if side == "short" {
 				tpLevel = supportLevel
 			}
+			// 便于排查分层止盈未激活：每周期打印当前盈亏与已触发档位
+			scaledTaken := at.getScaledLevelsTaken(posKey)
+			logger.Infof("📋 TP check %s %s: pnl=%.2f%%, entry=%.4f mark=%.4f, scaled_levels_taken=%d",
+				symbol, side, pnlPct, entryPrice, markPrice, len(scaledTaken))
 			signal := takeProfitChecker.CheckTakeProfit(&positionInfo, markPrice, atr, tpLevel)
 			if signal.Triggered {
 				kernel.LogTakeProfitCheck(symbol, signal)

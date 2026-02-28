@@ -123,11 +123,13 @@ func (c *TakeProfitChecker) checkScaledTakeProfit(position *PositionInfo, curren
 	}
 
 	entryPrice := position.EntryPrice
+	firstLevel := c.config.ScaledLevels[0]
 
 	// Check each level in order
 	for _, level := range c.config.ScaledLevels {
 		// Skip if already taken
 		if c.isLevelTaken(position, level.ProfitPercent, "scaled") {
+			logger.Infof("📋 Scaled TP %s: level %.2f%% already taken, skip", position.Symbol, level.ProfitPercent)
 			continue
 		}
 
@@ -158,6 +160,22 @@ func (c *TakeProfitChecker) checkScaledTakeProfit(position *PositionInfo, curren
 				}
 			}
 		}
+	}
+
+	// 盈利已超过第一档却未触发时打日志，便于排查分层止盈未激活
+	var currentProfitPct float64
+	if position.Side == "long" && entryPrice > 0 {
+		currentProfitPct = (currentPrice - entryPrice) / entryPrice * 100
+	} else if position.Side == "short" && entryPrice > 0 {
+		currentProfitPct = (entryPrice - currentPrice) / entryPrice * 100
+	}
+	if currentProfitPct >= firstLevel.ProfitPercent {
+		targetFirst := entryPrice * (1 + firstLevel.ProfitPercent/100)
+		if position.Side == "short" {
+			targetFirst = entryPrice * (1 - firstLevel.ProfitPercent/100)
+		}
+		logger.Infof("📋 Scaled TP %s: profit %.2f%% >= first level %.2f%% but no trigger (target=%.4f current=%.4f, side=%s)",
+			position.Symbol, currentProfitPct, firstLevel.ProfitPercent, targetFirst, currentPrice, position.Side)
 	}
 
 	return &TakeProfitSignal{Triggered: false}

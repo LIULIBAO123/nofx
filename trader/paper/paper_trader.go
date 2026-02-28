@@ -107,7 +107,7 @@ func (p *PaperTrader) GetPositions() ([]map[string]interface{}, error) {
 	posCopy := make([]*paperPosition, 0, len(p.positions))
 	for _, pos := range p.positions {
 		if pos.Quantity > 0 {
-			posCopy = append(posCopy, &paperPosition{Symbol: pos.Symbol, Side: pos.Side, Quantity: pos.Quantity, EntryPrice: pos.EntryPrice, Leverage: pos.Leverage})
+			posCopy = append(posCopy, &paperPosition{Symbol: pos.Symbol, Side: pos.Side, Quantity: pos.Quantity, EntryPrice: pos.EntryPrice, Leverage: pos.Leverage, EntryTime: pos.EntryTime})
 		}
 	}
 	p.mu.RUnlock()
@@ -121,7 +121,7 @@ func (p *PaperTrader) GetPositions() ([]map[string]interface{}, error) {
 		} else {
 			unrealized = (pos.EntryPrice - price) * pos.Quantity
 		}
-		out = append(out, map[string]interface{}{
+		m := map[string]interface{}{
 			"symbol":         pos.Symbol,
 			"position_side":  pos.Side,
 			"position_amt":   pos.Quantity,
@@ -129,7 +129,11 @@ func (p *PaperTrader) GetPositions() ([]map[string]interface{}, error) {
 			"mark_price":     price,
 			"unrealized_pnl": unrealized,
 			"leverage":       pos.Leverage,
-		})
+		}
+		if !pos.EntryTime.IsZero() {
+			m["update_time"] = pos.EntryTime.UnixMilli()
+		}
+		out = append(out, m)
 	}
 	return out, nil
 }
@@ -282,8 +286,9 @@ func (p *PaperTrader) closePosition(symbol, side string, quantity float64) (map[
 	return map[string]interface{}{"order_id": fmt.Sprintf("paper_%d", p.orderIDGen), "status": "FILLED"}, nil
 }
 
-// RestoreOpenPosition 从 DB 恢复一条未平仓位（进程重启后调用），与实盘一致：扣减占用保证金
-func (p *PaperTrader) RestoreOpenPosition(symbol, side string, quantity, entryPrice float64, leverage int) {
+// RestoreOpenPosition 从 DB 恢复一条未平仓位（进程重启后调用），与实盘一致：扣减占用保证金。
+// entryTimeMs 为 DB 中的入场时间（毫秒），传 0 则用当前时间（SL/TP 最小持仓会从恢复时刻算起）。
+func (p *PaperTrader) RestoreOpenPosition(symbol, side string, quantity, entryPrice float64, leverage int, entryTimeMs int64) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -297,6 +302,11 @@ func (p *PaperTrader) RestoreOpenPosition(symbol, side string, quantity, entryPr
 		margin = p.balance
 	}
 	p.balance -= margin
+
+	entryTime := time.Now()
+	if entryTimeMs > 0 {
+		entryTime = time.UnixMilli(entryTimeMs)
+	}
 
 	key := posKey(symbol, side)
 	if pos, ok := p.positions[key]; ok {
@@ -313,7 +323,7 @@ func (p *PaperTrader) RestoreOpenPosition(symbol, side string, quantity, entryPr
 			Quantity:   quantity,
 			EntryPrice: entryPrice,
 			Leverage:   leverage,
-			EntryTime:  time.Now(),
+			EntryTime:  entryTime,
 		}
 		if leverage > 0 {
 			p.leverage[symbol] = leverage

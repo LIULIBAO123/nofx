@@ -109,10 +109,17 @@ func (pb *PositionBuilder) handleClose(
 	}
 
 	if position == nil {
-		// No open position found - just skip
-		// This can happen if trades are processed out of order or database was cleared
-		logger.Infof("  ⚠️  No matching open position for %s %s (orderID: %s), skipping", symbol, side, orderID)
-		return nil
+		// No open position found - create orphan CLOSED record so 平仓记录 is not lost
+		// (e.g. DB cleared after open, or sync/order processing out of order)
+		if closeReason == "" {
+			closeReason = "sync"
+		}
+		logger.Infof("  📌 No matching open position for %s %s (orderID: %s), creating orphan closed record", symbol, side, orderID)
+		return pb.positionStore.CreateOrphanClosedPosition(
+			traderID, exchangeID, exchangeType, symbol, side,
+			quantity, price, tradeTimeMs, orderID,
+			realizedPnL, fee, closeReason,
+		)
 	}
 
 	const QUANTITY_TOLERANCE = 0.0001

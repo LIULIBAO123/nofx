@@ -64,8 +64,8 @@ export function StrategyStudioPage() {
   const [expandedSections, setExpandedSections] = useState({
     gridConfig: true,
     coinSource: true,
-    indicators: false,
-    riskControl: false,
+    indicators: true, // 默认展开，便于看到「写入 Prompt 的候选币数」等
+    riskControl: true, // 默认展开，便于看到「AI 仅开仓」等选项
     promptSections: false,
     customPrompt: false,
     publishSettings: false,

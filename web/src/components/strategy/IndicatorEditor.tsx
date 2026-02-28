@@ -51,6 +51,9 @@ export function IndicatorEditor({
       timeframes: { zh: '时间周期', en: 'Timeframes' },
       timeframesDesc: { zh: '选择 K 线分析周期，★ 为主周期（双击设置）', en: 'Select K-line timeframes, ★ = primary (double-click)' },
       klineCount: { zh: 'K 线数量', en: 'K-line Count' },
+      maxCoinsInPrompt: { zh: '写入 Prompt 的候选币数', en: 'Max coins in prompt' },
+      maxCoinsInPromptDesc: { zh: 'AI 思维链中会展示的候选币种数量上限（不含当前持仓），0 或空=默认 8。增大可让 AI 看到更多标的，减小可省 Token。', en: 'Max candidate coins sent to AI (excl. positions). 0 or empty = default 8. More coins = more context; fewer = less tokens.' },
+      default8: { zh: '(默认 8)', en: '(default 8)' },
       scalp: { zh: '超短', en: 'Scalp' },
       intraday: { zh: '日内', en: 'Intraday' },
       swing: { zh: '波段', en: 'Swing' },
@@ -582,7 +585,7 @@ export function IndicatorEditor({
                 <Clock className="w-3.5 h-3.5" style={{ color: '#848E9C' }} />
                 <span className="text-xs font-medium" style={{ color: '#EAECEF' }}>{t('timeframes')}</span>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-3">
                 <span className="text-[10px]" style={{ color: '#848E9C' }}>{t('klineCount')}:</span>
                 <input
                   type="number"
@@ -600,6 +603,30 @@ export function IndicatorEditor({
                   className="w-16 px-2 py-1 rounded text-xs text-center"
                   style={{ background: '#1E2329', border: '1px solid #2B3139', color: '#EAECEF' }}
                 />
+                <span className="text-[10px] mr-1" style={{ color: '#848E9C' }}>|</span>
+                <span className="text-[10px]" style={{ color: '#848E9C' }} title={t('maxCoinsInPromptDesc')}>{t('maxCoinsInPrompt')}:</span>
+                <input
+                  type="number"
+                  value={config.klines.max_coins_in_prompt && config.klines.max_coins_in_prompt > 0 ? config.klines.max_coins_in_prompt : ''}
+                  placeholder="8"
+                  onChange={(e) => {
+                    const v = e.target.value === '' ? undefined : parseInt(e.target.value, 10)
+                    if (disabled) return
+                    onChange({
+                      ...config,
+                      klines: { ...config.klines, max_coins_in_prompt: (v !== undefined && !Number.isNaN(v)) ? v : undefined },
+                    })
+                  }}
+                  disabled={disabled}
+                  min={1}
+                  max={20}
+                  className="w-14 px-2 py-1 rounded text-xs text-center"
+                  style={{ background: '#1E2329', border: '1px solid #2B3139', color: '#EAECEF' }}
+                  title={t('maxCoinsInPromptDesc')}
+                />
+                {(config.klines.max_coins_in_prompt ?? 0) <= 0 && (
+                  <span className="text-[10px]" style={{ color: '#848E9C' }}>{t('default8')}</span>
+                )}
               </div>
             </div>
             <p className="text-[10px] mb-2" style={{ color: '#5E6673' }}>{t('timeframesDesc')}</p>
