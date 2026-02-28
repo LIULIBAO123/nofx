@@ -237,7 +237,7 @@ type MockClientHooks struct {
 
 	// Custom return values
 	BuildUrlFunc           func() string
-	ParseResponseFunc      func([]byte) (string, error)
+	ParseResponseFunc      func([]byte) (string, *TokenUsage, error)
 	IsRetryableErrorFunc   func(error) bool
 	BuildRequestBodyFunc   func(string, string) map[string]any
 	MarshalRequestBodyFunc func(map[string]any) ([]byte, error)
@@ -282,12 +282,12 @@ func (m *MockClientHooks) marshalRequestBody(body map[string]any) ([]byte, error
 	return json.Marshal(body)
 }
 
-func (m *MockClientHooks) parseMCPResponse(body []byte) (string, error) {
+func (m *MockClientHooks) parseMCPResponse(body []byte) (string, *TokenUsage, error) {
 	m.ParseResponseCalled++
 	if m.ParseResponseFunc != nil {
 		return m.ParseResponseFunc(body)
 	}
-	return "mocked response", nil
+	return "mocked response", nil, nil
 }
 
 func (m *MockClientHooks) isRetryableError(err error) bool {

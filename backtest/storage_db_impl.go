@@ -211,16 +211,35 @@ func loadEquityPointsDB(runID string) ([]EquityPoint, error) {
 }
 
 func appendTradeEventDB(runID string, event TradeEvent) error {
+	var aiJSON string
+	var aiTS int64
+	var aiRating string
+	if event.AIAnalysis != nil {
+		if b, err := json.Marshal(event.AIAnalysis); err == nil {
+			aiJSON = string(b)
+		}
+		aiTS = event.AIAnalysis.GeneratedAt
+		// Optional: derive rating from OverallScore for display
+		if event.AIAnalysis.OverallScore >= 8 {
+			aiRating = "excellent"
+		} else if event.AIAnalysis.OverallScore >= 6 {
+			aiRating = "good"
+		} else if event.AIAnalysis.OverallScore >= 4 {
+			aiRating = "fair"
+		} else if event.AIAnalysis.OverallScore > 0 {
+			aiRating = "poor"
+		}
+	}
 	_, err := persistenceDB.Exec(convertQuery(`
-		INSERT INTO backtest_trades (run_id, ts, symbol, action, side, qty, price, fee, slippage, order_value, realized_pnl, leverage, cycle, position_after, liquidation, note)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), runID, event.Timestamp, event.Symbol, event.Action, event.Side, event.Quantity, event.Price, event.Fee, event.Slippage, event.OrderValue, event.RealizedPnL, event.Leverage, event.Cycle, event.PositionAfter, event.LiquidationFlag, event.Note)
+		INSERT INTO backtest_trades (run_id, ts, symbol, action, side, qty, price, fee, slippage, order_value, realized_pnl, leverage, cycle, position_after, liquidation, note, stop_loss, take_profit, atr_at_open, open_time, ai_analysis, ai_analysis_ts, analysis_rating)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), runID, event.Timestamp, event.Symbol, event.Action, event.Side, event.Quantity, event.Price, event.Fee, event.Slippage, event.OrderValue, event.RealizedPnL, event.Leverage, event.Cycle, event.PositionAfter, event.LiquidationFlag, event.Note, event.StopLoss, event.TakeProfit, event.ATRAtOpen, event.OpenTime, aiJSON, aiTS, aiRating)
 	return err
 }
 
 func loadTradeEventsDB(runID string) ([]TradeEvent, error) {
 	rows, err := persistenceDB.Query(convertQuery(`
-		SELECT ts, symbol, action, side, qty, price, fee, slippage, order_value, realized_pnl, leverage, cycle, position_after, liquidation, note
+		SELECT ts, symbol, action, side, qty, price, fee, slippage, order_value, realized_pnl, leverage, cycle, position_after, liquidation, note, COALESCE(stop_loss, 0), COALESCE(take_profit, 0), COALESCE(atr_at_open, 0), COALESCE(open_time, 0), ai_analysis, COALESCE(ai_analysis_ts, 0), COALESCE(analysis_rating, '')
 		FROM backtest_trades WHERE run_id = ? ORDER BY ts ASC
 	`), runID)
 	if err != nil {
@@ -230,8 +249,17 @@ func loadTradeEventsDB(runID string) ([]TradeEvent, error) {
 	events := make([]TradeEvent, 0)
 	for rows.Next() {
 		var event TradeEvent
-		if err := rows.Scan(&event.Timestamp, &event.Symbol, &event.Action, &event.Side, &event.Quantity, &event.Price, &event.Fee, &event.Slippage, &event.OrderValue, &event.RealizedPnL, &event.Leverage, &event.Cycle, &event.PositionAfter, &event.LiquidationFlag, &event.Note); err != nil {
+		var aiAnalysis sql.NullString
+		var aiTS int64
+		var aiRating sql.NullString
+		if err := rows.Scan(&event.Timestamp, &event.Symbol, &event.Action, &event.Side, &event.Quantity, &event.Price, &event.Fee, &event.Slippage, &event.OrderValue, &event.RealizedPnL, &event.Leverage, &event.Cycle, &event.PositionAfter, &event.LiquidationFlag, &event.Note, &event.StopLoss, &event.TakeProfit, &event.ATRAtOpen, &event.OpenTime, &aiAnalysis, &aiTS, &aiRating); err != nil {
 			return nil, err
+		}
+		if aiAnalysis.Valid && aiAnalysis.String != "" {
+			var a TradeAnalysis
+			if json.Unmarshal([]byte(aiAnalysis.String), &a) == nil {
+				event.AIAnalysis = &a
+			}
 		}
 		events = append(events, event)
 	}

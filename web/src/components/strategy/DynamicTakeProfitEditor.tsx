@@ -56,12 +56,15 @@ export function DynamicTakeProfitEditor({
       // Common Settings
       lockProfitPercent: { zh: '锁定利润阈值', en: 'Lock Profit Threshold' },
       lockProfitPercentDesc: { zh: '达到此盈利后移动止损到盈亏平衡点', en: 'Move stop to breakeven after this profit' },
+      minHoldMinutes: { zh: '最小持仓时间（分钟）', en: 'Min hold (minutes)' },
+      minHoldMinutesDesc: { zh: '未满此时间不触发动态止盈，避免开仓即止盈。0=不限制', en: 'Do not trigger before this many minutes; 0=no limit' },
     }
     return translations[key]?.[language] || key
   }
 
   const defaultConfig: DynamicTakeProfitConfig = {
     enabled: true,
+    min_hold_minutes: 5,
     fixed_enabled: false,
     fixed_percent: 8,
     scaled_enabled: true,
@@ -150,6 +153,26 @@ export function DynamicTakeProfitEditor({
 
       {currentConfig.enabled && (
         <>
+          {/* Min hold time */}
+          <div className="p-4 rounded-xl shadow-lg" style={{ background: 'linear-gradient(135deg, #1a1d24 0%, #0f1115 100%)', border: '1px solid #2B3139' }}>
+            <label className="text-xs block mb-1" style={{ color: '#848E9C' }}>{t('minHoldMinutes')}</label>
+            <div className="flex items-center gap-2 flex-wrap">
+              <input
+                type="number"
+                min={0}
+                max={120}
+                step={1}
+                value={currentConfig.min_hold_minutes ?? 5}
+                onChange={(e) => updateField('min_hold_minutes', parseFloat(e.target.value) || 0)}
+                disabled={disabled}
+                className="w-16 rounded px-2 py-1 text-sm"
+                style={{ background: '#1E2329', border: '1px solid #2B3139', color: '#EAECEF' }}
+              />
+              <span className="text-xs" style={{ color: '#848E9C' }}>{language === 'zh' ? '分钟' : 'min'}</span>
+              <span className="text-[10px]" style={{ color: '#5E6673' }}>{t('minHoldMinutesDesc')}</span>
+            </div>
+          </div>
+
           {/* Fixed Take Profit */}
           <div className="p-4 rounded-xl shadow-lg" style={{ background: 'linear-gradient(135deg, #1a1d24 0%, #0f1115 100%)', border: currentConfig.fixed_enabled ? '2px solid #0ECB81' : '1px solid #2B3139' }}>
             <label className="flex items-center gap-3 cursor-pointer mb-4">

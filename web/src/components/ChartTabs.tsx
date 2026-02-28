@@ -11,6 +11,7 @@ interface ChartTabsProps {
   selectedSymbol?: string // 从外部选择的币种
   updateKey?: number // 强制更新的 key
   exchangeId?: string // 交易所ID
+  isSimulation?: boolean // 实盘模拟：净值曲线无数据时显示友好提示
 }
 
 type ChartTab = 'equity' | 'kline'
@@ -51,7 +52,7 @@ function getMarketTypeFromExchange(exchangeId: string | undefined): MarketType {
   return 'crypto'
 }
 
-export function ChartTabs({ traderId, selectedSymbol, updateKey, exchangeId }: ChartTabsProps) {
+export function ChartTabs({ traderId, selectedSymbol, updateKey, exchangeId, isSimulation }: ChartTabsProps) {
   const { language } = useLanguage()
   const [activeTab, setActiveTab] = useState<ChartTab>('equity')
   const [chartSymbol, setChartSymbol] = useState<string>('BTC')
@@ -310,7 +311,7 @@ export function ChartTabs({ traderId, selectedSymbol, updateKey, exchangeId }: C
               transition={{ duration: 0.2 }}
               className="h-full w-full absolute inset-0"
             >
-              <EquityChart traderId={traderId} embedded />
+              <EquityChart traderId={traderId} embedded isSimulation={isSimulation} />
             </motion.div>
           ) : (
             <motion.div

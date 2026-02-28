@@ -1,3 +1,14 @@
+/** Latest AI token usage from backend (includes prompt cache when supported) */
+export interface AIUsage {
+  provider: string
+  model: string
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+  cache_read_input_tokens: number
+  cache_creation_input_tokens: number
+}
+
 export interface SystemStatus {
   trader_id: string
   trader_name: string
@@ -20,8 +31,9 @@ export interface AccountInfo {
   wallet_balance: number
   unrealized_profit: number // 未实现盈亏（交易所API官方值）
   available_balance: number
-  total_pnl: number
+  total_pnl: number       // 总盈亏 = 总资产 - 初始（含持仓浮盈/浮亏）
   total_pnl_pct: number
+  realized_pnl?: number   // 已实现盈亏（仅平仓后的盈亏，不含持仓）
   initial_balance: number
   daily_pnl: number
   position_count: number
@@ -40,6 +52,24 @@ export interface Position {
   unrealized_pnl_pct: number
   liquidation_price: number
   margin_used: number
+  stop_loss?: number
+  take_profit?: number
+  atr_at_open?: number
+  atr_multiple_sl?: number
+  atr_multiple_tp?: number
+  distance_to_sl_pct?: number
+  distance_to_tp_pct?: number
+  trailing_enabled?: boolean
+  scaled_tp_enabled?: boolean
+  scaled_tp_level?: number
+  scaled_tp_closed_pct?: number
+  trailing_tier_activated?: number
+  trailing_allowed_drawdown?: number
+  atr_period?: number
+  support_resistance_enabled?: boolean
+  support_resistance_buffer?: number
+  resistance_enabled?: boolean
+  resistance_buffer?: number
 }
 
 export interface DecisionAction {
@@ -104,6 +134,8 @@ export interface TraderInfo {
   use_ai500?: boolean
   use_oi_top?: boolean
   system_prompt_template?: string
+  /** 实盘模拟：虚拟资金，不发出真实订单 */
+  is_simulation?: boolean
 }
 
 export interface AIModel {
@@ -138,12 +170,16 @@ export interface Exchange {
   lighterPrivateKey?: string
   lighterApiKeyPrivateKey?: string
   lighterApiKeyIndex?: number
+  /** true=仅用于实盘模拟，与实盘交易分离 */
+  is_simulation?: boolean
 }
 
 export interface CreateExchangeRequest {
   exchange_type: string          // "binance", "bybit", "okx", "hyperliquid", "aster", "lighter"
   account_name: string           // User-defined account name
   enabled: boolean
+  /** true=仅用于实盘模拟，与实盘交易分离 */
+  is_simulation?: boolean
   api_key?: string
   secret_key?: string
   passphrase?: string
@@ -163,10 +199,12 @@ export interface CreateTraderRequest {
   ai_model_id: string
   exchange_id: string
   strategy_id?: string // 策略ID（新版，使用保存的策略配置）
-  initial_balance?: number // 可选：创建时由后端自动获取，编辑时可手动更新
+  initial_balance?: number // 可选：创建时由后端自动获取，编辑时可手动更新；实盘模拟时为必填虚拟初始资金
   scan_interval_minutes?: number
   is_cross_margin?: boolean
   show_in_competition?: boolean // 是否在竞技场显示
+  /** 实盘模拟：为 true 时 initial_balance 为自定义虚拟初始资金，不查询交易所 */
+  is_simulation?: boolean
   // 以下字段为向后兼容保留，新版使用策略配置
   btc_eth_leverage?: number
   altcoin_leverage?: number
@@ -295,6 +333,26 @@ export interface BacktestPositionStatus {
   unrealized_pnl: number;
   unrealized_pnl_pct: number;
   margin_used: number;
+  stop_loss?: number;
+  take_profit?: number;
+  atr_at_open?: number;
+  /** ATR as multiples (e.g. 1.6 = 1.6× ATR) for display */
+  atr_multiple_sl?: number;
+  atr_multiple_tp?: number;
+  /** Distance from current price to SL/TP as % (positive = room before hit) */
+  distance_to_sl_pct?: number;
+  distance_to_tp_pct?: number;
+  trailing_enabled?: boolean;
+  scaled_tp_enabled?: boolean;
+  scaled_tp_level?: number;
+  /** Cumulative % of position closed by scaled TP (0–100) */
+  scaled_tp_closed_pct?: number;
+  /** Trailing stop: which tier activated by profit (0=none, 1=first…) */
+  trailing_tier_activated?: number;
+  /** Trailing stop: allowed drawdown % at current tier */
+  trailing_allowed_drawdown?: number;
+  /** ATR period used (e.g. 14) */
+  atr_period?: number;
 }
 
 export interface BacktestStatusPayload {
@@ -340,6 +398,21 @@ export interface BacktestTradeEvent {
   liquidation: boolean;
   note?: string;
   ai_analysis?: TradeAnalysis;
+  /** 开仓时间（仅平仓事件有），用于展示持仓时间 */
+  open_time?: number;
+  stop_loss?: number;
+  take_profit?: number;
+  atr_at_open?: number;
+  /** 平仓原因：策略触发时为 initial_stop | trailing_stop | scaled_tp | fixed_tp 等 */
+  close_reason?: string;
+  /** 平仓时最终固定值（与当时持仓一致，仅 close 事件有） */
+  atr_multiple_sl?: number;
+  atr_multiple_tp?: number;
+  atr_period?: number;
+  scaled_tp_level?: number;
+  scaled_tp_closed_pct?: number;
+  trailing_tier_activated?: number;
+  trailing_allowed_drawdown?: number;
 }
 
 export interface TradeAnalysis {
@@ -385,6 +458,8 @@ export interface BacktestStartConfig {
   timeframes: string[];
   decision_timeframe: string;
   decision_cadence_nbars: number;
+  /** 与实盘一致：每 N 分钟一次决策（0=按 K 线节奏） */
+  decision_interval_minutes?: number;
   start_ts: number;
   end_ts: number;
   initial_balance: number;
@@ -578,6 +653,9 @@ export interface IndicatorConfig {
   enable_price_ranking?: boolean;
   price_ranking_duration?: string;  // "1h", "4h", "24h" or "1h,4h,24h"
   price_ranking_limit?: number;
+
+  /** 非主周期在 Prompt 中仅输出一行摘要（Close/EMA20/EMA50/ATR14），可显著减少 Token */
+  compact_non_primary_timeframe?: boolean;
 }
 
 export interface KlineConfig {
@@ -588,6 +666,8 @@ export interface KlineConfig {
   enable_multi_timeframe: boolean;
   // 新增：支持选择多个时间周期
   selected_timeframes?: string[];
+  /** 写入 Prompt 的候选币数上限（不含持仓），0=默认8，减小可省 Token */
+  max_coins_in_prompt?: number;
 }
 
 export interface ExternalDataSource {
@@ -619,6 +699,9 @@ export interface RiskControlConfig {
   min_risk_reward_ratio: number;   // Min take_profit / stop_loss ratio (AI guided)
   min_confidence: number;          // Min AI confidence to open position (AI guided)
 
+  // AI 仅开仓：true 时不执行 AI 的平仓建议，平仓完全由策略动态 SL/TP 执行（适应震荡市）
+  ai_only_entry?: boolean;
+
   // Dynamic Stop Loss & Take Profit
   dynamic_stop_loss?: DynamicStopLossConfig;
   dynamic_take_profit?: DynamicTakeProfitConfig;
@@ -628,6 +711,9 @@ export interface RiskControlConfig {
 export interface DynamicStopLossConfig {
   enabled: boolean;                // 是否启用动态止损
   trigger_logic: 'any' | 'all';    // 触发逻辑：'any' = 任一条件触发即平仓，'all' = 所有启用的条件都触发才平仓
+  
+  // 最小持仓时间（分钟），未满不触发动态止损，避免开仓即止损。0=不限制
+  min_hold_minutes?: number;
   
   // 初始固定止损（必需，作为保底）
   initial_stop_percent: number;    // 初始固定止损百分比 (例如: 3 = 3%)
@@ -646,6 +732,13 @@ export interface DynamicStopLossConfig {
   // 支撑阻力止损
   support_resistance_enabled?: boolean;  // 是否启用支撑阻力止损
   support_resistance_buffer?: number;    // 支撑/阻力位缓冲百分比 (例如: 0.5 = 0.5%)
+
+  // 连续确认再止损：减少单K线假跌破
+  confirm_cycles?: number;               // 连续 N 周期满足条件才执行止损，1=立即，2+=延迟确认
+
+  // 高波动宽容：ATR 高时更宽容
+  atr_tolerance_enabled?: boolean;      // 高波动时多要求 1 个确认周期 / 放宽 ATR 止损
+  atr_high_multiplier?: number;         // 当前 ATR > 长期 ATR * 此倍数视为高波动，默认 1.2
 }
 
 // 追踪止损层级
@@ -657,6 +750,9 @@ export interface TrailingStopLevel {
 // 动态止盈配置
 export interface DynamicTakeProfitConfig {
   enabled: boolean;                // 是否启用动态止盈
+  
+  // 最小持仓时间（分钟），未满不触发动态止盈，避免开仓即止盈。0=不限制
+  min_hold_minutes?: number;
   
   // 固定止盈
   fixed_enabled?: boolean;         // 是否启用固定止盈
@@ -826,6 +922,13 @@ export interface HistoricalPosition {
   leverage: number;
   status: string;
   close_reason: string;
+  // Fixed params at open (same as backtest trade history)
+  stop_loss?: number;
+  take_profit?: number;
+  atr_at_open?: number;
+  atr_multiple_sl?: number;
+  atr_multiple_tp?: number;
+  atr_period?: number;
   created_at: string;
   updated_at: string;
 }

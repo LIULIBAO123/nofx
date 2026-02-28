@@ -1,14 +1,15 @@
-import { useEffect, useState, useRef } from 'react'
+import React, { useEffect, useState, useRef } from 'react'
 import { mutate } from 'swr'
 import { api } from '../lib/api'
 import { ChartTabs } from '../components/ChartTabs'
 import { DecisionCard } from '../components/DecisionCard'
+import { AIUsageCard } from '../components/AIUsageCard'
 import { PositionHistory } from '../components/PositionHistory'
 import { PunkAvatar, getTraderAvatar } from '../components/PunkAvatar'
 import { confirmToast, notify } from '../lib/notify'
-import { formatPrice, formatQuantity } from '../utils/format'
+import { formatPrice, formatQuantity, formatFull } from '../utils/format'
 import { t, type Language } from '../i18n/translations'
-import { LogOut, Loader2, Eye, EyeOff, Copy, Check } from 'lucide-react'
+import { LogOut, Loader2, Eye, EyeOff, Copy, Check, ArrowLeft, Settings, RefreshCw } from 'lucide-react'
 import { DeepVoidBackground } from '../components/DeepVoidBackground'
 import { GrainOverlay } from '../components/ui/GrainOverlay'
 import { GridRiskPanel } from '../components/strategy/GridRiskPanel'
@@ -111,6 +112,10 @@ interface TraderDashboardPageProps {
     lastUpdate: string
     language: Language
     exchanges?: Exchange[]
+    /** 实盘模拟模式（虚拟资金，不发出真实订单） */
+    isSimulation?: boolean
+    /** 手动刷新看板数据（状态/账户/持仓/决策等） */
+    onRefresh?: () => void
 }
 
 export function TraderDashboardPage({
@@ -129,6 +134,8 @@ export function TraderDashboardPage({
     onTraderSelect,
     onNavigateToTraders,
     exchanges,
+    isSimulation,
+    onRefresh,
 }: TraderDashboardPageProps) {
     const [closingPosition, setClosingPosition] = useState<string | null>(null)
     const [selectedChartSymbol, setSelectedChartSymbol] = useState<string | undefined>(undefined)
@@ -375,6 +382,11 @@ export function TraderDashboardPage({
                                 <span className="text-3xl tracking-tight text-white font-semibold">
                                     {selectedTrader.trader_name}
                                 </span>
+                                {isSimulation && (
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-500/20 text-amber-400 border border-amber-500/30 mt-1 w-fit">
+                                        {language === 'zh' ? '实盘模拟' : 'Paper'}
+                                    </span>
+                                )}
                                 <span className="text-xs font-mono text-zinc-400 opacity-60 flex items-center gap-2">
                                     <div className="w-1.5 h-1.5 bg-teal-400 rounded-full" />
                                     ID: {selectedTrader.trader_id.slice(0, 8)}...
@@ -382,7 +394,20 @@ export function TraderDashboardPage({
                             </div>
                         </h2>
 
-                        <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-4 flex-wrap">
+                            {/* 实盘模拟：返回配置/列表页入口，便于找到「创建模拟交易员、模拟交易所」 */}
+                            {isSimulation && (
+                                <button
+                                    type="button"
+                                    onClick={onNavigateToTraders}
+                                    className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border border-amber-500/30 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-colors"
+                                    title={language === 'zh' ? '返回实盘模拟配置（交易员/交易所）' : 'Back to paper config (traders & exchanges)'}
+                                >
+                                    <ArrowLeft className="w-4 h-4 shrink-0" />
+                                    <Settings className="w-3.5 h-3.5 shrink-0" />
+                                    {language === 'zh' ? '实盘模拟配置' : 'Paper config'}
+                                </button>
+                            )}
                             {/* Trader Selector */}
                             {traders && traders.length > 0 && (
                                 <div className="flex items-center gap-2 modern-card px-1 py-1 rounded-lg border border-white/5">
@@ -497,14 +522,40 @@ export function TraderDashboardPage({
                     </div>
                 </div>
 
-                {/* Debug Info */}
-                {account && (
+                {/* 模拟交易隔离标识：明确标注当前为模拟交易看板 */}
+                {isSimulation && (
+                    <div className="mb-4 px-4 py-2 rounded-lg border border-amber-500/30 bg-amber-500/10 flex items-center gap-2">
+                        <span className="text-amber-400 font-semibold text-sm">
+                            {language === 'zh' ? '模拟交易' : 'Paper Trading'}
+                        </span>
+                        <span className="text-zinc-400 text-xs">
+                            {language === 'zh' ? '· 虚拟资金，不发出真实订单' : '· Virtual funds, no real orders'}
+                        </span>
+                    </div>
+                )}
+
+                {/* Debug Info + 手动刷新 */}
+                {(account || lastUpdate !== '--:--:--') && (
                     <div className="mb-4 px-3 py-1.5 rounded bg-black/40 border border-white/5 text-[10px] font-mono text-nofx-text-muted flex justify-between items-center opacity-60 hover:opacity-100 transition-opacity">
                         <span>SYSTEM_STATUS::ONLINE</span>
-                        <div className="flex gap-4">
+                        <div className="flex items-center gap-4">
                             <span>LAST_UPDATE::{lastUpdate}</span>
-                            <span>EQ::{account?.total_equity?.toFixed(2)}</span>
-                            <span>PNL::{account?.total_pnl?.toFixed(2)}</span>
+                            {account && (
+                                <>
+                                    <span>EQ::{account?.total_equity?.toFixed(2)}</span>
+                                    <span>PNL::{account?.total_pnl?.toFixed(2)}</span>
+                                </>
+                            )}
+                            {onRefresh && (
+                                <button
+                                    type="button"
+                                    onClick={onRefresh}
+                                    className="p-1 rounded hover:bg-white/10 text-nofx-text-muted hover:text-white transition-colors"
+                                    title={language === 'zh' ? '刷新数据' : 'Refresh data'}
+                                >
+                                    <RefreshCw className="w-3.5 h-3.5" />
+                                </button>
+                            )}
                         </div>
                     </div>
                 )}
@@ -532,6 +583,7 @@ export function TraderDashboardPage({
                         unit="USDT"
                         change={account?.total_pnl_pct || 0}
                         positive={(account?.total_pnl ?? 0) >= 0}
+                        subtitle={language === 'zh' ? `含持仓浮盈/浮亏${account?.realized_pnl !== undefined ? ` · 已实现: ${account.realized_pnl >= 0 ? '+' : ''}${account.realized_pnl.toFixed(2)}` : ''}` : `Includes unrealized${account?.realized_pnl !== undefined ? ` · Realized: ${account.realized_pnl >= 0 ? '+' : ''}${account.realized_pnl.toFixed(2)}` : ''}`}
                         icon="📈"
                     />
                     <StatCard
@@ -572,6 +624,7 @@ export function TraderDashboardPage({
                                     selectedTrader.exchange_id,
                                     exchanges
                                 )}
+                                isSimulation={isSimulation}
                             />
                         </div>
 
@@ -583,13 +636,23 @@ export function TraderDashboardPage({
                             <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity">
                                 <div className="w-24 h-24 rounded-full bg-blue-500 blur-3xl" />
                             </div>
-                            <div className="flex items-center justify-between mb-5 relative z-10">
+                            <div className="flex items-center justify-between mb-5 relative z-10 flex-wrap gap-2">
                                 <h2 className="text-lg font-bold flex items-center gap-2 text-nofx-text-main uppercase tracking-wide">
                                     <span className="text-blue-500">◈</span> {t('currentPositions', language)}
                                 </h2>
                                 {positions && positions.length > 0 && (
-                                    <div className="text-xs px-2 py-1 rounded bg-nofx-gold/10 text-nofx-gold border border-nofx-gold/20 font-mono shadow-[0_0_10px_rgba(240,185,11,0.1)]">
-                                        {positions.length} {t('active', language)}
+                                    <div className="flex items-center gap-3 flex-wrap">
+                                        <div className="text-xs px-2 py-1 rounded bg-nofx-gold/10 text-nofx-gold border border-nofx-gold/20 font-mono shadow-[0_0_10px_rgba(240,185,11,0.1)]">
+                                            {positions.length} {t('active', language)}
+                                        </div>
+                                        <div className="flex items-center gap-3 text-xs font-mono">
+                                            <span className="text-nofx-text-muted">
+                                                {language === 'zh' ? '保证金' : 'Margin'}: ${(positions.reduce((s, p) => s + (p.margin_used ?? 0), 0)).toFixed(2)}
+                                            </span>
+                                            <span className={`font-semibold ${positions.reduce((s, p) => s + p.unrealized_pnl, 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                                {language === 'zh' ? '浮盈' : 'uPnL'}: {positions.reduce((s, p) => s + p.unrealized_pnl, 0) >= 0 ? '+' : ''}{positions.reduce((s, p) => s + p.unrealized_pnl, 0).toFixed(2)}
+                                            </span>
+                                        </div>
                                     </div>
                                 )}
                             </div>
@@ -613,8 +676,8 @@ export function TraderDashboardPage({
                                             </thead>
                                             <tbody>
                                                 {paginatedPositions.map((pos, i) => (
+                                                    <React.Fragment key={i}>
                                                     <tr
-                                                        key={i}
                                                         className="border-b border-white/5 last:border-0 transition-all hover:bg-white/5 cursor-pointer group/row"
                                                         onClick={() => {
                                                             setSelectedChartSymbol(pos.symbol)
@@ -672,6 +735,40 @@ export function TraderDashboardPage({
                                                         </td>
                                                         <td className="px-1 py-3 font-mono whitespace-nowrap text-right text-nofx-text-muted hidden md:table-cell">{formatPrice(pos.liquidation_price)}</td>
                                                     </tr>
+                                                    {(() => {
+                                                        const hasLive = pos.distance_to_sl_pct != null || pos.distance_to_tp_pct != null || pos.trailing_enabled || pos.scaled_tp_enabled || pos.support_resistance_enabled || pos.resistance_enabled
+                                                        return (
+                                                        <tr className="border-b border-white/5 bg-white/[0.02]">
+                                                            <td colSpan={10} className="px-2 py-2 text-[11px]">
+                                                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 font-mono">
+                                                                    {/* 固定实时参数：始终显示，有值显示数值否则显示 — */}
+                                                                    <div className="rounded-lg px-2.5 py-2 grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-0.5 text-[11px] font-mono" style={{ background: 'rgba(43,49,57,0.4)', border: '1px solid rgba(43,49,57,0.6)' }}>
+                                                                        <div className="flex items-center gap-1.5"><span className="text-nofx-text-muted shrink-0">{language === 'zh' ? '止损价' : 'SL'}</span><span className={(pos.stop_loss != null && pos.stop_loss > 0) ? 'text-red-400 font-medium' : 'text-nofx-text-muted'}>{(pos.stop_loss != null && pos.stop_loss > 0) ? '$' + formatFull(pos.stop_loss) : '—'}</span></div>
+                                                                        <div className="flex items-center gap-1.5"><span className="text-nofx-text-muted shrink-0">{language === 'zh' ? '止盈价' : 'TP'}</span><span className={(pos.take_profit != null && pos.take_profit > 0) ? 'text-emerald-400 font-medium' : 'text-nofx-text-muted'}>{(pos.take_profit != null && pos.take_profit > 0) ? '$' + formatFull(pos.take_profit) : '—'}</span></div>
+                                                                        <div className="flex items-center gap-1.5"><span className="text-nofx-text-muted shrink-0">ATR ×</span><span className="text-nofx-text-main">{((pos.atr_multiple_sl != null && pos.atr_multiple_sl > 0) || (pos.atr_multiple_tp != null && pos.atr_multiple_tp > 0)) ? (pos.atr_multiple_sl != null && pos.atr_multiple_sl > 0 ? formatFull(pos.atr_multiple_sl, 2) + '×' : '—') + ((pos.atr_multiple_sl != null && pos.atr_multiple_sl > 0) && (pos.atr_multiple_tp != null && pos.atr_multiple_tp > 0) ? ' / ' : '') + (pos.atr_multiple_tp != null && pos.atr_multiple_tp > 0 ? formatFull(pos.atr_multiple_tp, 2) + '×' : '') : '—'}</span></div>
+                                                                        <div className="flex items-center gap-1.5"><span className="text-nofx-text-muted shrink-0">ATR {language === 'zh' ? '数值' : 'value'}</span><span className="text-nofx-text-main">{(pos.atr_at_open != null && pos.atr_at_open > 0) ? '$' + formatFull(pos.atr_at_open, 6) : '—'}</span></div>
+                                                                        <div className="flex items-center gap-1.5"><span className="text-nofx-text-muted shrink-0">ATR {language === 'zh' ? '周期' : 'period'}</span><span className="text-nofx-text-muted">{(pos.atr_period != null && pos.atr_period > 0) ? String(pos.atr_period) : '—'}</span></div>
+                                                                        <div className="col-span-2 sm:col-span-3 text-[10px] mt-0.5" style={{ color: '#848E9C' }}>{language === 'zh' ? '参数在开仓时写入并持久保存，随刷新实时显示；距止损/距止盈随行情更新。无记录时显示 —' : 'Params saved at open and shown on each refresh; distance to SL/TP updates with price. No record = —'}</div>
+                                                                    </div>
+                                                                    {hasLive && (
+                                                                        <div className="rounded-lg px-2.5 py-2 grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-0.5 text-[11px] font-mono" style={{ background: 'rgba(30,35,41,0.6)', border: '1px solid #2B3139' }}>
+                                                                            {pos.distance_to_sl_pct != null && (<div className="flex items-center gap-1.5"><span className="text-nofx-text-muted shrink-0">{language === 'zh' ? '距止损' : 'To SL'}</span><span className={pos.distance_to_sl_pct >= 0 ? 'text-emerald-400 font-medium' : 'text-red-400 font-medium'}>{pos.distance_to_sl_pct >= 0 ? '+' : ''}{formatFull(pos.distance_to_sl_pct, 3)}%</span></div>)}
+                                                                            {pos.distance_to_tp_pct != null && (<div className="flex items-center gap-1.5"><span className="text-nofx-text-muted shrink-0">{language === 'zh' ? '距止盈' : 'To TP'}</span><span className={pos.distance_to_tp_pct >= 0 ? 'text-emerald-400 font-medium' : 'text-nofx-text-muted'}>{pos.distance_to_tp_pct >= 0 ? '+' : ''}{formatFull(pos.distance_to_tp_pct, 3)}%</span></div>)}
+                                                                            {pos.trailing_enabled && (<div className="flex items-center gap-1.5"><span className="text-nofx-text-muted shrink-0">{language === 'zh' ? '追踪止损' : 'Trailing'}</span><span className="text-nofx-gold">{(pos.trailing_tier_activated ?? 0) > 0 ? (language === 'zh' ? `L${pos.trailing_tier_activated} 激活` : `L${pos.trailing_tier_activated} on`) : (language === 'zh' ? '未激活' : 'off')}</span></div>)}
+                                                                            {pos.trailing_enabled && pos.trailing_allowed_drawdown != null && pos.trailing_allowed_drawdown > 0 && (pos.trailing_tier_activated ?? 0) > 0 && (<div className="flex items-center gap-1.5"><span className="text-nofx-text-muted shrink-0">{language === 'zh' ? '允许回撤' : 'Allowed DD'}</span><span className="text-nofx-gold">{formatFull(pos.trailing_allowed_drawdown, 2)}%</span></div>)}
+                                                                            {pos.scaled_tp_enabled && (<div className="flex items-center gap-1.5"><span className="text-nofx-text-muted shrink-0">{language === 'zh' ? '分层止盈' : 'Scaled TP'}</span><span className="text-nofx-gold">{(pos.scaled_tp_level ?? 0) > 0 ? (language === 'zh' ? `L${pos.scaled_tp_level} 激活` : `L${pos.scaled_tp_level} on`) : (language === 'zh' ? '未激活' : 'off')}</span></div>)}
+                                                                            {pos.scaled_tp_enabled && pos.scaled_tp_closed_pct != null && pos.scaled_tp_closed_pct > 0 && (<div className="flex items-center gap-1.5"><span className="text-nofx-text-muted shrink-0">{language === 'zh' ? '已平仓' : 'Closed'}</span><span className="text-emerald-400">{formatFull(pos.scaled_tp_closed_pct, 2)}%</span></div>)}
+                                                                            {pos.support_resistance_enabled && (<div className="flex items-center gap-1.5"><span className="text-nofx-text-muted shrink-0">{language === 'zh' ? '支撑阻力止损' : 'S/R Stop'}</span><span className="text-nofx-gold">{language === 'zh' ? '已开' : 'on'}{pos.support_resistance_buffer != null && pos.support_resistance_buffer > 0 ? ` (${formatFull(pos.support_resistance_buffer, 2)}%)` : ''}</span></div>)}
+                                                                            {pos.resistance_enabled && (<div className="flex items-center gap-1.5"><span className="text-nofx-text-muted shrink-0">{language === 'zh' ? '阻力位止盈' : 'Resistance TP'}</span><span className="text-nofx-gold">{language === 'zh' ? '已开' : 'on'}{pos.resistance_buffer != null && pos.resistance_buffer > 0 ? ` (${formatFull(pos.resistance_buffer, 2)}%)` : ''}</span></div>)}
+                                                                            <div className="flex items-center gap-1.5"><span className="text-nofx-text-muted shrink-0">{language === 'zh' ? '当前盈亏' : 'PnL'}</span><span className={`font-medium ${pos.unrealized_pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{pos.unrealized_pnl_pct >= 0 ? '+' : ''}{formatFull(pos.unrealized_pnl_pct, 3)}%</span></div>
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            </td>
+                                                        </tr>
+                                                        )
+                                                    })()}
+                                                    </React.Fragment>
                                                 ))}
                                             </tbody>
                                         </table>
@@ -759,12 +856,20 @@ export function TraderDashboardPage({
                             </div>
                             <div className="flex-1">
                                 <h2 className="text-xl font-bold text-nofx-text-main">
-                                    {t('recentDecisions', language)}
+                                    {language === 'zh' ? 'AI 决策 / 分析' : 'AI Decisions / Analysis'}
                                 </h2>
+                                <div className="text-xs text-nofx-text-muted mt-0.5">
+                                    {language === 'zh' ? '与回测实验室一致的思维链与决策记录' : 'Same as Backtest Lab: chain-of-thought and decision log'}
+                                </div>
                                 {decisions && decisions.length > 0 && (
-                                    <div className="text-xs text-nofx-text-muted">
-                                        {t('lastCycles', language, { count: decisions.length })}
-                                    </div>
+                                    <>
+                                        <div className="text-xs text-nofx-text-muted mt-0.5">
+                                            {t('lastCycles', language, { count: decisions.length })}
+                                        </div>
+                                        <div className="text-[11px] text-nofx-text-muted mt-1 opacity-90">
+                                            {t('decisionListHint', language)}
+                                        </div>
+                                    </>
                                 )}
                             </div>
                             {/* Limit Selector */}
@@ -781,10 +886,15 @@ export function TraderDashboardPage({
                             </select>
                         </div>
 
+                        {/* Token 用量：按当前交易员隔离，仅显示本交易员的用量 */}
+                        <div className="mb-4 shrink-0">
+                            <AIUsageCard language={language} traderId={selectedTraderId} />
+                        </div>
+
                         {/* Decisions List - Scrollable */}
                         <div
                             className="space-y-4 overflow-y-auto pr-2 custom-scrollbar"
-                            style={{ maxHeight: 'calc(100vh - 280px)' }}
+                            style={{ maxHeight: 'calc(100vh - 380px)' }}
                         >
                             {decisions && decisions.length > 0 ? (
                                 decisions.map((decision, i) => (

@@ -40,11 +40,25 @@ import {
   ReferenceDot,
 } from 'recharts'
 import { api } from '../lib/api'
+import { formatFull } from '../utils/format'
 import { useLanguage } from '../contexts/LanguageContext'
 import { t } from '../i18n/translations'
 import { confirmToast } from '../lib/notify'
 import { DecisionCard } from './DecisionCard'
 import { MetricTooltip } from './MetricTooltip'
+import { AIUsageCard } from './AIUsageCard'
+
+function formatHoldingDuration(closeTs: number, openTs: number): string {
+  const ms = closeTs - openTs
+  if (ms <= 0) return '0m'
+  const mins = Math.floor(ms / 60000)
+  if (mins < 60) return `${mins}m`
+  const h = Math.floor(mins / 60)
+  const m = mins % 60
+  return m > 0 ? `${h}h ${m}m` : `${h}h`
+}
+
+
 import type {
   BacktestStatusPayload,
   BacktestPositionStatus,
@@ -61,7 +75,7 @@ import type {
 type WizardStep = 1 | 2 | 3
 type ViewTab = 'overview' | 'chart' | 'trades' | 'decisions' | 'analysis'
 
-const TIMEFRAME_OPTIONS = ['1m', '3m', '5m', '15m', '30m', '1h', '4h', '1d']
+const TIMEFRAME_OPTIONS = ['1m', '3m', '5m', '10m', '15m', '30m', '1h', '4h', '1d']
 const POPULAR_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'DOGEUSDT']
 
 // ============ Helper Functions ============
@@ -558,6 +572,17 @@ function TradeTimeline({ trades, language }: { trades: BacktestTradeEvent[]; lan
         const iconColor = isOpen ? '#0ECB81' : '#F6465D'
         const hasAnalysis = trade.ai_analysis && !trade.ai_analysis.analysis_error
 
+        const hasParams = (trade.stop_loss != null && trade.stop_loss > 0) || (trade.take_profit != null && trade.take_profit > 0) || (trade.atr_at_open != null && trade.atr_at_open > 0)
+        const atrMultSl = trade.atr_multiple_sl != null && trade.atr_multiple_sl > 0
+          ? trade.atr_multiple_sl
+          : (trade.atr_at_open != null && trade.atr_at_open > 0 && trade.stop_loss != null && trade.stop_loss > 0
+            ? (Math.abs(trade.price - trade.stop_loss) / trade.atr_at_open) : null)
+        const atrMultTp = trade.atr_multiple_tp != null && trade.atr_multiple_tp > 0
+          ? trade.atr_multiple_tp
+          : (trade.atr_at_open != null && trade.atr_at_open > 0 && trade.take_profit != null && trade.take_profit > 0
+            ? (Math.abs(trade.take_profit - trade.price) / trade.atr_at_open) : null)
+        const isClose = trade.action.includes('close')
+
         return (
           <motion.div
             key={`${trade.ts}-${trade.symbol}-${idx}`}
@@ -567,60 +592,91 @@ function TradeTimeline({ trades, language }: { trades: BacktestTradeEvent[]; lan
             className="p-3 rounded-lg"
             style={{ background: bgColor, border: `1px solid ${borderColor}` }}
           >
-            <div className="flex items-center gap-3">
-              <div
-                className="w-8 h-8 rounded-full flex items-center justify-center"
-                style={{ background: `${iconColor}20` }}
-              >
-                {isLong ? (
-                  <TrendingUp className="w-4 h-4" style={{ color: iconColor }} />
-                ) : (
-                  <TrendingDown className="w-4 h-4" style={{ color: iconColor }} />
-                )}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="font-mono font-bold text-sm" style={{ color: '#EAECEF' }}>
-                    {trade.symbol.replace('USDT', '')}
-                  </span>
-                  <span
-                    className="px-2 py-0.5 rounded text-xs font-medium"
-                    style={{ background: `${iconColor}20`, color: iconColor }}
-                  >
-                    {trade.action.replace('_', ' ').toUpperCase()}
-                  </span>
-                  {trade.leverage && (
-                    <span className="text-xs" style={{ color: '#848E9C' }}>
-                      {trade.leverage}x
-                    </span>
-                  )}
-                  {hasAnalysis && trade.ai_analysis && (
-                    <span
-                      className="px-1.5 py-0.5 rounded text-xs font-medium flex items-center gap-1"
-                      style={{ background: '#F0B90B20', color: '#F0B90B' }}
-                    >
-                      <Brain className="w-3 h-3" />
-                      {trade.ai_analysis.overall_score?.toFixed(1)}/10
-                    </span>
-                  )}
-                </div>
-                <div className="text-xs mt-1" style={{ color: '#848E9C' }}>
-                  {new Date(trade.ts).toLocaleString()} · Qty: {trade.qty.toFixed(4)} · ${trade.price.toFixed(2)}
-                </div>
-              </div>
-              <div className="text-right">
+            {/* 头部：标的 + 方向 + 杠杆 + 盈亏 */}
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
                 <div
-                  className="font-mono font-bold"
+                  className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center"
+                  style={{ background: `${iconColor}20` }}
+                >
+                  {isLong ? (
+                    <TrendingUp className="w-4 h-4" style={{ color: iconColor }} />
+                  ) : (
+                    <TrendingDown className="w-4 h-4" style={{ color: iconColor }} />
+                  )}
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-mono font-bold text-sm" style={{ color: '#EAECEF' }}>
+                      {trade.symbol.replace('USDT', '')}
+                    </span>
+                    <span
+                      className="px-2 py-0.5 rounded text-xs font-medium"
+                      style={{ background: `${iconColor}20`, color: iconColor }}
+                    >
+                      {trade.action.replace('_', ' ').toUpperCase()}
+                    </span>
+                    {trade.leverage != null && trade.leverage > 0 && (
+                      <span className="text-xs" style={{ color: '#848E9C' }}>{trade.leverage}x</span>
+                    )}
+                    {hasAnalysis && trade.ai_analysis && (
+                      <span
+                        className="px-1.5 py-0.5 rounded text-xs font-medium flex items-center gap-1"
+                        style={{ background: '#F0B90B20', color: '#F0B90B' }}
+                      >
+                        <Brain className="w-3 h-3" />
+                        {trade.ai_analysis.overall_score?.toFixed(1)}/10
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-xs mt-0.5" style={{ color: '#848E9C' }}>
+                    {new Date(trade.ts).toLocaleString()} · Qty: {formatFull(trade.qty, 6)} · ${formatFull(trade.price)}
+                    {trade.open_time != null && trade.open_time > 0 && (
+                      <span className="ml-1.5" style={{ color: '#F0B90B' }} title={language === 'zh' ? '该平仓对应的开仓时间（若下方紧接开仓，则为更早那笔开仓的平仓）' : 'Open time for this close (if an open follows below, this close is for an earlier open)'}>
+                        · {language === 'zh' ? '持仓' : 'Held'}: {formatHoldingDuration(trade.ts, trade.open_time)}
+                        {trade.action.includes('close') && (
+                          <span className="ml-1 opacity-80" style={{ color: '#848E9C', fontSize: '10px' }}>
+                            ({language === 'zh' ? '开' : 'open'} {new Date(trade.open_time).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })})
+                          </span>
+                        )}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <div className="text-right flex-shrink-0">
+                <div
+                  className="font-mono font-bold text-sm"
                   style={{ color: trade.realized_pnl >= 0 ? '#0ECB81' : '#F6465D' }}
                 >
-                  {trade.realized_pnl >= 0 ? '+' : ''}
-                  {trade.realized_pnl.toFixed(2)}
-                </div>
-                <div className="text-xs" style={{ color: '#848E9C' }}>
-                  USDT
+                  {trade.realized_pnl >= 0 ? '+' : ''}{formatFull(trade.realized_pnl, 4)} USDT
                 </div>
               </div>
             </div>
+
+            {/* 与当时持仓一致的参数（不显示「固定」）；平仓时第二块为平仓刻的最终固定值 */}
+            {hasParams && (
+              <div className="mt-2 pt-2 border-t border-white/5 grid grid-cols-1 sm:grid-cols-2 gap-2 font-mono text-[11px]">
+                <div className="rounded-lg px-2.5 py-2 grid grid-cols-2 gap-x-3 gap-y-1" style={{ background: 'rgba(43,49,57,0.4)', border: '1px solid rgba(43,49,57,0.6)' }}>
+                  {trade.stop_loss != null && trade.stop_loss > 0 && (<><span style={{ color: '#848E9C' }}>{language === 'zh' ? '止损价' : 'SL'}</span><span style={{ color: '#EAECEF' }}>${formatFull(trade.stop_loss)}</span></>)}
+                  {trade.take_profit != null && trade.take_profit > 0 && (<><span style={{ color: '#848E9C' }}>{language === 'zh' ? '止盈价' : 'TP'}</span><span style={{ color: '#EAECEF' }}>${formatFull(trade.take_profit)}</span></>)}
+                  {trade.stop_loss != null && trade.stop_loss > 0 && (<><span style={{ color: '#848E9C' }}>{language === 'zh' ? '初始止损位' : 'Initial SL'}</span><span style={{ color: '#848E9C' }}>${formatFull(trade.stop_loss)}</span></>)}
+                  {(atrMultSl != null || atrMultTp != null) && (<><span style={{ color: '#848E9C' }}>ATR ×</span><span style={{ color: '#EAECEF' }}>{atrMultSl != null ? formatFull(atrMultSl, 2) + '×' : '—'}{(atrMultSl != null && atrMultTp != null) ? ' / ' : ''}{atrMultTp != null ? formatFull(atrMultTp, 2) + '×' : ''}</span></>)}
+                  {trade.atr_at_open != null && trade.atr_at_open > 0 && (<><span style={{ color: '#848E9C' }}>ATR {language === 'zh' ? '数值' : 'value'}</span><span style={{ color: '#EAECEF' }}>${formatFull(trade.atr_at_open, 6)}</span></>)}
+                  {trade.atr_period != null && trade.atr_period > 0 && (<><span style={{ color: '#848E9C' }}>ATR {language === 'zh' ? '周期' : 'period'}</span><span style={{ color: '#848E9C' }}>{trade.atr_period}</span></>)}
+                </div>
+                {(isClose && (trade.close_reason || (trade.trailing_tier_activated ?? 0) > 0 || (trade.scaled_tp_closed_pct ?? 0) > 0 || trade.realized_pnl !== 0)) && (
+                  <div className="rounded-lg px-2.5 py-2 grid grid-cols-2 gap-x-3 gap-y-1" style={{ background: 'rgba(30,35,41,0.6)', border: '1px solid #2B3139' }}>
+                    {trade.close_reason && (<><span style={{ color: '#848E9C' }}>{language === 'zh' ? '平仓原因' : 'Close reason'}</span><span style={{ color: '#B7BDC6' }}>{trade.close_reason}</span></>)}
+                    {(trade.trailing_tier_activated ?? 0) > 0 && (<><span style={{ color: '#848E9C' }}>{language === 'zh' ? '追踪止损档位' : 'Trailing tier'}</span><span style={{ color: '#F0B90B' }}>L{trade.trailing_tier_activated}</span></>)}
+                    {(trade.trailing_allowed_drawdown ?? 0) > 0 && (trade.trailing_tier_activated ?? 0) > 0 && (<><span style={{ color: '#848E9C' }}>{language === 'zh' ? '允许回撤' : 'Allowed DD'}</span><span style={{ color: '#F0B90B' }}>{formatFull(trade.trailing_allowed_drawdown!, 2)}%</span></>)}
+                    {(trade.scaled_tp_level ?? 0) > 0 && (<><span style={{ color: '#848E9C' }}>{language === 'zh' ? '分层止盈档位' : 'Scaled TP level'}</span><span style={{ color: '#F0B90B' }}>L{trade.scaled_tp_level}</span></>)}
+                    {(trade.scaled_tp_closed_pct ?? 0) > 0 && (<><span style={{ color: '#848E9C' }}>{language === 'zh' ? '已平仓' : 'Closed'}</span><span style={{ color: '#0ECB81' }}>{formatFull(trade.scaled_tp_closed_pct!, 2)}%</span></>)}
+                    <><span style={{ color: '#848E9C' }}>{language === 'zh' ? '已实现盈亏' : 'Realized PnL'}</span><span style={{ color: trade.realized_pnl >= 0 ? '#0ECB81' : '#F6465D' }}>{trade.realized_pnl >= 0 ? '+' : ''}{formatFull(trade.realized_pnl, 4)} USDT</span></>
+                  </div>
+                )}
+              </div>
+            )}
             
             {/* AI Analysis Section */}
             {hasAnalysis && trade.ai_analysis && (
@@ -662,9 +718,13 @@ function TradeTimeline({ trades, language }: { trades: BacktestTradeEvent[]; lan
 
 // AI Analysis Display Component
 function AIAnalysisDisplay({ trades, language }: { trades: BacktestTradeEvent[]; language: string }) {
-  // Filter trades with AI analysis
+  // Trades with successful AI analysis (for stats and list)
   const analyzedTrades = useMemo(() => {
     return trades.filter((t) => t.ai_analysis && !t.ai_analysis.analysis_error)
+  }, [trades])
+  // Trades with analysis attempted but failed (show in tab so user sees "分析失败")
+  const failedAnalysisTrades = useMemo(() => {
+    return trades.filter((t) => t.ai_analysis?.analysis_error)
   }, [trades])
 
   // Calculate statistics
@@ -702,13 +762,23 @@ function AIAnalysisDisplay({ trades, language }: { trades: BacktestTradeEvent[];
   }, [analyzedTrades])
 
   if (analyzedTrades.length === 0) {
+    const hasCloses = trades.some((t) => t.action === 'close_long' || t.action === 'close_short')
+    const hint = hasCloses
+      ? (failedAnalysisTrades.length > 0
+          ? (language === 'zh'
+              ? `有 ${failedAnalysisTrades.length} 笔平仓触发了分析但分析失败，请检查 AI 模型配置与网络。`
+              : `${failedAnalysisTrades.length} close(s) triggered analysis but failed. Check AI model and network.`)
+          : (language === 'zh'
+              ? '本回测有平仓记录但暂无AI分析，请确认已启用「交易AI分析」并检查回测配置与AI模型。'
+              : 'This run has closed trades but no AI analysis yet. Ensure "Trade AI Analysis" is enabled and AI model is configured.'))
+      : (language === 'zh'
+          ? '暂无已平仓交易。AI分析将在有平仓记录后显示，请确保回测配置中已启用「交易AI分析」。'
+          : 'No closed trades yet. AI analysis will appear after closes. Enable "Trade AI Analysis" in backtest config.')
     return (
       <div className="py-12 text-center" style={{ color: '#5E6673' }}>
         <Brain className="w-12 h-12 mx-auto mb-4 opacity-30" />
         <p>{language === 'zh' ? '暂无AI分析数据' : 'No AI analysis data available'}</p>
-        <p className="text-xs mt-2">
-          {language === 'zh' ? '请在回测配置中启用"交易AI分析"功能' : 'Enable "Trade AI Analysis" in backtest config'}
-        </p>
+        <p className="text-xs mt-2 max-w-md mx-auto">{hint}</p>
       </div>
     )
   }
@@ -900,6 +970,11 @@ function AIAnalysisDisplay({ trades, language }: { trades: BacktestTradeEvent[];
                       </div>
                       <div className="text-xs mt-1" style={{ color: '#848E9C' }}>
                         {new Date(trade.ts).toLocaleString()} · ${trade.price.toFixed(2)}
+                        {trade.open_time != null && trade.open_time > 0 && (
+                          <span className="ml-2" style={{ color: '#F0B90B' }}>
+                            · {language === 'zh' ? '持仓' : 'Held'}: {formatHoldingDuration(trade.ts, trade.open_time)}
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1072,73 +1147,151 @@ function PositionsDisplay({
         </div>
       </div>
 
-      <div className="space-y-1.5">
+      <div className="space-y-2">
         {positions.map((pos) => {
           const isLong = pos.side === 'long'
           const pnlColor = pos.unrealized_pnl >= 0 ? '#0ECB81' : '#F6465D'
+          const hasParams = (pos.stop_loss != null && pos.stop_loss > 0) || (pos.take_profit != null && pos.take_profit > 0) || (pos.atr_at_open != null && pos.atr_at_open > 0) || (pos.atr_multiple_sl != null && pos.atr_multiple_sl > 0) || (pos.atr_multiple_tp != null && pos.atr_multiple_tp > 0)
+          const hasLive = pos.distance_to_sl_pct != null || pos.distance_to_tp_pct != null || (pos.trailing_enabled && (pos.trailing_tier_activated != null && pos.trailing_tier_activated > 0)) || (pos.scaled_tp_enabled && (pos.scaled_tp_level != null && pos.scaled_tp_level > 0))
 
           return (
             <motion.div
               key={`${pos.symbol}-${pos.side}`}
-              initial={{ opacity: 0, scale: 0.95 }}
+              initial={{ opacity: 0, scale: 0.98 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="flex items-center justify-between p-2 rounded"
-              style={{ background: '#1E2329' }}
+              className="rounded-xl overflow-hidden"
+              style={{ background: 'linear-gradient(180deg, #1E2329 0%, #181B21 100%)', border: '1px solid #2B3139', boxShadow: '0 2px 8px rgba(0,0,0,0.2)' }}
             >
-              <div className="flex items-center gap-2">
-                <div
-                  className="w-6 h-6 rounded flex items-center justify-center"
-                  style={{ background: isLong ? '#0ECB8120' : '#F6465D20' }}
-                >
-                  {isLong ? (
-                    <TrendingUp className="w-3.5 h-3.5" style={{ color: '#0ECB81' }} />
-                  ) : (
-                    <TrendingDown className="w-3.5 h-3.5" style={{ color: '#F6465D' }} />
-                  )}
-                </div>
-                <div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="font-mono font-bold text-sm" style={{ color: '#EAECEF' }}>
-                      {pos.symbol.replace('USDT', '')}
-                    </span>
-                    <span
-                      className="px-1 py-0.5 rounded text-[10px] font-medium"
-                      style={{
-                        background: isLong ? '#0ECB8120' : '#F6465D20',
-                        color: isLong ? '#0ECB81' : '#F6465D',
-                      }}
-                    >
-                      {isLong ? 'LONG' : 'SHORT'} {pos.leverage}x
-                    </span>
+              {/* Header: symbol, side, leverage, qty, margin, entry, mark, PnL — full precision */}
+              <div className="p-3 flex items-start justify-between gap-3">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div
+                    className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
+                    style={{ background: isLong ? '#0ECB8118' : '#F6465D18' }}
+                  >
+                    {isLong ? <TrendingUp className="w-4 h-4" style={{ color: '#0ECB81' }} /> : <TrendingDown className="w-4 h-4" style={{ color: '#F6465D' }} />}
                   </div>
-                  <div className="text-[10px]" style={{ color: '#5E6673' }}>
-                    {language === 'zh' ? '数量' : 'Qty'}: {pos.quantity.toFixed(4)} ·{' '}
-                    {language === 'zh' ? '保证金' : 'Margin'}: ${pos.margin_used.toFixed(2)}
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-semibold text-sm tracking-tight" style={{ color: '#EAECEF' }}>{pos.symbol.replace('USDT', '')}</span>
+                      <span className="px-1.5 py-0.5 rounded text-[11px] font-medium" style={{ background: isLong ? '#0ECB8120' : '#F6465D20', color: isLong ? '#0ECB81' : '#F6465D' }}>
+                        {isLong ? 'LONG' : 'SHORT'} {pos.leverage}x
+                      </span>
+                    </div>
+                    <div className="text-[11px] mt-0.5 font-mono" style={{ color: '#848E9C' }}>
+                      {language === 'zh' ? '数量' : 'Qty'} {formatFull(pos.quantity, 6)} · {language === 'zh' ? '保证金' : 'Margin'} ${formatFull(pos.margin_used, 4)}
+                    </div>
+                  </div>
+                </div>
+                <div className="text-right shrink-0">
+                  <div className="text-[11px] font-mono" style={{ color: '#848E9C' }}>
+                    {language === 'zh' ? '开仓' : 'Entry'} ${formatFull(pos.entry_price)} · {language === 'zh' ? '现价' : 'Mark'} ${formatFull(pos.mark_price)}
+                  </div>
+                  <div className="font-mono font-semibold text-sm mt-0.5" style={{ color: pnlColor }}>
+                    {pos.unrealized_pnl >= 0 ? '+' : ''}{formatFull(pos.unrealized_pnl, 4)} USDT ({pos.unrealized_pnl_pct >= 0 ? '+' : ''}{formatFull(pos.unrealized_pnl_pct, 3)}%)
                   </div>
                 </div>
               </div>
 
-              <div className="text-right">
-                <div className="flex items-center gap-2 text-xs">
-                  <span style={{ color: '#848E9C' }}>
-                    {language === 'zh' ? '开仓' : 'Entry'}: ${pos.entry_price.toFixed(2)}
-                  </span>
-                  <span style={{ color: '#EAECEF' }}>
-                    {language === 'zh' ? '现价' : 'Mark'}: ${pos.mark_price.toFixed(2)}
-                  </span>
+              {/* Block 1: SL/TP/ATR — 与实盘/实盘模拟一致：标签与数值同行紧凑，关键数据上色 */}
+              {hasParams && (
+                <div className="px-3 pb-2.5">
+                  <div className="rounded-lg px-2.5 py-2 grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-0.5 text-[11px] font-mono" style={{ background: 'rgba(43,49,57,0.4)', border: '1px solid rgba(43,49,57,0.6)' }}>
+                    {(pos.stop_loss != null && pos.stop_loss > 0) && (
+                      <div className="flex items-center gap-1.5">
+                        <span style={{ color: '#848E9C' }}>{language === 'zh' ? '止损价' : 'SL'}</span>
+                        <span style={{ color: '#F87171' }} className="font-medium">${formatFull(pos.stop_loss)}</span>
+                      </div>
+                    )}
+                    {(pos.take_profit != null && pos.take_profit > 0) && (
+                      <div className="flex items-center gap-1.5">
+                        <span style={{ color: '#848E9C' }}>{language === 'zh' ? '止盈价' : 'TP'}</span>
+                        <span style={{ color: '#34D399' }} className="font-medium">${formatFull(pos.take_profit)}</span>
+                      </div>
+                    )}
+                    {(pos.stop_loss != null && pos.stop_loss > 0) && (
+                      <div className="flex items-center gap-1.5">
+                        <span style={{ color: '#848E9C' }}>{language === 'zh' ? '初始止损位' : 'Initial SL'}</span>
+                        <span style={{ color: '#B7BDC6' }}>${formatFull(pos.stop_loss)}</span>
+                      </div>
+                    )}
+                    {((pos.atr_multiple_sl != null && pos.atr_multiple_sl > 0) || (pos.atr_multiple_tp != null && pos.atr_multiple_tp > 0)) && (
+                      <div className="flex items-center gap-1.5">
+                        <span style={{ color: '#848E9C' }}>ATR {language === 'zh' ? '倍数' : '×'}</span>
+                        <span style={{ color: '#EAECEF' }}>
+                          {pos.atr_multiple_sl != null && pos.atr_multiple_sl > 0 ? `${formatFull(pos.atr_multiple_sl, 2)}×` : '—'}
+                          {(pos.atr_multiple_sl != null && pos.atr_multiple_sl > 0) && (pos.atr_multiple_tp != null && pos.atr_multiple_tp > 0) ? ' / ' : ''}
+                          {pos.atr_multiple_tp != null && pos.atr_multiple_tp > 0 ? `${formatFull(pos.atr_multiple_tp, 2)}×` : ''}
+                        </span>
+                      </div>
+                    )}
+                    {(pos.atr_at_open != null && pos.atr_at_open > 0) && (
+                      <div className="flex items-center gap-1.5">
+                        <span style={{ color: '#848E9C' }}>ATR {language === 'zh' ? '数值' : 'value'}</span>
+                        <span style={{ color: '#EAECEF' }}>${formatFull(pos.atr_at_open, 6)}</span>
+                      </div>
+                    )}
+                    {(pos.atr_period != null && pos.atr_period > 0) && (
+                      <div className="flex items-center gap-1.5">
+                        <span style={{ color: '#848E9C' }}>ATR {language === 'zh' ? '周期' : 'period'}</span>
+                        <span style={{ color: '#B7BDC6' }}>{pos.atr_period}</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <div className="flex items-center justify-end gap-1.5 mt-0.5">
-                  <span className="font-mono font-bold" style={{ color: pnlColor }}>
-                    {pos.unrealized_pnl >= 0 ? '+' : ''}${pos.unrealized_pnl.toFixed(2)}
-                  </span>
-                  <span
-                    className="px-1 py-0.5 rounded text-[10px] font-medium"
-                    style={{ background: `${pnlColor}20`, color: pnlColor }}
-                  >
-                    {pos.unrealized_pnl_pct >= 0 ? '+' : ''}{pos.unrealized_pnl_pct.toFixed(2)}%
-                  </span>
+              )}
+
+              {/* Block 2: live metrics — 与实盘/实盘模拟一致 */}
+              {(hasLive || pos.trailing_enabled || pos.scaled_tp_enabled) && (
+                <div className="px-3 pb-3">
+                  <div className="rounded-lg px-2.5 py-2 grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-0.5 text-[11px] font-mono" style={{ background: 'rgba(30,35,41,0.6)', border: '1px solid #2B3139' }}>
+                    {pos.distance_to_sl_pct != null && (
+                      <div className="flex items-center gap-1.5">
+                        <span style={{ color: '#848E9C' }}>{language === 'zh' ? '距止损' : 'To SL'}</span>
+                        <span style={{ color: pos.distance_to_sl_pct >= 0 ? '#34D399' : '#F87171' }} className="font-medium">{pos.distance_to_sl_pct >= 0 ? '+' : ''}{formatFull(pos.distance_to_sl_pct, 3)}%</span>
+                      </div>
+                    )}
+                    {pos.distance_to_tp_pct != null && (
+                      <div className="flex items-center gap-1.5">
+                        <span style={{ color: '#848E9C' }}>{language === 'zh' ? '距止盈' : 'To TP'}</span>
+                        <span style={{ color: pos.distance_to_tp_pct >= 0 ? '#34D399' : '#B7BDC6' }} className="font-medium">{pos.distance_to_tp_pct >= 0 ? '+' : ''}{formatFull(pos.distance_to_tp_pct, 3)}%</span>
+                      </div>
+                    )}
+                    {pos.trailing_enabled && (
+                      <div className="flex items-center gap-1.5">
+                        <span style={{ color: '#848E9C' }}>{language === 'zh' ? '追踪止损' : 'Trailing'}</span>
+                        <span style={{ color: (pos.trailing_tier_activated ?? 0) > 0 ? '#F0B90B' : '#5E6673' }}>
+                          {(pos.trailing_tier_activated ?? 0) > 0 ? (language === 'zh' ? `L${pos.trailing_tier_activated} 激活` : `L${pos.trailing_tier_activated} on`) : (language === 'zh' ? '未激活' : 'off')}
+                        </span>
+                      </div>
+                    )}
+                    {pos.trailing_enabled && (pos.trailing_allowed_drawdown != null && pos.trailing_allowed_drawdown > 0) && (pos.trailing_tier_activated ?? 0) > 0 && (
+                      <div className="flex items-center gap-1.5">
+                        <span style={{ color: '#848E9C' }}>{language === 'zh' ? '允许回撤' : 'Allowed DD'}</span>
+                        <span style={{ color: '#F0B90B' }}>{formatFull(pos.trailing_allowed_drawdown, 2)}%</span>
+                      </div>
+                    )}
+                    {pos.scaled_tp_enabled && (
+                      <div className="flex items-center gap-1.5">
+                        <span style={{ color: '#848E9C' }}>{language === 'zh' ? '分层止盈' : 'Scaled TP'}</span>
+                        <span style={{ color: (pos.scaled_tp_level ?? 0) > 0 ? '#F0B90B' : '#5E6673' }}>
+                          {(pos.scaled_tp_level ?? 0) > 0 ? (language === 'zh' ? `L${pos.scaled_tp_level} 激活` : `L${pos.scaled_tp_level} on`) : (language === 'zh' ? '未激活' : 'off')}
+                        </span>
+                      </div>
+                    )}
+                    {pos.scaled_tp_enabled && (pos.scaled_tp_closed_pct != null && pos.scaled_tp_closed_pct > 0) && (
+                      <div className="flex items-center gap-1.5">
+                        <span style={{ color: '#848E9C' }}>{language === 'zh' ? '已平仓' : 'Closed'}</span>
+                        <span style={{ color: '#34D399' }}>{formatFull(pos.scaled_tp_closed_pct, 2)}%</span>
+                      </div>
+                    )}
+                    <div className="flex items-center gap-1.5">
+                      <span style={{ color: '#848E9C' }}>{language === 'zh' ? '当前盈亏' : 'PnL'}</span>
+                      <span style={{ color: pnlColor }} className="font-medium">{pos.unrealized_pnl_pct >= 0 ? '+' : ''}{formatFull(pos.unrealized_pnl_pct, 3)}%</span>
+                    </div>
+                  </div>
                 </div>
-              </div>
+              )}
             </motion.div>
           )
         })}
@@ -1170,7 +1323,8 @@ export function BacktestPage() {
     symbols: 'BTCUSDT,ETHUSDT,SOLUSDT',
     timeframes: ['3m', '15m', '4h'],
     decisionTf: '3m',
-    cadence: 20,
+    cadence: 1,
+    decisionIntervalMinutes: 0,
     start: toLocalInput(new Date(now.getTime() - 3 * 24 * 3600 * 1000)),
     end: toLocalInput(now),
     balance: 1000,
@@ -1341,6 +1495,7 @@ export function BacktestPage() {
         timeframes: formState.timeframes,
         decision_timeframe: formState.decisionTf,
         decision_cadence_nbars: formState.cadence,
+        decision_interval_minutes: formState.decisionIntervalMinutes || 0,
         start_ts: Math.floor(start / 1000),
         end_ts: Math.floor(end / 1000),
         initial_balance: formState.balance,
@@ -1822,15 +1977,20 @@ export function BacktestPage() {
                           <select
                             className="w-full p-2 rounded-lg text-xs"
                             style={{ background: '#0B0E11', border: '1px solid #2B3139', color: '#EAECEF' }}
-                            value={formState.decisionTf}
+                            value={TIMEFRAME_OPTIONS.includes(formState.decisionTf) ? formState.decisionTf : formState.timeframes[0] ?? '15m'}
                             onChange={(e) => handleFormChange('decisionTf', e.target.value)}
                           >
-                            {formState.timeframes.map((tf) => (
+                            {TIMEFRAME_OPTIONS.map((tf) => (
                               <option key={tf} value={tf}>
                                 {tf}
                               </option>
                             ))}
                           </select>
+                          {!formState.timeframes.includes(formState.decisionTf) && (
+                            <p className="text-[10px] mt-0.5" style={{ color: '#F0B90B' }}>
+                              {language === 'zh' ? '未选入时间周期时将自动加载该周期' : 'Will load this TF if not in timeframes'}
+                            </p>
+                          )}
                         </div>
                       </div>
 
@@ -1929,6 +2089,24 @@ export function BacktestPage() {
                             value={formState.cadence}
                             onChange={(e) => handleFormChange('cadence', Number(e.target.value))}
                           />
+                        </div>
+                        <div>
+                          <label className="block text-xs mb-1" style={{ color: '#848E9C' }}>
+                            {language === 'zh' ? '决策间隔(分钟)' : 'Decision interval (min)'}
+                          </label>
+                          <input
+                            type="number"
+                            min={0}
+                            max={60}
+                            className="w-full p-2 rounded-lg text-xs"
+                            style={{ background: '#0B0E11', border: '1px solid #2B3139', color: '#EAECEF' }}
+                            value={formState.decisionIntervalMinutes}
+                            onChange={(e) => handleFormChange('decisionIntervalMinutes', Math.max(0, Number(e.target.value)))}
+                            placeholder="0"
+                          />
+                          <p className="text-[10px] mt-0.5" style={{ color: '#5E6673' }}>
+                            {language === 'zh' ? '0=按K线节奏。填实盘 Scan 间隔(如5)则回测与实盘一致，每5分钟决策一次' : '0=per bar. Set to live Scan interval (e.g. 5) to match live'}
+                          </p>
                         </div>
                       </div>
 
@@ -2233,6 +2411,11 @@ export function BacktestPage() {
                   />
                 </div>
 
+                {/* AI 用量 / Prompt Caching（按回测 run 分别统计） */}
+                <div className="mt-3">
+                  <AIUsageCard language={language} runId={selectedRunId} />
+                </div>
+
                 {/* Tabs */}
                 <div className="modern-card">
                   <div className="flex border-b overflow-x-auto" style={{ borderColor: '#2B3139' }}>
@@ -2375,6 +2558,11 @@ export function BacktestPage() {
                           animate={{ opacity: 1 }}
                           exit={{ opacity: 0 }}
                         >
+                          <p className="text-[11px] px-1 pb-1.5" style={{ color: '#5E6673' }}>
+                            {language === 'zh'
+                              ? '说明：每周期先处理策略平仓（动态止损/止盈），再处理 AI 开平仓。若列表中先出现「平仓 24m」再出现「开仓」，则该平仓对应更早的开仓，不是紧挨着的那笔开仓。'
+                              : 'Each cycle processes strategy closes (SL/TP) first, then AI open/close. If you see "Close 24m" then "Open", that close is for an earlier open, not the one below.'}
+                          </p>
                           <TradeTimeline trades={trades ?? []} language={language} />
                         </motion.div>
                       )}
@@ -2387,6 +2575,13 @@ export function BacktestPage() {
                           exit={{ opacity: 0 }}
                           className="space-y-3 max-h-[500px] overflow-y-auto"
                         >
+                          {decisions && decisions.length > 0 && (
+                            <p className="text-[11px] px-1 pb-1" style={{ color: '#5E6673' }}>
+                              {language === 'zh'
+                                ? '说明：每张卡片为一次 AI 决策（开仓/观望等）。若平仓由「动态止损/止盈」触发，不会产生单独的 AI 决策卡片，交易列表中仍会显示该笔平仓。'
+                                : 'Each card is one AI decision (open/hold). Closes triggered by dynamic SL/TP do not create a separate decision card; the close still appears in Trades.'}
+                            </p>
+                          )}
                           {decisions && decisions.length > 0 ? (
                             decisions.map((d) => (
                               <DecisionCard

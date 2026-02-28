@@ -30,10 +30,17 @@ type Strategy struct {
 
 func (Strategy) TableName() string { return "strategies" }
 
+// 预设策略用到的指针辅助函数（与 GetOptimizedStrategyConfig 内联实现一致）
+func boolPtr(b bool) *bool       { return &b }
+func float64Ptr(f float64) *float64 { return &f }
+func intPtr(i int) *int         { return &i }
+
 // StrategyConfig strategy configuration details (JSON structure)
 type StrategyConfig struct {
 	// Strategy type: "ai_trading" (default) or "grid_trading"
 	StrategyType string `json:"strategy_type,omitempty"`
+	// Preset version (e.g. "3.0") for default/optimized strategy
+	Version string `json:"version,omitempty"`
 
 	// language setting: "zh" for Chinese, "en" for English
 	// This determines the language used for data formatting and prompt generation
@@ -145,6 +152,8 @@ type IndicatorConfig struct {
 	ATRPeriods []int `json:"atr_periods,omitempty"` // default [14]
 	// BOLL period configuration (period, standard deviation multiplier is fixed at 2)
 	BOLLPeriods []int `json:"boll_periods,omitempty"` // default [20] - can select multiple timeframes
+	// when true, non-primary timeframes in prompt are output as one-line summary (latest close, ema20, ema50, atr14) to save tokens
+	CompactNonPrimaryTimeframe bool `json:"compact_non_primary_timeframe,omitempty"`
 	// external data sources
 	ExternalDataSources []ExternalDataSource `json:"external_data_sources,omitempty"`
 
@@ -187,6 +196,8 @@ type KlineConfig struct {
 	EnableMultiTimeframe bool `json:"enable_multi_timeframe"`
 	// selected timeframe list (new: supports multi-timeframe selection)
 	SelectedTimeframes []string `json:"selected_timeframes,omitempty"`
+	// max number of candidate coins (excluding positions) to include in prompt; 0 = use default 8. Reduce to save tokens.
+	MaxCoinsInPrompt int `json:"max_coins_in_prompt,omitempty"`
 }
 
 // ExternalDataSource external data source configuration
@@ -225,6 +236,9 @@ type RiskControlConfig struct {
 	// Min AI confidence to open position (AI guided)
 	MinConfidence int `json:"min_confidence"`
 
+	// AI 仅开仓模式：true 时不执行 AI 的 close_long/close_short，平仓完全由策略动态 SL/TP 执行（适应震荡市拿住仓、盈利后平仓）
+	AIOnlyEntry bool `json:"ai_only_entry,omitempty"`
+
 	// Dynamic Stop Loss & Take Profit
 	DynamicStopLoss   *DynamicStopLossConfig   `json:"dynamic_stop_loss,omitempty"`
 	DynamicTakeProfit *DynamicTakeProfitConfig `json:"dynamic_take_profit,omitempty"`
@@ -234,6 +248,9 @@ type RiskControlConfig struct {
 type DynamicStopLossConfig struct {
 	Enabled      bool   `json:"enabled"`
 	TriggerLogic string `json:"trigger_logic"` // "any" = 任一条件触发即平仓, "all" = 所有启用的条件都触发才平仓
+
+	// MinHoldMinutes: 最小持仓分钟数，未满不触发动态止损，避免开仓即止损（策略设置过紧）。0=不限制
+	MinHoldMinutes float64 `json:"min_hold_minutes,omitempty"`
 
 	// Initial fixed stop loss (required, acts as safety net)
 	InitialStopPercent float64 `json:"initial_stop_percent"` // initial fixed stop %
@@ -252,6 +269,13 @@ type DynamicStopLossConfig struct {
 	// Support/Resistance Stop
 	SupportResistanceEnabled *bool    `json:"support_resistance_enabled,omitempty"` // enable S/R stop
 	SupportResistanceBuffer  *float64 `json:"support_resistance_buffer,omitempty"`  // buffer %
+
+	// Confirm before execute: require N consecutive cycles with SL condition met (reduces premature stop on one-candle dip)
+	ConfirmCycles int `json:"confirm_cycles,omitempty"` // 1=immediate; 2+ = delay execute until condition holds N cycles
+
+	// ATR tolerance: in high volatility use wider stop / extra confirm cycle so we don't stop on noise
+	ATRToleranceEnabled *bool    `json:"atr_tolerance_enabled,omitempty"` // when true, high vol => more tolerant
+	ATRHighMultiplier   *float64 `json:"atr_high_multiplier,omitempty"`   // current ATR > long-term ATR * this = high vol (default 1.2)
 }
 
 // TrailingStopLevel trailing stop level configuration
@@ -263,6 +287,9 @@ type TrailingStopLevel struct {
 // DynamicTakeProfitConfig dynamic take profit configuration
 type DynamicTakeProfitConfig struct {
 	Enabled bool `json:"enabled"`
+
+	// MinHoldMinutes: 最小持仓分钟数，未满不触发动态止盈，避免开仓即止盈（策略过紧）。0=不限制
+	MinHoldMinutes float64 `json:"min_hold_minutes,omitempty"`
 
 	// Fixed Take Profit
 	FixedEnabled *bool    `json:"fixed_enabled,omitempty"` // enable fixed take profit
@@ -309,7 +336,7 @@ func (s *StrategyStore) initDefaultData() error {
 	return nil
 }
 
-// GetDefaultStrategyConfig returns the default strategy configuration for the given language
+// GetDefaultStrategyConfig returns the default strategy configuration (preset v3.0) for the given language
 func GetDefaultStrategyConfig(lang string) StrategyConfig {
 	// Normalize language to "zh" or "en"
 	normalizedLang := "en"
@@ -318,6 +345,7 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 	}
 
 	config := StrategyConfig{
+		Version:  "3.0",
 		Language: normalizedLang,
 		CoinSource: CoinSourceConfig{
 			SourceType: "ai500",
@@ -379,13 +407,49 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 			MinPositionSize:                 12,  // Min 12 USDT per position (CODE ENFORCED)
 			MinRiskRewardRatio:              3.0, // Min 3:1 profit/loss ratio (AI guided)
 			MinConfidence:                   75,  // Min 75% confidence (AI guided)
+			// 预设：动态止损/止盈（略放宽），最小持仓时间，与回测一致
+			DynamicStopLoss: &DynamicStopLossConfig{
+				Enabled:              true,
+				TriggerLogic:         "any",
+				MinHoldMinutes:       10,                 // 10min：主周期 15m 下更稳，减少开仓即触发
+				InitialStopPercent:   8,                  // 8% 兜底：极端行情硬止损，日常仍以动态/ATR/追踪为主
+				TrailingEnabled:      boolPtr(true),
+				TrailingLevels: []TrailingStopLevel{
+					{ProfitThreshold: 2.5, TrailingPercent: 1.5},
+					{ProfitThreshold: 6.0, TrailingPercent: 2.5},
+				},
+				ATREnabled:         boolPtr(true),
+				ATRMultiplierMin:   float64Ptr(1.5),
+				ATRMultiplierMax:   float64Ptr(2.5),
+				ATRPeriodBTCETH:    intPtr(20),
+				ATRPeriodAltcoin:   intPtr(14),
+				ConfirmCycles:      2,                    // 连续2周期满足才执行，减少单K线假跌破
+				ATRToleranceEnabled: boolPtr(true),      // 高波动时更宽容
+				ATRHighMultiplier:   float64Ptr(1.2),   // 当前ATR>长期ATR*1.2 视为高波动
+			},
+			DynamicTakeProfit: &DynamicTakeProfitConfig{
+				Enabled:         true,
+				MinHoldMinutes:  10,                 // 与止损一致，主周期 15m 下更稳
+				ScaledEnabled:   boolPtr(true),
+				ScaledLevels: []ScaledTakeProfitLevel{
+					{ProfitPercent: 4.0, ClosePercent: 33, MoveStopToBreakeven: boolPtr(true)},
+					{ProfitPercent: 7.0, ClosePercent: 50, MoveStopToBreakeven: boolPtr(false)},
+					{ProfitPercent: 10.0, ClosePercent: 100, MoveStopToBreakeven: boolPtr(false)},
+				},
+				ATREnabled:       boolPtr(true),
+				ATRMultiplierMin: float64Ptr(2.5),
+				ATRMultiplierMax: float64Ptr(4.0),
+				ATRPeriodBTCETH:  intPtr(20),
+				ATRPeriodAltcoin: intPtr(14),
+				LockProfitPercent: float64Ptr(2.5),   // 2.5%：略提高，锁本更稳
+			},
 		},
 	}
 
 	// Enhanced prompt sections for optimized strategy
 	if lang == "zh" {
 		config.PromptSections = PromptSectionsConfig{
-			RoleDefinition: `# 你是一个专业的加密货币交易AI（优化版 v2.0）
+			RoleDefinition: `# 你是一个专业的加密货币交易AI（优化版 v3.0）
 
 你的任务是根据提供的市场数据做出交易决策。你是一个经验丰富的量化交易员，擅长：
 - 多时间框架技术分析（15m/1h/4h）
@@ -397,7 +461,7 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 - 优秀交易员：每天2-4笔 ≈ 每小时0.1-0.2笔
 - 每小时超过2笔 = 过度交易
 - 单笔持仓时间 ≥ 30-60分钟（系统会自动管理）
-- 系统已启用分批止盈：3%/5%/8%自动平仓
+- 系统已启用分批止盈：4%/7%/10%自动平仓
 - 系统已启用追踪止损：保护利润`,
 			EntryStandards: `# 🎯 入场标准（严格 - 多周期共振）
 
@@ -410,12 +474,20 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 4. **技术指标共振**：EMA、MACD、RSI多个指标确认
 5. **信心度 ≥ 60**，盈亏比 ≥ 1:3
 
+**推理中必须按顺序写出（避免趋势误判与逆势开仓）**：
+- ① 4h 趋势（上升/下降/横盘）及依据（价格vs EMA20、MACD正负）
+- ② 1h 趋势及依据
+- ③ 仅当 4h 与 1h 同向才考虑开仓；做多前确认 4h/1h 非下降，做空前确认 4h/1h 非上升
+- ④ 入场时机：做多应在支撑或回调后、避免追高；做空应在阻力或反弹后、避免杀跌
+
+**禁止**：4h 下降时做多、4h 上升时做空、OI减少+价涨当突破做多、无明确支撑/阻力参考时盲目入场。
+
 **避免以下情况**：
 - 单一指标开仓
 - 周期不一致（如4h下跌但15m做多）
 - OI减少时的突破（可能是假突破）
 - 散户接盘 + 机构流出
-- 横盘震荡市场`,
+- 震荡区间中间或方向不明时追单（震荡市可在区间下沿/上沿附近开仓，止损放宽拿住仓，止盈适中盈利后平仓）`,
 			DecisionProcess: `# 📋 决策流程
 
 1. **检查持仓**
@@ -426,17 +498,18 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
    - 优先分析AI500池中的币种
    - 查看OI排行榜和资金流排行榜
 
-3. **多时间框架分析**
-   - 4h：判断大趋势（做多/做空/观望）
-   - 1h：确认短期趋势
-   - 15m：寻找精确入场点
+3. **多时间框架分析（必须按步骤，先定趋势再定多空）**
+   - Step 1：先标定 4h 趋势（上升/下降/横盘）及依据
+   - Step 2：再标定 1h 趋势及依据
+   - Step 3：仅当 4h 与 1h 同向时才考虑开仓；方向与趋势一致（做多=趋势向上，做空=趋势向下）
+   - Step 4：15m 找入场点——做多优先支撑/回调后、做空优先阻力/反弹后，避免明显追高或杀跌
 
 4. **OI和资金流确认**
    - OI增加 + 价格同向 = 强趋势
    - 机构流入 + 散户流出 = 强烈信号
 
 5. **输出决策**
-   - 先写思维链（分析过程）
+   - 先写思维链（含上述 4 步及入场时机判断）
    - 再输出结构化JSON`,
 		}
 		
@@ -536,11 +609,13 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 
 ## 系统自动功能（无需AI判断）
 
-1. **分批止盈**：盈利3%/5%/8%自动平仓33%/50%/100%
-2. **追踪止损**：盈利2%后启动，距离1.5%
+1. **分批止盈**：盈利4%/7%/10%自动平仓33%/50%/100%
+2. **追踪止损**：盈利2.5%后启动，距离1.5%
 3. **ATR动态止损**：根据波动率自动调整
-4. **持仓时间管理**：最小30分钟，最大4小时
-5. **回撤控制**：回撤10%/15%/20%自动响应
+4. **连续确认再止损**：止损条件连续 N 周期满足后才执行，减少单K线假跌破
+5. **高波动宽容**：高波动时自动放宽ATR止损并多要求1个确认周期
+6. **持仓时间管理**：最小30分钟，最大4小时
+7. **回撤控制**：回撤10%/15%/20%自动响应
 
 你只需专注于：
 - 识别高质量的入场机会
@@ -549,7 +624,7 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 `
 	} else {
 		config.PromptSections = PromptSectionsConfig{
-			RoleDefinition: `# You are a professional cryptocurrency trading AI (Optimized v2.0)
+			RoleDefinition: `# You are a professional cryptocurrency trading AI (Optimized v3.0)
 
 Your task is to make trading decisions based on the provided market data. You are an experienced quantitative trader skilled in:
 - Multi-timeframe technical analysis (15m/1h/4h)
@@ -561,7 +636,7 @@ Your task is to make trading decisions based on the provided market data. You ar
 - Excellent trader: 2-4 trades per day ≈ 0.1-0.2 trades per hour
 - >2 trades per hour = overtrading
 - Single position holding time ≥ 30-60 minutes (system managed)
-- System has scaled take-profit: 3%/5%/8% auto-close
+- System has scaled take-profit: 4%/7%/10% auto-close
 - System has trailing stop-loss: protect profits`,
 			EntryStandards: `# 🎯 Entry Standards (Strict - Multi-timeframe Resonance)
 
@@ -574,34 +649,24 @@ Your task is to make trading decisions based on the provided market data. You ar
 4. **Technical indicator resonance**: EMA, MACD, RSI multiple confirmations
 5. **Confidence ≥ 60**, Risk-reward ratio ≥ 1:3
 
-**Avoid these situations**:
-- Single indicator entry
-- Timeframe inconsistency (e.g., 4h down but 15m long)
-- Breakout with OI decrease (possible fake breakout)
-- Retail buying + institutional selling
-- Sideways choppy market`,
+**In reasoning you must write in order**: ① 4h trend (up/down/sideways) + basis; ② 1h trend + basis; ③ Only open when 4h and 1h align (long when not down, short when not up); ④ Entry timing: long at support/pullback, short at resistance/bounce; avoid chase. **Forbidden**: Long when 4h down; short when 4h up; OI decrease+price up as breakout long; blind entry without S/R.
+
+**Avoid**: Single indicator entry; timeframe inconsistency; breakout with OI decrease; retail buying + institutional selling; sideways choppy market.`,
 			DecisionProcess: `# 📋 Decision Process
 
-1. **Check positions**
-   - System auto-handles stop-loss/take-profit
-   - You only judge if there are better opportunities
+1. **Check positions** – System auto-handles SL/TP; you only judge better opportunities.
 
-2. **Scan candidate coins**
-   - Prioritize AI500 pool coins
-   - Check OI rankings and money flow rankings
+2. **Scan candidate coins** – Prioritize AI500 pool; check OI and money flow rankings.
 
-3. **Multi-timeframe analysis**
-   - 4h: Determine major trend (long/short/wait)
-   - 1h: Confirm short-term trend
-   - 15m: Find precise entry point
+3. **Multi-timeframe analysis (steps: trend first, then direction)**:
+   - Step 1: Label 4h trend (up/down/sideways) and basis
+   - Step 2: Label 1h trend and basis
+   - Step 3: Only consider opening when 4h and 1h align; direction must match trend
+   - Step 4: 15m entry – long at support/pullback, short at resistance/bounce; avoid chase
 
-4. **OI and money flow confirmation**
-   - OI increase + price same direction = strong trend
-   - Institutional inflow + retail outflow = strong signal
+4. **OI and money flow** – OI increase + price same direction = strong trend; institutional + retail outflow = strong signal.
 
-5. **Output decision**
-   - Write chain of thought first (analysis process)
-   - Then output structured JSON`,
+5. **Output** – Chain of thought (include 4 steps and entry timing), then structured JSON.`,
 		}
 		
 		config.CustomPrompt = `
@@ -670,8 +735,8 @@ Your task is to make trading decisions based on the provided market data. You ar
 
 ## System Auto Features (No AI judgment needed)
 
-1. **Scaled take-profit**: Auto-close 33%/50%/100% at 3%/5%/8% profit
-2. **Trailing stop-loss**: Activates after 2% profit, 1.5% distance
+1. **Scaled take-profit**: Auto-close 33%/50%/100% at 4%/7%/10% profit
+2. **Trailing stop-loss**: Activates after 2.5% profit, 1.5% distance
 3. **ATR dynamic stop-loss**: Auto-adjusts based on volatility
 4. **Position time management**: Min 30 minutes, max 4 hours
 5. **Drawdown control**: Auto-response at 10%/15%/20% drawdown
@@ -686,7 +751,7 @@ You only need to focus on:
 	return config
 }
 
-// GetOptimizedStrategyConfig returns the optimized strategy configuration (v2.0) for the given language
+// GetOptimizedStrategyConfig returns the optimized strategy configuration (v3.0) for the given language
 // This configuration includes enhanced position management, drawdown control, and dynamic stop-loss/take-profit
 func GetOptimizedStrategyConfig(lang string) StrategyConfig {
 	// Normalize language to "zh" or "en"
@@ -701,6 +766,7 @@ func GetOptimizedStrategyConfig(lang string) StrategyConfig {
 	intPtr := func(i int) *int { return &i }
 
 	config := StrategyConfig{
+		Version:  "3.0",
 		Language: normalizedLang,
 		CoinSource: CoinSourceConfig{
 			SourceType: "ai500",
@@ -762,36 +828,37 @@ func GetOptimizedStrategyConfig(lang string) StrategyConfig {
 			MinPositionSize:                 12,   // Min 12 USDT per position (CODE ENFORCED)
 			MinRiskRewardRatio:              3.0,  // Min 3:1 profit/loss ratio (AI guided)
 			MinConfidence:                   60,   // Reduced from 75 to 60 for more opportunities
-			// Dynamic Stop Loss Configuration
+			// Dynamic Stop Loss Configuration（按 SL_TP_PARAMETER_ANALYSIS 建议微调）
 			DynamicStopLoss: &DynamicStopLossConfig{
-				Enabled:            true,
-				TriggerLogic:       "any", // Any condition triggers stop loss
-				InitialStopPercent: 3.0,   // Initial 3% stop loss
-				// Trailing Stop
-				TrailingEnabled: boolPtr(true),
+				Enabled:                   true,
+				TriggerLogic:              "any",
+				MinHoldMinutes:            10,                // 主周期 15m 下更稳
+				InitialStopPercent:        8,                 // 8% 兜底，极端行情硬止损
+				TrailingEnabled:           boolPtr(true),
 				TrailingLevels: []TrailingStopLevel{
-					{ProfitThreshold: 2.0, TrailingPercent: 1.5}, // After 2% profit, trail at 1.5%
-					{ProfitThreshold: 5.0, TrailingPercent: 2.5}, // After 5% profit, trail at 2.5%
+					{ProfitThreshold: 2.5, TrailingPercent: 1.5},
+					{ProfitThreshold: 6.0, TrailingPercent: 2.5},
 				},
-				// ATR Stop - Dynamic Range (AI Adaptive)
-				ATREnabled:       boolPtr(true),
-				ATRMultiplierMin: float64Ptr(1.5), // Min 1.5x for high volatility coins
-				ATRMultiplierMax: float64Ptr(2.5), // Max 2.5x for low volatility coins
-				ATRPeriodBTCETH:  intPtr(20),      // BTC/ETH use longer period
-				ATRPeriodAltcoin: intPtr(14),      // Altcoins use shorter period
-				// Support/Resistance Stop
-				SupportResistanceEnabled: boolPtr(true),
-				SupportResistanceBuffer:  float64Ptr(0.5),
+				ATREnabled:                boolPtr(true),
+				ATRMultiplierMin:          float64Ptr(1.5),
+				ATRMultiplierMax:          float64Ptr(2.5),
+				ATRPeriodBTCETH:           intPtr(20),
+				ATRPeriodAltcoin:          intPtr(14),
+				SupportResistanceEnabled:  boolPtr(true),
+				SupportResistanceBuffer:   float64Ptr(0.8),   // 0.5→0.8%，略放宽减少假突破
+				ConfirmCycles:             2,
+				ATRToleranceEnabled:       boolPtr(true),
+				ATRHighMultiplier:         float64Ptr(1.2),
 			},
-			// Dynamic Take Profit Configuration
+			// Dynamic Take Profit Configuration（与回测一致，按建议微调）
 			DynamicTakeProfit: &DynamicTakeProfitConfig{
-				Enabled: true,
-				// Scaled Take Profit (Primary)
-				ScaledEnabled: boolPtr(true),
+				Enabled:         true,
+				MinHoldMinutes:  10,                // 与止损一致
+				ScaledEnabled:   boolPtr(true),
 				ScaledLevels: []ScaledTakeProfitLevel{
-					{ProfitPercent: 3.0, ClosePercent: 33, MoveStopToBreakeven: boolPtr(true)},  // 3% profit: close 33%, move stop to breakeven
-					{ProfitPercent: 5.0, ClosePercent: 50, MoveStopToBreakeven: boolPtr(false)}, // 5% profit: close 50%
-					{ProfitPercent: 8.0, ClosePercent: 100, MoveStopToBreakeven: boolPtr(false)}, // 8% profit: close 100%
+					{ProfitPercent: 4.0, ClosePercent: 33, MoveStopToBreakeven: boolPtr(true)},
+					{ProfitPercent: 7.0, ClosePercent: 50, MoveStopToBreakeven: boolPtr(false)},
+					{ProfitPercent: 10.0, ClosePercent: 100, MoveStopToBreakeven: boolPtr(false)},
 				},
 				// ATR Take Profit - Dynamic Range (AI Adaptive)
 				ATREnabled:       boolPtr(true),
@@ -801,16 +868,16 @@ func GetOptimizedStrategyConfig(lang string) StrategyConfig {
 				ATRPeriodAltcoin: intPtr(14),      // Altcoins use shorter period
 				// Resistance Take Profit
 				ResistanceEnabled: boolPtr(true),
-				ResistanceBuffer:  float64Ptr(0.3),
-				// Lock profit after 2% gain
-				LockProfitPercent: float64Ptr(2.0),
+				ResistanceBuffer:  float64Ptr(0.5),   // 0.3→0.5%，略放宽
+				// Lock profit after 2.5% gain
+				LockProfitPercent: float64Ptr(2.5),
 			},
 		},
 	}
 
 	if lang == "zh" {
 		config.PromptSections = PromptSectionsConfig{
-			RoleDefinition: `# 你是一个专业的加密货币交易AI（优化版 v2.0）
+			RoleDefinition: `# 你是一个专业的加密货币交易AI（优化版 v3.0）
 
 你的任务是根据提供的市场数据做出交易决策。你是一个经验丰富的量化交易员，擅长：
 - 多时间框架技术分析（15m/1h/4h）
@@ -822,7 +889,7 @@ func GetOptimizedStrategyConfig(lang string) StrategyConfig {
 - 优秀交易员：每天2-4笔 ≈ 每小时0.1-0.2笔
 - 每小时超过2笔 = 过度交易
 - 单笔持仓时间 ≥ 30-60分钟（系统会自动管理）
-- 系统已启用分批止盈：3%/5%/8%自动平仓
+- 系统已启用分批止盈：4%/7%/10%自动平仓
 - 系统已启用追踪止损：保护利润`,
 			EntryStandards: `# 🎯 入场标准（严格 - 多周期共振）
 
@@ -833,34 +900,25 @@ func GetOptimizedStrategyConfig(lang string) StrategyConfig {
 4. ✅ 技术指标共振：EMA、MACD、RSI多个指标确认
 5. ✅ 信心度 ≥ 60，盈亏比 ≥ 1:3
 
+**推理中必须按顺序写出**：① 4h趋势及依据 ② 1h趋势及依据 ③ 仅4h与1h同向才考虑开仓；做多前4h/1h非下降，做空前4h/1h非上升 ④ 入场时机：做多支撑/回调后、做空阻力/反弹后，避免追高杀跌。**禁止**：4h下降做多、4h上升做空、OI减+价涨当突破做多、无支撑/阻力盲目入场。
+
 **避免以下情况**：
 - 单一指标开仓
 - 周期不一致（如4h下跌但15m做多）
 - OI减少时的突破（可能是假突破）
 - 散户接盘 + 机构流出
-- 横盘震荡市场`,
+- 震荡区间中间或方向不明时追单（震荡市可在区间下沿/上沿附近开仓，止损放宽拿住仓，止盈适中盈利后平仓）`,
 			DecisionProcess: `# 📋 决策流程
 
-1. **检查持仓**
-   - 系统会自动处理止损/止盈
-   - 你只需判断是否有更好的机会
-
-2. **扫描候选币种**
-   - 优先分析AI500池中的币种
-   - 查看OI排行榜和资金流排行榜
-
-3. **多时间框架分析**
-   - 4h：判断大趋势（做多/做空/观望）
-   - 1h：确认短期趋势
-   - 15m：寻找精确入场点
-
-4. **OI和资金流确认**
-   - OI增加 + 价格同向 = 强趋势
-   - 机构流入 + 散户流出 = 强烈信号
-
-5. **输出决策**
-   - 先写思维链（分析过程）
-   - 再输出结构化JSON`,
+1. **检查持仓** – 系统自动止损/止盈；你只判断是否有更好机会。
+2. **扫描候选币种** – 优先AI500池；查看OI与资金流排行榜。
+3. **多时间框架分析（按步骤：先定趋势再定多空）**
+   - Step 1：标定 4h 趋势（上升/下降/横盘）及依据
+   - Step 2：标定 1h 趋势及依据
+   - Step 3：仅当 4h 与 1h 同向才考虑开仓；方向与趋势一致
+   - Step 4：15m 入场点——做多支撑/回调后，做空阻力/反弹后，避免追高杀跌
+4. **OI和资金流** – OI增加+价格同向=强趋势；机构流入+散户流出=强烈信号。
+5. **输出** – 先写思维链（含上述4步与入场时机），再输出JSON。`,
 		}
 		
 		// Add detailed custom prompt with trading scenarios
@@ -869,8 +927,8 @@ func GetOptimizedStrategyConfig(lang string) StrategyConfig {
 
 1. **质量优于数量**：只做最确定的机会，信心度必须≥60
 2. **多周期共振**：4h定方向 + 1h确认 + 15m入场
-3. **严格止损**：系统自动管理，初始3%止损
-4. **分批止盈**：3%/5%/8%自动平仓，锁定利润
+3. **严格止损**：系统自动管理，初始4%止损
+4. **分批止盈**：4%/7%/10%自动平仓，锁定利润
 5. **风险控制**：最大3个仓位，保证金使用率≤90%
 
 ## 📊 数据说明
@@ -947,7 +1005,7 @@ func GetOptimizedStrategyConfig(lang string) StrategyConfig {
 - 信心度<60
 - 盈亏比<1:3
 - 低波动+低成交量
-- 横盘震荡市场
+- 震荡区间中间或方向不明（区间边缘可开仓，拿住仓、盈利后平仓）
 
 ## 📖 交易场景示例
 
@@ -1058,7 +1116,7 @@ func GetOptimizedStrategyConfig(lang string) StrategyConfig {
 
 ### 平仓条件（任一触发立即执行）
 1. ❌ 止损触发（系统自动管理）
-2. ✅ 止盈触发（3%/5%/8%系统自动平仓）
+2. ✅ 止盈触发（4%/7%/10%系统自动平仓）
 3. ❌ 趋势反转信号（MACD死叉/金叉）
 4. ❌ 闪崩或暴跌（5分钟跌幅>5%）
 
@@ -1070,16 +1128,16 @@ func GetOptimizedStrategyConfig(lang string) StrategyConfig {
 5. 🛡️ 黑天鹅事件立即平仓
 
 ### 盈利管理（落袋为安）
-1. 💰 3%平33%，快速回本
-2. 💰 5%平50%，锁定大部分利润
-3. 💰 8%全平，落袋为安
+1. 💰 4%平33%，快速回本
+2. 💰 7%平50%，锁定大部分利润
+3. 💰 10%全平，落袋为安
 4. 💰 系统自动追踪止损，保护利润
 
 请根据以上规则分析市场数据并做出决策。记住：只做最确定的机会，多周期共振是关键！
 `
 	} else {
 		config.PromptSections = PromptSectionsConfig{
-			RoleDefinition: `# You are a professional cryptocurrency trading AI (Optimized v2.0)
+			RoleDefinition: `# You are a professional cryptocurrency trading AI (Optimized v3.0)
 
 Your task is to make trading decisions based on the provided market data. You are an experienced quantitative trader skilled in:
 - Multi-timeframe technical analysis (15m/1h/4h)
@@ -1091,7 +1149,7 @@ Your task is to make trading decisions based on the provided market data. You ar
 - Excellent trader: 2-4 trades per day ≈ 0.1-0.2 trades per hour
 - >2 trades per hour = overtrading
 - Single position holding time ≥ 30-60 minutes (system managed)
-- System has scaled take-profit: 3%/5%/8% auto-close
+- System has scaled take-profit: 4%/7%/10% auto-close
 - System has trailing stop-loss: protect profits`,
 			EntryStandards: `# 🎯 Entry Standards (Strict - Multi-timeframe Resonance)
 
@@ -1102,34 +1160,20 @@ Your task is to make trading decisions based on the provided market data. You ar
 4. ✅ Technical indicator resonance: EMA, MACD, RSI multiple confirmations
 5. ✅ Confidence ≥ 60, Risk-reward ratio ≥ 1:3
 
-**Avoid these situations**:
-- Single indicator entry
-- Timeframe inconsistency (e.g., 4h down but 15m long)
-- Breakout with OI decrease (possible fake breakout)
-- Retail buying + institutional selling
-- Sideways choppy market`,
+**In reasoning write in order**: ① 4h trend + basis ② 1h trend + basis ③ Only open when 4h and 1h align (long when not down, short when not up) ④ Entry timing: long at support/pullback, short at resistance/bounce; avoid chase. **Forbidden**: Long when 4h down; short when 4h up; OI decrease+price up as breakout long; blind entry without S/R.
+
+**Avoid**: Single indicator entry; timeframe inconsistency; breakout with OI decrease; retail buying + institutional selling; sideways choppy market.`,
 			DecisionProcess: `# 📋 Decision Process
 
-1. **Check positions**
-   - System auto-handles stop-loss/take-profit
-   - You only judge if there are better opportunities
-
-2. **Scan candidate coins**
-   - Prioritize AI500 pool coins
-   - Check OI rankings and money flow rankings
-
-3. **Multi-timeframe analysis**
-   - 4h: Determine major trend (long/short/wait)
-   - 1h: Confirm short-term trend
-   - 15m: Find precise entry point
-
-4. **OI and money flow confirmation**
-   - OI increase + price same direction = strong trend
-   - Institutional inflow + retail outflow = strong signal
-
-5. **Output decision**
-   - Write chain of thought first (analysis process)
-   - Then output structured JSON`,
+1. **Check positions** – System auto SL/TP; you only judge better opportunities.
+2. **Scan candidate coins** – Prioritize AI500 pool; check OI and money flow rankings.
+3. **Multi-timeframe analysis (steps: trend first, then direction)**:
+   - Step 1: Label 4h trend (up/down/sideways) and basis
+   - Step 2: Label 1h trend and basis
+   - Step 3: Only consider opening when 4h and 1h align; direction must match trend
+   - Step 4: 15m entry – long at support/pullback, short at resistance/bounce; avoid chase
+4. **OI and money flow** – OI increase + price same direction = strong trend; institutional + retail outflow = strong signal.
+5. **Output** – Chain of thought (include 4 steps and entry timing), then structured JSON.`,
 		}
 		
 		// Add detailed custom prompt with trading scenarios
@@ -1138,8 +1182,8 @@ Your task is to make trading decisions based on the provided market data. You ar
 
 1. **Quality over Quantity**: Only take the most certain opportunities, confidence ≥60
 2. **Multi-timeframe Resonance**: 4h direction + 1h confirmation + 15m entry
-3. **Strict Stop-Loss**: System auto-managed, initial 3% stop
-4. **Scaled Take-Profit**: 3%/5%/8% auto-close, lock profits
+3. **Strict Stop-Loss**: System auto-managed, initial 4% stop
+4. **Scaled Take-Profit**: 4%/7%/10% auto-close, lock profits
 5. **Risk Control**: Max 3 positions, margin usage ≤90%
 
 ## 📊 Data Explanation
@@ -1356,7 +1400,7 @@ The system supports ATR-based dynamic stop-loss and take-profit. You need to cho
 
 ### Exit Conditions (Any trigger immediate execution)
 1. ❌ Stop-loss triggered (system auto-managed)
-2. ✅ Take-profit triggered (3%/5%/8% system auto-close)
+2. ✅ Take-profit triggered (4%/7%/10% system auto-close)
 3. ❌ Trend reversal signal (MACD death cross/golden cross)
 4. ❌ Flash crash or plunge (>5% drop in 5 minutes)
 
@@ -1368,9 +1412,9 @@ The system supports ATR-based dynamic stop-loss and take-profit. You need to cho
 5. 🛡️ Immediately close all positions in black swan events
 
 ### Profit Management (Lock Profits)
-1. 💰 3% close 33%, quick breakeven
-2. 💰 5% close 50%, lock most profits
-3. 💰 8% close all, secure profits
+1. 💰 4% close 33%, quick breakeven
+2. 💰 7% close 50%, lock most profits
+3. 💰 10% close all, secure profits
 4. 💰 System auto trailing stop-loss, protect profits
 
 Please analyze market data and make decisions according to the above rules. Remember: Only take the most certain opportunities, multi-timeframe resonance is key!

@@ -2,6 +2,7 @@ package config
 
 import (
 	"nofx/experience"
+	"nofx/logger"
 	"nofx/mcp"
 	"os"
 	"strconv"
@@ -137,14 +138,29 @@ func Init() {
 	// Initialize experience improvement (installation ID will be set after database init)
 	experience.Init(cfg.ExperienceImprovement, "")
 
-	// Set up AI token usage tracking callback
-	mcp.TokenUsageCallback = func(usage mcp.TokenUsage) {
+	// Set up AI token usage tracking callback (includes prompt cache stats when available).
+	// runID is set for backtest runs so GET /api/ai-usage?run_id= returns per-run stats.
+	// traderID is set for live/simulation traders so GET /api/ai-usage?trader_id= returns per-trader stats.
+	mcp.TokenUsageCallback = func(usage mcp.TokenUsage, runID string, traderID string, scope string) {
+		// Record usage: scope (e.g. strategy_studio) > trader > run > global
+		if scope != "" {
+			mcp.RecordTokenUsageForScope(usage, scope)
+		} else if traderID != "" {
+			mcp.RecordTokenUsageForTrader(usage, traderID)
+		} else {
+			mcp.RecordTokenUsage(usage, runID)
+		}
 		experience.TrackAIUsage(experience.AIUsageEvent{
 			ModelProvider: usage.Provider,
 			ModelName:     usage.Model,
 			InputTokens:   usage.PromptTokens,
 			OutputTokens:  usage.CompletionTokens,
 		})
+		// Log prompt cache usage when present (Claude/OpenAI) so operators can verify caching is running
+		if usage.CacheReadInputTokens > 0 || usage.CacheCreationInputTokens > 0 {
+			logger.Infof("📦 Prompt Caching: read=%d created=%d (provider=%s model=%s)",
+				usage.CacheReadInputTokens, usage.CacheCreationInputTokens, usage.Provider, usage.Model)
+		}
 	}
 }
 

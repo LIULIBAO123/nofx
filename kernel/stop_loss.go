@@ -27,14 +27,21 @@ type StopLossSignal struct {
 	Reason    string
 	Price     float64
 	Type      string // "initial", "trailing", "atr", "support_resistance"
+
+	// Trailing only: which tier triggered and key percentages (for close_reason and UI)
+	TrailingTier         int     // 1-based level index (0 = not trailing)
+	TrailingPeakPct      float64 // peak profit % at trigger (e.g. 3.5)
+	TrailingRetracePct   float64 // allowed retracement % for this tier (e.g. 2.5)
 }
 
-// CheckStopLoss checks if any stop loss condition is triggered for a position
+// CheckStopLoss checks if any stop loss condition is triggered for a position.
+// atrLong: longer-period ATR (e.g. 28) for high-vol detection; when atr > atrLong*threshold we use wider ATR stop.
 func (c *StopLossChecker) CheckStopLoss(
 	position *PositionInfo,
 	currentPrice float64,
 	highestPrice float64, // highest price since entry (for trailing stop)
-	atr float64, // current ATR value
+	atr float64, // current ATR value (e.g. 14)
+	atrLong float64, // longer-period ATR for volatility regime (0 = disable tolerance)
 	supportLevel float64, // support level (0 if not available)
 ) *StopLossSignal {
 	if c == nil || c.config == nil {
@@ -43,9 +50,11 @@ func (c *StopLossChecker) CheckStopLoss(
 
 	signals := make([]*StopLossSignal, 0)
 
-	// 1. Check initial fixed stop loss (always active as safety net)
-	if signal := c.checkInitialStop(position, currentPrice); signal.Triggered {
-		signals = append(signals, signal)
+	// 1. Check initial fixed stop loss only when configured (InitialStopPercent > 0). Removed as default; use dynamic/ATR/trailing only when 0.
+	if c.config.InitialStopPercent > 0 {
+		if signal := c.checkInitialStop(position, currentPrice); signal.Triggered {
+			signals = append(signals, signal)
+		}
 	}
 
 	// 2. Check trailing stop (if enabled)
@@ -55,9 +64,9 @@ func (c *StopLossChecker) CheckStopLoss(
 		}
 	}
 
-	// 3. Check ATR stop (if enabled)
+	// 3. Check ATR stop (if enabled); pass atrLong for high-vol tolerance
 	if c.config.ATREnabled != nil && *c.config.ATREnabled && atr > 0 {
-		if signal := c.checkATRStop(position, currentPrice, atr); signal.Triggered {
+		if signal := c.checkATRStop(position, currentPrice, atr, atrLong); signal.Triggered {
 			signals = append(signals, signal)
 		}
 	}
@@ -147,12 +156,14 @@ func (c *StopLossChecker) checkTrailingStop(position *PositionInfo, currentPrice
 		profitPct = ((entryPrice - highestPrice) / entryPrice) * 100
 	}
 
-	// Find the active trailing level (highest profit threshold reached)
+	// Find the active trailing level (highest profit threshold reached) and tier index
 	var activeLevel *store.TrailingStopLevel
+	tierIndex := 0
 	for i := range c.config.TrailingLevels {
 		level := &c.config.TrailingLevels[i]
 		if profitPct >= level.ProfitThreshold {
 			activeLevel = level
+			tierIndex = i + 1 // 1-based for display (L1, L2, ...)
 		}
 	}
 
@@ -166,20 +177,26 @@ func (c *StopLossChecker) checkTrailingStop(position *PositionInfo, currentPrice
 		stopPrice = highestPrice * (1 - activeLevel.TrailingPercent/100)
 		if currentPrice <= stopPrice {
 			return &StopLossSignal{
-				Triggered: true,
-				Reason:    fmt.Sprintf("Trailing stop triggered: %.2f%% profit, %.2f%% retracement", profitPct, activeLevel.TrailingPercent),
-				Price:     stopPrice,
-				Type:      "trailing",
+				Triggered:            true,
+				Reason:               fmt.Sprintf("Trailing stop triggered: %.2f%% profit, %.2f%% retracement", profitPct, activeLevel.TrailingPercent),
+				Price:                stopPrice,
+				Type:                 "trailing",
+				TrailingTier:         tierIndex,
+				TrailingPeakPct:      profitPct,
+				TrailingRetracePct:   activeLevel.TrailingPercent,
 			}
 		}
 	} else { // short
 		stopPrice = highestPrice * (1 + activeLevel.TrailingPercent/100)
 		if currentPrice >= stopPrice {
 			return &StopLossSignal{
-				Triggered: true,
-				Reason:    fmt.Sprintf("Trailing stop triggered: %.2f%% profit, %.2f%% retracement", profitPct, activeLevel.TrailingPercent),
-				Price:     stopPrice,
-				Type:      "trailing",
+				Triggered:            true,
+				Reason:               fmt.Sprintf("Trailing stop triggered: %.2f%% profit, %.2f%% retracement", profitPct, activeLevel.TrailingPercent),
+				Price:                stopPrice,
+				Type:                 "trailing",
+				TrailingTier:         tierIndex,
+				TrailingPeakPct:      profitPct,
+				TrailingRetracePct:   activeLevel.TrailingPercent,
 			}
 		}
 	}
@@ -187,14 +204,22 @@ func (c *StopLossChecker) checkTrailingStop(position *PositionInfo, currentPrice
 	return &StopLossSignal{Triggered: false}
 }
 
-// checkATRStop checks ATR-based dynamic stop loss
-func (c *StopLossChecker) checkATRStop(position *PositionInfo, currentPrice float64, atr float64) *StopLossSignal {
+// checkATRStop checks ATR-based dynamic stop loss.
+// When atrLong > 0 and atr > atrLong*ATRHighMultiplier (high volatility), use ATRMultiplierMax for wider stop (more tolerant).
+func (c *StopLossChecker) checkATRStop(position *PositionInfo, currentPrice float64, atr, atrLong float64) *StopLossSignal {
 	entryPrice := position.EntryPrice
-	
-	// Use mid-point of ATR multiplier range as default
+
 	multiplierMin := getFloat64Value(c.config.ATRMultiplierMin, 1.5)
 	multiplierMax := getFloat64Value(c.config.ATRMultiplierMax, 3.5)
 	multiplier := (multiplierMin + multiplierMax) / 2
+
+	// High volatility: use max multiplier so stop is further away (more tolerant)
+	if atrLong > 0 && c.config.ATRToleranceEnabled != nil && *c.config.ATRToleranceEnabled {
+		highMult := getFloat64Value(c.config.ATRHighMultiplier, 1.2)
+		if atr > atrLong*highMult {
+			multiplier = multiplierMax
+		}
+	}
 
 	var stopPrice float64
 	if position.Side == "long" {
@@ -223,28 +248,29 @@ func (c *StopLossChecker) checkATRStop(position *PositionInfo, currentPrice floa
 }
 
 // checkSupportResistanceStop checks support/resistance based stop loss
-func (c *StopLossChecker) checkSupportResistanceStop(position *PositionInfo, currentPrice float64, supportLevel float64) *StopLossSignal {
+// Caller should pass: supportLevel for long positions, resistanceLevel for short positions
+func (c *StopLossChecker) checkSupportResistanceStop(position *PositionInfo, currentPrice float64, srLevel float64) *StopLossSignal {
 	buffer := getFloat64Value(c.config.SupportResistanceBuffer, 0.5)
 	
 	var stopPrice float64
 	if position.Side == "long" {
 		// For long positions, stop below support level
-		stopPrice = supportLevel * (1 - buffer/100)
+		stopPrice = srLevel * (1 - buffer/100)
 		if currentPrice <= stopPrice {
 			return &StopLossSignal{
 				Triggered: true,
-				Reason:    fmt.Sprintf("Support level broken: price below %.2f (support: %.2f)", stopPrice, supportLevel),
+				Reason:    fmt.Sprintf("Support level broken: price below %.2f (support: %.2f)", stopPrice, srLevel),
 				Price:     stopPrice,
 				Type:      "support_resistance",
 			}
 		}
 	} else { // short
-		// For short positions, stop above resistance level (use supportLevel as resistance)
-		stopPrice = supportLevel * (1 + buffer/100)
+		// For short positions, stop above resistance level
+		stopPrice = srLevel * (1 + buffer/100)
 		if currentPrice >= stopPrice {
 			return &StopLossSignal{
 				Triggered: true,
-				Reason:    fmt.Sprintf("Resistance level broken: price above %.2f (resistance: %.2f)", stopPrice, supportLevel),
+				Reason:    fmt.Sprintf("Resistance level broken: price above %.2f (resistance: %.2f)", stopPrice, srLevel),
 				Price:     stopPrice,
 				Type:      "support_resistance",
 			}
@@ -256,8 +282,10 @@ func (c *StopLossChecker) checkSupportResistanceStop(position *PositionInfo, cur
 
 // countEnabledConditions counts how many stop loss conditions are enabled
 func (c *StopLossChecker) countEnabledConditions() int {
-	count := 1 // initial stop is always enabled
-	
+	count := 0
+	if c.config.InitialStopPercent > 0 {
+		count++
+	}
 	if c.config.TrailingEnabled != nil && *c.config.TrailingEnabled {
 		count++
 	}

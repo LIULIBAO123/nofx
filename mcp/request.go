@@ -34,6 +34,15 @@ type Request struct {
 	Messages []Message `json:"messages"`           // Conversation message list
 	Stream   bool      `json:"stream,omitempty"`   // Whether to stream response
 
+	// RunID optional backtest run id; when set, token usage is recorded per-run for GET /api/ai-usage?run_id=
+	RunID string `json:"-"`
+
+	// TraderID optional trader id; when set, token usage is recorded per-trader for GET /api/ai-usage?trader_id=
+	TraderID string `json:"-"`
+
+	// Scope optional scope (e.g. "strategy_studio"); when set, token usage is recorded per-scope for GET /api/ai-usage?context=
+	Scope string `json:"-"`
+
 	// Optional parameters (for fine-grained control)
 	Temperature      *float64 `json:"temperature,omitempty"`       // Temperature (0-2), controls randomness
 	MaxTokens        *int     `json:"max_tokens,omitempty"`        // Maximum token count

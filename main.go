@@ -109,7 +109,7 @@ func main() {
 	}
 
 	// Display loaded trader information
-	traders, err := st.Trader().List("default")
+	traders, err := st.Trader().List("default", false)
 	if err != nil {
 		logger.Fatalf("❌ Failed to get trader list: %v", err)
 	}

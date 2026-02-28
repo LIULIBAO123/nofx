@@ -93,24 +93,33 @@ func (df *DataFeed) loadAll() error {
 		df.symbolSeries[symbol] = ss
 	}
 
-	// Generate backtest progress timeline using the primary timeframe of the first symbol
-	firstSymbol := df.symbols[0]
-	primarySeries := df.symbolSeries[firstSymbol].byTF[df.primaryTF]
+	// Generate backtest progress timeline
 	startMs := start.UnixMilli()
 	endMs := end.UnixMilli()
-	for _, ts := range primarySeries.closeTimes {
-		if ts < startMs {
-			continue
+	intervalMin := df.cfg.DecisionIntervalMinutes
+	if intervalMin > 0 {
+		// 与实盘一致：按固定分钟间隔推进（如 5 分钟 = 实盘 ScanIntervalMinutes）
+		stepMs := int64(intervalMin) * 60 * 1000
+		for t := startMs; t <= endMs; t += stepMs {
+			df.decisionTimes = append(df.decisionTimes, t)
 		}
-		if ts > endMs {
-			break
-		}
-		df.decisionTimes = append(df.decisionTimes, ts)
-		// Align other symbols; report error early if data is missing
-		for _, symbol := range df.symbols[1:] {
-			if _, ok := df.symbolSeries[symbol].byTF[df.primaryTF]; !ok {
-				return fmt.Errorf("symbol %s missing timeframe %s", symbol, df.primaryTF)
+	} else {
+		// 按 K 线节奏：使用主周期 bar 的收盘时间
+		firstSymbol := df.symbols[0]
+		primarySeries := df.symbolSeries[firstSymbol].byTF[df.primaryTF]
+		for _, ts := range primarySeries.closeTimes {
+			if ts < startMs {
+				continue
 			}
+			if ts > endMs {
+				break
+			}
+			df.decisionTimes = append(df.decisionTimes, ts)
+		}
+	}
+	for _, symbol := range df.symbols {
+		if _, ok := df.symbolSeries[symbol].byTF[df.primaryTF]; !ok {
+			return fmt.Errorf("symbol %s missing timeframe %s", symbol, df.primaryTF)
 		}
 	}
 	if len(df.decisionTimes) == 0 {
@@ -205,4 +214,24 @@ func (df *DataFeed) decisionBarSnapshot(symbol string, ts int64) (*market.Kline,
 		next = &series.klines[idx+1]
 	}
 	return curr, next
+}
+
+// GetBarAt returns the OHLC bar for the given symbol at the decision timestamp ts (bar that closes at ts).
+// Used by backtest to check dynamic stop-loss/take-profit with bar high/low.
+func (df *DataFeed) GetBarAt(symbol string, ts int64) *market.Kline {
+	curr, _ := df.decisionBarSnapshot(symbol, ts)
+	if curr == nil {
+		return nil
+	}
+	k := *curr
+	return &k
+}
+
+// KlinesUpTo returns klines for symbol up to (and including) ts, primary timeframe. For support/resistance.
+func (df *DataFeed) KlinesUpTo(symbol string, ts int64) []market.Kline {
+	slice := df.sliceUpTo(symbol, df.primaryTF, ts)
+	if len(slice) == 0 {
+		return nil
+	}
+	return slice
 }

@@ -44,6 +44,8 @@ export function RiskControlEditor({
       minPositionSizeDesc: { zh: 'USDT 最小名义价值', en: 'Minimum notional value in USDT' },
       minConfidence: { zh: '最小信心度', en: 'Min Confidence' },
       minConfidenceDesc: { zh: 'AI 开仓信心度阈值', en: 'AI confidence threshold for entry' },
+      aiOnlyEntry: { zh: 'AI 仅开仓', en: 'AI Only Entry' },
+      aiOnlyEntryDesc: { zh: '开启后：AI 只负责预测与开仓；平仓完全由策略（动态止损/追踪/分层止盈）执行，不执行 AI 的 close 建议。适合震荡市拿住仓、盈利后平仓。', en: 'When on: AI only predicts and opens; strategy handles all exits (dynamic SL/TP, trailing, scaled TP). AI close suggestions are ignored. Suited for ranging markets.' },
       dynamicStopLoss: { zh: '动态止损', en: 'Dynamic Stop Loss' },
       dynamicTakeProfit: { zh: '动态止盈', en: 'Dynamic Take Profit' },
     }
@@ -97,6 +99,30 @@ export function RiskControlEditor({
                 color: '#EAECEF',
               }}
             />
+          </div>
+
+          {/* AI 仅开仓 */}
+          <div
+            className="p-4 rounded-lg"
+            style={{ background: '#0B0E11', border: '1px solid #2B3139' }}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <label className="block text-sm mb-1" style={{ color: '#EAECEF' }}>
+                  {t('aiOnlyEntry')}
+                </label>
+                <p className="text-xs" style={{ color: '#848E9C' }}>
+                  {t('aiOnlyEntryDesc')}
+                </p>
+              </div>
+              <input
+                type="checkbox"
+                checked={!!config.ai_only_entry}
+                onChange={(e) => updateField('ai_only_entry', e.target.checked)}
+                disabled={disabled}
+                className="w-5 h-5 rounded accent-yellow-500"
+              />
+            </div>
           </div>
         </div>
 
@@ -267,7 +293,6 @@ export function RiskControlEditor({
               {t('minRiskRewardDesc')}
             </p>
             <div className="flex items-center">
-              <span style={{ color: '#848E9C' }}>1:</span>
               <input
                 type="number"
                 value={config.min_risk_reward_ratio ?? 3}
@@ -278,13 +303,14 @@ export function RiskControlEditor({
                 min={1}
                 max={10}
                 step={0.5}
-                className="w-20 px-3 py-2 rounded ml-2"
+                className="w-20 px-3 py-2 rounded"
                 style={{
                   background: '#1E2329',
                   border: '1px solid #2B3139',
                   color: '#EAECEF',
                 }}
               />
+              <span style={{ color: '#848E9C' }} className="ml-2">:1</span>
             </div>
           </div>
 

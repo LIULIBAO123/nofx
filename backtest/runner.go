@@ -60,6 +60,14 @@ type Runner struct {
 	aiCache   *AICache
 	cachePath string
 
+	// positionParams holds stop_loss, take_profit, atr_at_open and scaled TP levels taken per position
+	positionParamsMu sync.RWMutex
+	positionParams   map[string]positionParam
+
+	// slConfirmCount: consecutive bars SL condition met per position; execute only when >= ConfirmCycles (and ATR tolerance)
+	slConfirmCountMu sync.Mutex
+	slConfirmCount   map[string]int
+
 	lockInfo     *RunLockInfo
 	lockStop     chan struct{}
 	lockStopOnce sync.Once // Ensures lockStop is closed only once
@@ -101,6 +109,7 @@ func NewRunner(cfg BacktestConfig, mcpClient mcp.AIClient) (*Runner, error) {
 		MaxDrawdownPct: 0,
 		LastUpdate:     createdAt,
 	}
+	positionParams := make(map[string]positionParam)
 
 	var (
 		aiCache   *AICache
@@ -123,21 +132,23 @@ func NewRunner(cfg BacktestConfig, mcpClient mcp.AIClient) (*Runner, error) {
 	strategyEngine := kernel.NewStrategyEngine(strategyConfig)
 
 	r := &Runner{
-		cfg:            cfg,
-		feed:           feed,
-		account:        account,
-		strategyEngine: strategyEngine,
-		decisionLogDir: dLogDir,
-		mcpClient:      client,
-		status:         RunStateCreated,
-		state:          state,
-		pauseCh:        make(chan struct{}, 1),
-		resumeCh:       make(chan struct{}, 1),
-		stopCh:         make(chan struct{}, 1),
-		doneCh:         make(chan struct{}),
-		createdAt:      createdAt,
-		aiCache:        aiCache,
-		cachePath:      cachePath,
+		cfg:             cfg,
+		feed:            feed,
+		account:         account,
+		strategyEngine:  strategyEngine,
+		decisionLogDir:  dLogDir,
+		mcpClient:       client,
+		status:          RunStateCreated,
+		state:           state,
+		pauseCh:         make(chan struct{}, 1),
+		resumeCh:        make(chan struct{}, 1),
+		stopCh:          make(chan struct{}, 1),
+		doneCh:          make(chan struct{}),
+		createdAt:       createdAt,
+		aiCache:         aiCache,
+		cachePath:       cachePath,
+		positionParams:   positionParams,
+		slConfirmCount:   make(map[string]int),
 	}
 
 	if err := r.initLock(); err != nil {
@@ -296,10 +307,32 @@ func (r *Runner) stepOnce() error {
 		hadError        bool
 	)
 
+	// Dynamic stop-loss / take-profit (same as live trading): check and execute before AI decision
+	forced := r.checkAndExecuteDynamicStopTakeProfit(ts, marketData, priceMap, callCount)
+	if len(forced) > 0 {
+		tradeEvents = append(tradeEvents, forced...)
+	}
+
 	decisionAttempted := shouldDecide
 
 	if shouldDecide {
-		ctx, rec, err := r.buildDecisionContext(ts, marketData, multiTF, priceMap, callCount)
+		var strategyClosesThisCycle []kernel.StrategyTriggeredClose
+		if len(forced) > 0 {
+			strategyClosesThisCycle = make([]kernel.StrategyTriggeredClose, 0, len(forced))
+			for _, evt := range forced {
+				reason := evt.CloseReason
+				if reason == "" {
+					reason = "dynamic_sl_tp"
+				}
+				strategyClosesThisCycle = append(strategyClosesThisCycle, kernel.StrategyTriggeredClose{
+					Symbol: evt.Symbol,
+					Side:   evt.Side,
+					Reason: reason,
+					Price:  evt.Price,
+				})
+			}
+		}
+		ctx, rec, err := r.buildDecisionContext(ts, marketData, multiTF, priceMap, callCount, strategyClosesThisCycle)
 		if err != nil {
 			// Defensive nil check to prevent panic if buildDecisionContext returns error with nil record
 			if rec != nil {
@@ -366,7 +399,7 @@ func (r *Runner) stepOnce() error {
 			}
 
 			for _, dec := range sorted {
-				actionRecord, trades, logEntry, execErr := r.executeDecision(dec, priceMap, ts, callCount)
+				actionRecord, trades, logEntry, execErr := r.executeDecision(dec, priceMap, ts, callCount, marketData)
 				if execErr != nil {
 					actionRecord.Success = false
 					actionRecord.Error = execErr.Error()
@@ -378,6 +411,15 @@ func (r *Runner) stepOnce() error {
 				}
 				if len(trades) > 0 {
 					tradeEvents = append(tradeEvents, trades...)
+					for _, evt := range trades {
+						key := evt.Symbol + ":" + evt.Side
+						switch evt.Action {
+						case "open_long", "open_short":
+							r.setPositionParams(key, evt.StopLoss, evt.TakeProfit, evt.ATRAtOpen)
+						case "close_long", "close_short":
+							r.deletePositionParams(key)
+						}
+					}
 				}
 				if logEntry != "" {
 					execLog = append(execLog, logEntry)
@@ -411,7 +453,8 @@ func (r *Runner) stepOnce() error {
 
 	if record != nil {
 		record.Decisions = decisionActions
-		record.ExecutionLog = execLog
+		// 保留 buildDecisionContext 中写入的「策略平仓」行，再追加本周期 AI 执行日志
+		record.ExecutionLog = append(record.ExecutionLog, execLog...)
 		record.Success = !hadError && liquidationNote == ""
 		if liquidationNote != "" {
 			record.ErrorMessage = liquidationNote
@@ -452,14 +495,15 @@ func (r *Runner) stepOnce() error {
 	}
 	
 	for _, evt := range tradeEvents {
-		// Perform AI analysis for this trade (async to avoid blocking)
-		if !evt.LiquidationFlag && r.cfg.EnableTradeAnalysis {
+		// Perform AI analysis only for completed trades (close_long/close_short) so it runs after trade is done
+		isClose := evt.Action == "close_long" || evt.Action == "close_short"
+		if !evt.LiquidationFlag && r.cfg.EnableTradeAnalysis && isClose {
 			accountAfter := kernel.AccountInfo{
 				TotalEquity:      snapshot.Equity,
 				AvailableBalance: snapshot.Cash,
 				MarginUsed:       r.totalMarginUsed(),
 			}
-			
+
 			// Build market data context for analysis
 			marketDataCtx := make(map[string]interface{})
 			if md, ok := marketData[evt.Symbol]; ok {
@@ -467,21 +511,21 @@ func (r *Runner) stepOnce() error {
 				marketDataCtx["current_price"] = md.CurrentPrice
 				// Add more context if available
 			}
-			
+
 			// Get decision context if available
 			decisionCtx := ""
 			if record != nil && record.InputPrompt != "" {
 				decisionCtx = record.InputPrompt
 			}
-			
-			// Analyze trade
+
+			// Analyze trade (completed round-trip)
 			analysis := r.AnalyzeTrade(evt, accountBefore, accountAfter, marketDataCtx, decisionCtx)
 			if analysis != nil {
 				evt.AIAnalysis = analysis
 				logger.Infof("📊 Trade analysis: %s %s - Score: %.1f/10", evt.Symbol, evt.Action, analysis.OverallScore)
 			}
 		}
-		
+
 		if err := appendTradeEvent(r.cfg.RunID, evt); err != nil {
 			return err
 		}
@@ -515,7 +559,7 @@ func (r *Runner) stepOnce() error {
 	return nil
 }
 
-func (r *Runner) buildDecisionContext(ts int64, marketData map[string]*market.Data, multiTF map[string]map[string]*market.Data, priceMap map[string]float64, callCount int) (*kernel.Context, *store.DecisionRecord, error) {
+func (r *Runner) buildDecisionContext(ts int64, marketData map[string]*market.Data, multiTF map[string]map[string]*market.Data, priceMap map[string]float64, callCount int, strategyClosesThisCycle []kernel.StrategyTriggeredClose) (*kernel.Context, *store.DecisionRecord, error) {
 	equity, unrealized, _ := r.account.TotalEquity(priceMap)
 	available := r.account.Cash()
 	marginUsed := r.totalMarginUsed()
@@ -548,18 +592,19 @@ func (r *Runner) buildDecisionContext(ts int64, marketData map[string]*market.Da
 
 	runtime := int((ts - int64(r.cfg.StartTS*1000)) / 60000)
 	ctx := &kernel.Context{
-		CurrentTime:     time.UnixMilli(ts).UTC().Format("2006-01-02 15:04:05 UTC"),
-		RuntimeMinutes:  runtime,
-		CallCount:       callCount,
-		Account:         accountInfo,
-		Positions:       positions,
-		CandidateCoins:  candidateCoins,
-		PromptVariant:   r.cfg.PromptVariant,
-		MarketDataMap:   marketData,
-		MultiTFMarket:   multiTF,
-		BTCETHLeverage:  r.cfg.Leverage.BTCETHLeverage,
-		AltcoinLeverage: r.cfg.Leverage.AltcoinLeverage,
-		Timeframes:      r.cfg.Timeframes,
+		CurrentTime:             time.UnixMilli(ts).UTC().Format("2006-01-02 15:04:05 UTC"),
+		RuntimeMinutes:          runtime,
+		CallCount:               callCount,
+		Account:                 accountInfo,
+		Positions:               positions,
+		CandidateCoins:          candidateCoins,
+		PromptVariant:           r.cfg.PromptVariant,
+		StrategyTriggeredCloses: strategyClosesThisCycle,
+		MarketDataMap:           marketData,
+		MultiTFMarket:           multiTF,
+		BTCETHLeverage:          r.cfg.Leverage.BTCETHLeverage,
+		AltcoinLeverage:         r.cfg.Leverage.AltcoinLeverage,
+		Timeframes:              r.cfg.Timeframes,
 	}
 
 	// Fetch quantitative data if enabled in strategy (uses current data as approximation)
@@ -620,11 +665,16 @@ func (r *Runner) buildDecisionContext(ts int64, marketData map[string]*market.Da
 		},
 		CandidateCoins: make([]string, 0, len(candidateCoins)),
 		Positions:      r.snapshotPositions(priceMap),
+		ExecutionLog:   make([]string, 0),
 	}
 	for _, coin := range candidateCoins {
 		record.CandidateCoins = append(record.CandidateCoins, coin.Symbol)
 	}
 	record.Timestamp = time.UnixMilli(ts).UTC()
+
+	for _, c := range strategyClosesThisCycle {
+		record.ExecutionLog = append(record.ExecutionLog, fmt.Sprintf("策略平仓: %s %s @ %.4f (%s)", c.Symbol, c.Side, c.Price, c.Reason))
+	}
 
 	return ctx, record, nil
 }
@@ -649,6 +699,7 @@ func (r *Runner) invokeAIWithRetry(ctx *kernel.Context) (*kernel.FullDecision, e
 			r.mcpClient,
 			r.strategyEngine,
 			r.cfg.PromptVariant,
+			r.cfg.RunID,
 		)
 		if err == nil {
 			return fd, nil
@@ -660,8 +711,20 @@ func (r *Runner) invokeAIWithRetry(ctx *kernel.Context) (*kernel.FullDecision, e
 	return nil, lastErr
 }
 
-func (r *Runner) executeDecision(dec kernel.Decision, priceMap map[string]float64, ts int64, cycle int) (store.DecisionAction, []TradeEvent, string, error) {
+func (r *Runner) executeDecision(dec kernel.Decision, priceMap map[string]float64, ts int64, cycle int, marketData map[string]*market.Data) (store.DecisionAction, []TradeEvent, string, error) {
 	symbol := dec.Symbol
+	// hold/wait do not need a valid symbol or price (e.g. Claude may return symbol "ALL" for "wait").
+	// Treat as success so the run continues; next cycle may return real symbols and 候选币种分析.
+	if dec.Action == "hold" || dec.Action == "wait" {
+		actionRecord := store.DecisionAction{
+			Action:    dec.Action,
+			Symbol:    symbol,
+			Success:   true,
+			Timestamp: time.UnixMilli(ts).UTC(),
+		}
+		return actionRecord, nil, "观望，无操作", nil
+	}
+
 	if symbol == "" {
 		return store.DecisionAction{}, nil, "", fmt.Errorf("empty symbol in decision")
 	}
@@ -683,6 +746,17 @@ func (r *Runner) executeDecision(dec kernel.Decision, priceMap map[string]float6
 		return actionRecord, nil, "", fmt.Errorf("price unavailable for %s (found=%v, price=%.4f)", symbol, ok, basePrice)
 	}
 	fillPrice := r.executionPrice(symbol, basePrice, ts)
+
+	atrAtOpen := 0.0
+	if marketData != nil {
+		if md, ok := marketData[symbol]; ok && md != nil {
+			if md.LongerTermContext != nil && md.LongerTermContext.ATR14 > 0 {
+				atrAtOpen = md.LongerTermContext.ATR14
+			} else if md.IntradaySeries != nil && md.IntradaySeries.ATR14 > 0 {
+				atrAtOpen = md.IntradaySeries.ATR14
+			}
+		}
+	}
 
 	switch dec.Action {
 	case "open_long":
@@ -711,6 +785,9 @@ func (r *Runner) executeDecision(dec kernel.Decision, priceMap map[string]float6
 			Leverage:      pos.Leverage,
 			Cycle:         cycle,
 			PositionAfter: pos.Quantity,
+			StopLoss:      dec.StopLoss,
+			TakeProfit:   dec.TakeProfit,
+			ATRAtOpen:    atrAtOpen,
 		}
 		return actionRecord, []TradeEvent{trade}, "", nil
 
@@ -740,6 +817,9 @@ func (r *Runner) executeDecision(dec kernel.Decision, priceMap map[string]float6
 			Leverage:      pos.Leverage,
 			Cycle:         cycle,
 			PositionAfter: pos.Quantity,
+			StopLoss:      dec.StopLoss,
+			TakeProfit:   dec.TakeProfit,
+			ATRAtOpen:    atrAtOpen,
 		}
 		return actionRecord, []TradeEvent{trade}, "", nil
 
@@ -748,6 +828,7 @@ func (r *Runner) executeDecision(dec kernel.Decision, priceMap map[string]float6
 		if qty <= 0 {
 			return actionRecord, nil, "", fmt.Errorf("invalid close qty")
 		}
+		openTime := r.getPositionOpenTime(symbol, "long")
 		posLev := r.account.positionLeverage(symbol, "long")
 		realized, fee, execPrice, err := r.account.Close(symbol, "long", qty, fillPrice)
 		if err != nil {
@@ -770,6 +851,7 @@ func (r *Runner) executeDecision(dec kernel.Decision, priceMap map[string]float6
 			Leverage:      posLev,
 			Cycle:         cycle,
 			PositionAfter: r.remainingPosition(symbol, "long"),
+			OpenTime:      openTime,
 		}
 		return actionRecord, []TradeEvent{trade}, "", nil
 
@@ -778,6 +860,7 @@ func (r *Runner) executeDecision(dec kernel.Decision, priceMap map[string]float6
 		if qty <= 0 {
 			return actionRecord, nil, "", fmt.Errorf("invalid close qty")
 		}
+		openTime := r.getPositionOpenTime(symbol, "short")
 		posLev := r.account.positionLeverage(symbol, "short")
 		realized, fee, execPrice, err := r.account.Close(symbol, "short", qty, fillPrice)
 		if err != nil {
@@ -800,6 +883,7 @@ func (r *Runner) executeDecision(dec kernel.Decision, priceMap map[string]float6
 			Leverage:      posLev,
 			Cycle:         cycle,
 			PositionAfter: r.remainingPosition(symbol, "short"),
+			OpenTime:      openTime,
 		}
 		return actionRecord, []TradeEvent{trade}, "", nil
 
@@ -910,6 +994,15 @@ func (r *Runner) remainingPosition(symbol, side string) float64 {
 	return 0
 }
 
+func (r *Runner) getPositionOpenTime(symbol, side string) int64 {
+	for _, pos := range r.account.Positions() {
+		if pos.Symbol == strings.ToUpper(symbol) && pos.Side == side {
+			return pos.OpenTime
+		}
+	}
+	return 0
+}
+
 func (r *Runner) snapshotPositions(priceMap map[string]float64) []store.PositionSnapshot {
 	positions := r.account.Positions()
 	list := make([]store.PositionSnapshot, 0, len(positions))
@@ -978,6 +1071,51 @@ func (r *Runner) executionPrice(symbol string, markPrice float64, ts int64) floa
 	return markPrice
 }
 
+// positionParam holds per-position SL/TP and layered TP state.
+type positionParam struct {
+	StopLoss          float64
+	TakeProfit        float64
+	ATRAtOpen         float64
+	ScaledLevelsTaken []float64 // profit percents already taken (e.g. 3, 5 for 3%, 5%)
+}
+
+func (r *Runner) getPositionParams(key string) (p positionParam, ok bool) {
+	r.positionParamsMu.RLock()
+	defer r.positionParamsMu.RUnlock()
+	p, ok = r.positionParams[key]
+	if ok {
+		p.ScaledLevelsTaken = append([]float64(nil), p.ScaledLevelsTaken...)
+	}
+	return p, ok
+}
+
+func (r *Runner) setPositionParams(key string, stopLoss, takeProfit, atrAtOpen float64) {
+	r.positionParamsMu.Lock()
+	defer r.positionParamsMu.Unlock()
+	if r.positionParams == nil {
+		r.positionParams = make(map[string]positionParam)
+	}
+	r.positionParams[key] = positionParam{StopLoss: stopLoss, TakeProfit: takeProfit, ATRAtOpen: atrAtOpen}
+}
+
+// addScaledLevelTaken records that a scaled TP level (profitPercent) was taken for the position.
+func (r *Runner) addScaledLevelTaken(key string, profitPercent float64) {
+	r.positionParamsMu.Lock()
+	defer r.positionParamsMu.Unlock()
+	if r.positionParams == nil {
+		return
+	}
+	p := r.positionParams[key]
+	p.ScaledLevelsTaken = append(p.ScaledLevelsTaken, profitPercent)
+	r.positionParams[key] = p
+}
+
+func (r *Runner) deletePositionParams(key string) {
+	r.positionParamsMu.Lock()
+	defer r.positionParamsMu.Unlock()
+	delete(r.positionParams, key)
+}
+
 func (r *Runner) totalMarginUsed() float64 {
 	sum := 0.0
 	for _, pos := range r.account.Positions() {
@@ -1006,7 +1144,7 @@ func (r *Runner) updateState(ts int64, equity, unrealized, marginUsed float64, p
 	positions := make(map[string]PositionSnapshot)
 	for _, pos := range r.account.Positions() {
 		key := fmt.Sprintf("%s:%s", pos.Symbol, pos.Side)
-		positions[key] = PositionSnapshot{
+		snap := PositionSnapshot{
 			Symbol:           pos.Symbol,
 			Side:             pos.Side,
 			Quantity:         pos.Quantity,
@@ -1017,6 +1155,10 @@ func (r *Runner) updateState(ts int64, equity, unrealized, marginUsed float64, p
 			OpenTime:         pos.OpenTime,
 			AccumulatedFee:   pos.AccumulatedFee,
 		}
+		if p, ok := r.getPositionParams(key); ok {
+			snap.StopLoss, snap.TakeProfit, snap.ATRAtOpen = p.StopLoss, p.TakeProfit, p.ATRAtOpen
+		}
+		positions[key] = snap
 	}
 
 	r.state.BarTimestamp = ts
@@ -1073,6 +1215,282 @@ func (r *Runner) snapshotForCheckpoint(state BacktestState) []PositionSnapshot {
 	return res
 }
 
+// checkAndExecuteDynamicStopTakeProfit runs strategy dynamic SL/TP (same logic as live trading). Returns trade events for any forced closes.
+func (r *Runner) checkAndExecuteDynamicStopTakeProfit(ts int64, marketData map[string]*market.Data, priceMap map[string]float64, cycle int) []TradeEvent {
+	sc := r.cfg.ToStrategyConfig()
+	if sc == nil {
+		return nil
+	}
+	slConfig := sc.RiskControl.DynamicStopLoss
+	tpConfig := sc.RiskControl.DynamicTakeProfit
+	if (slConfig == nil || !slConfig.Enabled) && (tpConfig == nil || !tpConfig.Enabled) {
+		return nil
+	}
+	stopLossChecker := kernel.NewStopLossChecker(slConfig)
+	takeProfitChecker := kernel.NewTakeProfitChecker(tpConfig)
+	if stopLossChecker == nil && takeProfitChecker == nil {
+		return nil
+	}
+
+	positions := r.account.Positions()
+	if len(positions) == 0 {
+		return nil
+	}
+
+	minHoldMs := 0.0
+	if slConfig != nil && slConfig.MinHoldMinutes > 0 {
+		minHoldMs = slConfig.MinHoldMinutes * 60 * 1000
+	}
+	if tpConfig != nil && tpConfig.MinHoldMinutes > 0 {
+		if tpConfig.MinHoldMinutes*60*1000 > minHoldMs {
+			minHoldMs = tpConfig.MinHoldMinutes * 60 * 1000
+		}
+	}
+
+	var events []TradeEvent
+	for _, pos := range positions {
+		key := pos.Symbol + ":" + pos.Side
+		holdDurationMs := ts - pos.OpenTime
+		if minHoldMs > 0 && float64(holdDurationMs) < minHoldMs {
+			continue // 未满最小持仓时间，不触发动态止损/止盈，避免开仓即平仓
+		}
+
+		bar := r.feed.GetBarAt(pos.Symbol, ts)
+		if bar == nil {
+			continue
+		}
+		var priceForSL, priceForTP, highestForTrailing float64
+		if pos.Side == "long" {
+			priceForSL = bar.Low
+			priceForTP = bar.High
+			highestForTrailing = bar.High
+		} else {
+			priceForSL = bar.High
+			priceForTP = bar.Low
+			highestForTrailing = bar.Low
+		}
+
+		markPrice := priceMap[pos.Symbol]
+		if markPrice <= 0 {
+			continue
+		}
+		unrealized := 0.0
+		if pos.Side == "long" {
+			unrealized = (markPrice - pos.EntryPrice) * pos.Quantity
+		} else {
+			unrealized = (pos.EntryPrice - markPrice) * pos.Quantity
+		}
+		marginUsed := pos.Margin
+		pnlPct := 0.0
+		if marginUsed > 0 {
+			pnlPct = (unrealized / marginUsed) * 100
+		}
+		var posParams positionParam
+		posParamsOk := false
+		scaledTaken := []float64(nil)
+		if p, ok := r.getPositionParams(key); ok {
+			scaledTaken = p.ScaledLevelsTaken
+			posParams = p
+			posParamsOk = true
+		}
+		posInfo := &kernel.PositionInfo{
+			Symbol:            pos.Symbol,
+			Side:              pos.Side,
+			EntryPrice:        pos.EntryPrice,
+			MarkPrice:         markPrice,
+			Quantity:          pos.Quantity,
+			Leverage:          pos.Leverage,
+			UnrealizedPnL:     unrealized,
+			UnrealizedPnLPct:  pnlPct,
+			PeakPnLPct:        pnlPct,
+			LiquidationPrice:  pos.LiquidationPrice,
+			MarginUsed:        marginUsed,
+			UpdateTime:        pos.OpenTime,
+			ScaledLevelsTaken: scaledTaken,
+		}
+
+		atr := 0.0
+		atrLong := 0.0
+		supportLevel := 0.0
+		resistanceLevel := 0.0
+		if md, ok := marketData[pos.Symbol]; ok && md != nil {
+			if md.LongerTermContext != nil && md.LongerTermContext.ATR14 > 0 {
+				atr = md.LongerTermContext.ATR14
+			} else if md.IntradaySeries != nil && md.IntradaySeries.ATR14 > 0 {
+				atr = md.IntradaySeries.ATR14
+			}
+		}
+		klines := r.feed.KlinesUpTo(pos.Symbol, ts)
+		if len(klines) >= 3 {
+			if pos.Side == "long" {
+				supportLevel = kernel.FindSupportLevel(klines, markPrice, 30)
+			} else {
+				resistanceLevel = kernel.FindResistanceLevel(klines, markPrice, 30)
+			}
+		}
+		if len(klines) >= 29 {
+			atrLong = kernel.CalculateATR(klines, 28)
+			if atr == 0 {
+				atr = kernel.CalculateATR(klines, 14)
+			}
+		}
+		// Long: SL uses support; short: SL uses resistance (same as live)
+		slLevel := supportLevel
+		if pos.Side == "short" {
+			slLevel = resistanceLevel
+		}
+
+		var closeReason string
+		var tpPartialPct float64
+		triggered := false
+		var tpSig *kernel.TakeProfitSignal
+		if stopLossChecker != nil {
+			sig := stopLossChecker.CheckStopLoss(posInfo, priceForSL, highestForTrailing, atr, atrLong, slLevel)
+			if sig != nil && sig.Triggered {
+				requiredCycles := 1
+				if slConfig.ConfirmCycles > 0 {
+					requiredCycles = slConfig.ConfirmCycles
+				}
+				if slConfig.ATRToleranceEnabled != nil && *slConfig.ATRToleranceEnabled && atrLong > 0 {
+					highMult := 1.2
+					if slConfig.ATRHighMultiplier != nil {
+						highMult = *slConfig.ATRHighMultiplier
+					}
+					if atr > atrLong*highMult {
+						requiredCycles++
+					}
+				}
+				r.slConfirmCountMu.Lock()
+				r.slConfirmCount[key]++
+				count := r.slConfirmCount[key]
+				r.slConfirmCountMu.Unlock()
+				if count >= requiredCycles {
+					triggered = true
+					closeReason = sig.Type
+					logger.Infof("📉 Backtest dynamic SL: %s %s %s @ %.4f", pos.Symbol, pos.Side, sig.Type, sig.Price)
+				}
+			} else {
+				r.slConfirmCountMu.Lock()
+				delete(r.slConfirmCount, key)
+				r.slConfirmCountMu.Unlock()
+			}
+		}
+		if !triggered && takeProfitChecker != nil {
+			sig := takeProfitChecker.CheckTakeProfit(posInfo, priceForTP, atr, resistanceLevel)
+			if sig != nil && sig.Triggered {
+				triggered = true
+				closeReason = sig.Type
+				tpSig = sig
+				tpPartialPct = sig.PartialPercent
+				logger.Infof("📈 Backtest dynamic TP: %s %s %s @ %.4f (close %.1f%%)", pos.Symbol, pos.Side, sig.Type, sig.Price, tpPartialPct)
+			}
+		}
+		if !triggered {
+			continue
+		}
+
+		execPrice := priceMap[pos.Symbol]
+		fullQty := pos.Quantity
+		closeQty := fullQty
+		if tpSig != nil && tpPartialPct > 0 && tpPartialPct < 100 {
+			closeQty = fullQty * (tpPartialPct / 100)
+			if closeQty <= 0 || closeQty > fullQty {
+				closeQty = fullQty
+			}
+		}
+		realized, fee, finalPrice, err := r.account.Close(pos.Symbol, pos.Side, closeQty, execPrice)
+		if err != nil {
+			logger.Infof("⚠️ Backtest dynamic SL/TP close failed %s %s: %v", pos.Symbol, pos.Side, err)
+			continue
+		}
+		positionAfter := fullQty - closeQty
+		if positionAfter <= 0 {
+			r.deletePositionParams(key)
+			r.slConfirmCountMu.Lock()
+			delete(r.slConfirmCount, key)
+			r.slConfirmCountMu.Unlock()
+		} else if tpSig != nil && tpSig.Type == "scaled" {
+			profitPct := 0.0
+			if pos.Side == "long" {
+				profitPct = (tpSig.Price - pos.EntryPrice) / pos.EntryPrice * 100
+			} else {
+				profitPct = (pos.EntryPrice - tpSig.Price) / pos.EntryPrice * 100
+			}
+			r.addScaledLevelTaken(key, profitPct)
+		}
+
+		action := "close_long"
+		if pos.Side == "short" {
+			action = "close_short"
+		}
+		evt := TradeEvent{
+			Timestamp:     ts,
+			Symbol:        pos.Symbol,
+			Action:        action,
+			Side:          pos.Side,
+			Quantity:      closeQty,
+			Price:         finalPrice,
+			Fee:           fee,
+			Slippage:      0,
+			OrderValue:    finalPrice * closeQty,
+			RealizedPnL:   realized - fee,
+			Leverage:      pos.Leverage,
+			Cycle:         cycle,
+			PositionAfter: positionAfter,
+			Note:          "dynamic_stop_take_profit",
+			OpenTime:      pos.OpenTime,
+			CloseReason:   closeReason,
+		}
+		// Attach same params as position (final fixed values at close)
+		if posParamsOk {
+			evt.StopLoss = posParams.StopLoss
+			evt.TakeProfit = posParams.TakeProfit
+			evt.ATRAtOpen = posParams.ATRAtOpen
+			if posParams.ATRAtOpen > 0 {
+				if pos.Side == "long" {
+					if posParams.StopLoss > 0 {
+						evt.ATRMultipleSL = (pos.EntryPrice - posParams.StopLoss) / posParams.ATRAtOpen
+					}
+					if posParams.TakeProfit > 0 {
+						evt.ATRMultipleTP = (posParams.TakeProfit - pos.EntryPrice) / posParams.ATRAtOpen
+					}
+				} else {
+					if posParams.StopLoss > 0 {
+						evt.ATRMultipleSL = (posParams.StopLoss - pos.EntryPrice) / posParams.ATRAtOpen
+					}
+					if posParams.TakeProfit > 0 {
+						evt.ATRMultipleTP = (pos.EntryPrice - posParams.TakeProfit) / posParams.ATRAtOpen
+					}
+				}
+			}
+			evt.ScaledTPLevel = len(posParams.ScaledLevelsTaken)
+		}
+		if sc := r.cfg.ToStrategyConfig(); sc != nil {
+			if sl := sc.RiskControl.DynamicStopLoss; sl != nil && sl.ATRPeriodAltcoin != nil {
+				evt.ATRPeriod = *sl.ATRPeriodAltcoin
+			}
+			if tp := sc.RiskControl.DynamicTakeProfit; tp != nil && tp.ScaledEnabled != nil && *tp.ScaledEnabled && len(tp.ScaledLevels) > 0 {
+				for i := 0; i < evt.ScaledTPLevel && i < len(tp.ScaledLevels); i++ {
+					evt.ScaledTPClosedPct += tp.ScaledLevels[i].ClosePercent
+				}
+				if evt.ScaledTPClosedPct > 100 {
+					evt.ScaledTPClosedPct = 100
+				}
+			}
+			if sl := sc.RiskControl.DynamicStopLoss; sl != nil && sl.TrailingEnabled != nil && *sl.TrailingEnabled && len(sl.TrailingLevels) > 0 {
+				for i, lv := range sl.TrailingLevels {
+					if pnlPct >= lv.ProfitThreshold {
+						evt.TrailingTierActivated = i + 1
+						evt.TrailingAllowedDrawdown = lv.TrailingPercent
+					}
+				}
+			}
+		}
+		events = append(events, evt)
+	}
+	return events
+}
+
 func (r *Runner) checkLiquidation(ts int64, priceMap map[string]float64, cycle int) ([]TradeEvent, string, error) {
 	positions := append([]*position(nil), r.account.Positions()...)
 	events := make([]TradeEvent, 0)
@@ -1098,7 +1516,8 @@ func (r *Runner) checkLiquidation(ts int64, priceMap map[string]float64, cycle i
 			continue
 		}
 
-		realized, fee, finalPrice, err := r.account.Close(pos.Symbol, pos.Side, pos.Quantity, execPrice)
+		closeQty := pos.Quantity
+		realized, fee, finalPrice, err := r.account.Close(pos.Symbol, pos.Side, closeQty, execPrice)
 		if err != nil {
 			return nil, "", err
 		}
@@ -1110,17 +1529,18 @@ func (r *Runner) checkLiquidation(ts int64, priceMap map[string]float64, cycle i
 			Symbol:          pos.Symbol,
 			Action:          "liquidated",
 			Side:            pos.Side,
-			Quantity:        pos.Quantity,
+			Quantity:        closeQty,
 			Price:           finalPrice,
 			Fee:             fee,
 			Slippage:        0,
-			OrderValue:      finalPrice * pos.Quantity,
+			OrderValue:      finalPrice * closeQty,
 			RealizedPnL:     realized - fee,
 			Leverage:        pos.Leverage,
 			Cycle:           cycle,
 			PositionAfter:   0,
 			LiquidationFlag: true,
 			Note:            fmt.Sprintf("forced liquidation at %.4f", finalPrice),
+			OpenTime:        pos.OpenTime,
 		}
 		events = append(events, evt)
 	}
@@ -1289,16 +1709,107 @@ func (r *Runner) StatusPayload() StatusPayload {
 			pnlPct = (unrealizedPnL / pos.MarginUsed) * 100
 		}
 
+		// ATR multiples for display (instead of raw ATR value)
+		atrMultSL, atrMultTP := 0.0, 0.0
+		if pos.ATRAtOpen > 0 {
+			if pos.Side == "long" {
+				if pos.StopLoss > 0 {
+					atrMultSL = (pos.AvgPrice - pos.StopLoss) / pos.ATRAtOpen
+				}
+				if pos.TakeProfit > 0 {
+					atrMultTP = (pos.TakeProfit - pos.AvgPrice) / pos.ATRAtOpen
+				}
+			} else {
+				if pos.StopLoss > 0 {
+					atrMultSL = (pos.StopLoss - pos.AvgPrice) / pos.ATRAtOpen
+				}
+				if pos.TakeProfit > 0 {
+					atrMultTP = (pos.AvgPrice - pos.TakeProfit) / pos.ATRAtOpen
+				}
+			}
+		}
+		// Distance to SL/TP as % of mark price (positive = room before hit)
+		distSLPct, distTPPct := 0.0, 0.0
+		if markPrice > 0 {
+			if pos.Side == "long" {
+				if pos.StopLoss > 0 {
+					distSLPct = ((markPrice - pos.StopLoss) / markPrice) * 100
+				}
+				if pos.TakeProfit > 0 {
+					distTPPct = ((pos.TakeProfit - markPrice) / markPrice) * 100
+				}
+			} else {
+				if pos.StopLoss > 0 {
+					distSLPct = ((pos.StopLoss - markPrice) / markPrice) * 100
+				}
+				if pos.TakeProfit > 0 {
+					distTPPct = ((markPrice - pos.TakeProfit) / markPrice) * 100
+				}
+			}
+		}
+		trailingEnabled := false
+		scaledTPEnabled := false
+		scaledTPLevel := 0
+		scaledTPClosedPct := 0.0
+		trailingTier := 0
+		trailingDrawdown := 0.0
+		atrPeriod := 0
+		key := pos.Symbol + ":" + pos.Side
+		if p, ok := r.getPositionParams(key); ok {
+			scaledTPLevel = len(p.ScaledLevelsTaken)
+		}
+		if sc := r.cfg.ToStrategyConfig(); sc != nil {
+			if sc.RiskControl.DynamicStopLoss != nil && sc.RiskControl.DynamicStopLoss.TrailingEnabled != nil {
+				trailingEnabled = *sc.RiskControl.DynamicStopLoss.TrailingEnabled
+			}
+			if sl := sc.RiskControl.DynamicStopLoss; trailingEnabled && sl != nil && len(sl.TrailingLevels) > 0 {
+				for i, lv := range sl.TrailingLevels {
+					if pnlPct >= lv.ProfitThreshold {
+						trailingTier = i + 1
+						trailingDrawdown = lv.TrailingPercent
+					}
+				}
+			}
+			if sc.RiskControl.DynamicTakeProfit != nil && sc.RiskControl.DynamicTakeProfit.ScaledEnabled != nil {
+				scaledTPEnabled = *sc.RiskControl.DynamicTakeProfit.ScaledEnabled
+			}
+			if tp := sc.RiskControl.DynamicTakeProfit; scaledTPEnabled && tp != nil && len(tp.ScaledLevels) > 0 {
+				for i := 0; i < scaledTPLevel && i < len(tp.ScaledLevels); i++ {
+					scaledTPClosedPct += tp.ScaledLevels[i].ClosePercent
+				}
+				if scaledTPClosedPct > 100 {
+					scaledTPClosedPct = 100
+				}
+			}
+			if sl := sc.RiskControl.DynamicStopLoss; sl != nil && sl.ATRPeriodAltcoin != nil {
+				atrPeriod = *sl.ATRPeriodAltcoin
+			}
+		}
+
 		positions = append(positions, PositionStatus{
-			Symbol:           pos.Symbol,
-			Side:             pos.Side,
-			Quantity:         pos.Quantity,
-			EntryPrice:       pos.AvgPrice,
-			MarkPrice:        markPrice,
-			Leverage:         pos.Leverage,
-			UnrealizedPnL:    unrealizedPnL,
-			UnrealizedPnLPct: pnlPct,
-			MarginUsed:       pos.MarginUsed,
+			Symbol:                  pos.Symbol,
+			Side:                    pos.Side,
+			Quantity:                pos.Quantity,
+			EntryPrice:              pos.AvgPrice,
+			MarkPrice:               markPrice,
+			Leverage:                pos.Leverage,
+			UnrealizedPnL:           unrealizedPnL,
+			UnrealizedPnLPct:        pnlPct,
+			MarginUsed:              pos.MarginUsed,
+			StopLoss:                pos.StopLoss,
+			TakeProfit:              pos.TakeProfit,
+			ATRAtOpen:               pos.ATRAtOpen,
+			ATRMultipleSL:           atrMultSL,
+			ATRMultipleTP:           atrMultTP,
+			DistanceToSLPct:         distSLPct,
+			DistanceToTPPct:         distTPPct,
+			TrailingEnabled:         trailingEnabled,
+			ScaledTPEnabled:         scaledTPEnabled,
+			ScaledTPLevel:           scaledTPLevel,
+			ScaledTPClosedPct:       scaledTPClosedPct,
+			TrailingTierActivated:   trailingTier,
+			TrailingAllowedDrawdown: trailingDrawdown,
+			ATRPeriod:               atrPeriod,
 		})
 	}
 

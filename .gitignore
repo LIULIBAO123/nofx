@@ -6,6 +6,7 @@
 # AI 工具
 .claude/
 CLAUDE.md
+.specstory/
 
 # 编译产物
 nofx-auto

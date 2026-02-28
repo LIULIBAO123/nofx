@@ -32,8 +32,9 @@ type BacktestConfig struct {
 	StrategyID           string   `json:"strategy_id,omitempty"` // Optional: use saved strategy from Strategy Studio
 	Symbols              []string `json:"symbols"`
 	Timeframes           []string `json:"timeframes"`
-	DecisionTimeframe    string   `json:"decision_timeframe"`
-	DecisionCadenceNBars int      `json:"decision_cadence_nbars"`
+	DecisionTimeframe       string `json:"decision_timeframe"`
+	DecisionCadenceNBars    int    `json:"decision_cadence_nbars"`
+	DecisionIntervalMinutes int    `json:"decision_interval_minutes"` // 与实盘一致：每 N 分钟一次决策（0=按 K 线节奏）
 	StartTS              int64    `json:"start_ts"`
 	EndTS                int64    `json:"end_ts"`
 	InitialBalance       float64  `json:"initial_balance"`
@@ -103,9 +104,27 @@ func (cfg *BacktestConfig) Validate() error {
 		return fmt.Errorf("invalid decision_timeframe: %w", err)
 	}
 	cfg.DecisionTimeframe = normalizedDecision
+	// 确保决策周期在 K 线列表中，否则 datafeed 无法加载该周期数据
+	hasDecisionTF := false
+	for _, t := range cfg.Timeframes {
+		if t == cfg.DecisionTimeframe {
+			hasDecisionTF = true
+			break
+		}
+	}
+	if !hasDecisionTF {
+		cfg.Timeframes = append(cfg.Timeframes, cfg.DecisionTimeframe)
+	}
 
 	if cfg.DecisionCadenceNBars <= 0 {
-		cfg.DecisionCadenceNBars = 20
+		cfg.DecisionCadenceNBars = 1
+	}
+	if cfg.DecisionIntervalMinutes < 0 {
+		cfg.DecisionIntervalMinutes = 0
+	}
+	if cfg.DecisionIntervalMinutes > 0 {
+		// 使用固定间隔时，每步都决策，忽略 cadence
+		cfg.DecisionCadenceNBars = 1
 	}
 
 	if cfg.StartTS <= 0 || cfg.EndTS <= 0 || cfg.EndTS <= cfg.StartTS {
@@ -132,7 +151,7 @@ func (cfg *BacktestConfig) Validate() error {
 
 	cfg.PromptVariant = strings.TrimSpace(cfg.PromptVariant)
 	if cfg.PromptVariant == "" {
-		cfg.PromptVariant = "baseline"
+		cfg.PromptVariant = "balanced" // 与实盘默认一致，保证回测与实盘功能一致
 	}
 	cfg.PromptTemplate = strings.TrimSpace(cfg.PromptTemplate)
 	if cfg.PromptTemplate == "" {

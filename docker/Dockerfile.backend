@@ -7,16 +7,22 @@
 # ═══════════════════════════════════════════════════════════════
 
 ARG GO_VERSION=1.25-alpine
-ARG ALPINE_VERSION=latest
 ARG TA_LIB_VERSION=0.4.0
 
 # ──────────────────────────────────────────────────────────────
 # TA-Lib Build Stage (shared across builds)
 # ──────────────────────────────────────────────────────────────
-FROM alpine:${ALPINE_VERSION} AS ta-lib-builder
+#
+# NOTE: We intentionally use the same golang:*-alpine base image here (instead of plain alpine)
+# to avoid separate pulls of alpine images in environments where Docker Hub metadata fetch for
+# alpine:latest is flaky. This slightly increases image size during build but improves reliability.
+FROM golang:${GO_VERSION} AS ta-lib-builder
 ARG TA_LIB_VERSION
 
-RUN apk update && apk add --no-cache \
+# Workaround: some environments can't reach dl-cdn.alpinelinux.org reliably during build.
+# Switch Alpine repo domain to a mirror.
+RUN sed -i 's|dl-cdn.alpinelinux.org|mirrors.aliyun.com|g' /etc/apk/repositories && \
+    apk update && apk add --no-cache \
     wget tar make gcc g++ musl-dev autoconf automake
 
 RUN wget http://prdownloads.sourceforge.net/ta-lib/ta-lib-${TA_LIB_VERSION}-src.tar.gz && \
@@ -38,7 +44,8 @@ RUN wget http://prdownloads.sourceforge.net/ta-lib/ta-lib-${TA_LIB_VERSION}-src.
 # ──────────────────────────────────────────────────────────────
 FROM golang:${GO_VERSION} AS backend-builder
 
-RUN apk update && apk add --no-cache git make gcc g++ musl-dev
+RUN sed -i 's|dl-cdn.alpinelinux.org|mirrors.aliyun.com|g' /etc/apk/repositories && \
+    apk update && apk add --no-cache git make gcc g++ musl-dev
 
 COPY --from=ta-lib-builder /usr/local /usr/local
 
@@ -54,9 +61,10 @@ RUN CGO_ENABLED=1 GOOS=linux \
 # ──────────────────────────────────────────────────────────────
 # Runtime Stage (Minimal Executable Environment)
 # ──────────────────────────────────────────────────────────────
-FROM alpine:${ALPINE_VERSION}
+FROM golang:${GO_VERSION}
 
-RUN apk update && apk add --no-cache ca-certificates tzdata sqlite
+RUN sed -i 's|dl-cdn.alpinelinux.org|mirrors.aliyun.com|g' /etc/apk/repositories && \
+    apk update && apk add --no-cache ca-certificates tzdata sqlite
 
 COPY --from=ta-lib-builder /usr/local /usr/local
 WORKDIR /app

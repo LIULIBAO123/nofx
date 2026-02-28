@@ -290,9 +290,11 @@ func (t *BybitTrader) OpenLong(symbol string, quantity float64, leverage int) (m
 		logger.Infof("⚠️ [Bybit] Failed to cancel old stop orders: %v", err)
 	}
 
-	// Set leverage first
+	// Set leverage first - this is critical for position sizing
 	if err := t.SetLeverage(symbol, leverage); err != nil {
-		logger.Infof("⚠️ [Bybit] Failed to set leverage: %v", err)
+		// Log warning but continue - Bybit may reject if there's an existing position
+		// The position will use the current account leverage setting
+		logger.Infof("⚠️ [Bybit] Failed to set leverage to %dx: %v (will use current account setting)", leverage, err)
 	}
 
 	// Use FormatQuantity to format quantity
@@ -307,7 +309,7 @@ func (t *BybitTrader) OpenLong(symbol string, quantity float64, leverage int) (m
 		"positionIdx": 0, // One-way position mode
 	}
 
-	logger.Infof("[Bybit] OpenLong placing order: %+v", params)
+	logger.Infof("[Bybit] OpenLong placing order: %+v (requested leverage: %dx)", params, leverage)
 
 	result, err := t.client.NewUtaBybitServiceWithParams(params).PlaceOrder(context.Background())
 	if err != nil {
@@ -333,9 +335,11 @@ func (t *BybitTrader) OpenShort(symbol string, quantity float64, leverage int) (
 		logger.Infof("⚠️ [Bybit] Failed to cancel old stop orders: %v", err)
 	}
 
-	// Set leverage first
+	// Set leverage first - this is critical for position sizing
 	if err := t.SetLeverage(symbol, leverage); err != nil {
-		logger.Infof("⚠️ [Bybit] Failed to set leverage: %v", err)
+		// Log warning but continue - Bybit may reject if there's an existing position
+		// The position will use the current account leverage setting
+		logger.Infof("⚠️ [Bybit] Failed to set leverage to %dx: %v (will use current account setting)", leverage, err)
 	}
 
 	// Use FormatQuantity to format quantity
@@ -350,7 +354,7 @@ func (t *BybitTrader) OpenShort(symbol string, quantity float64, leverage int) (
 		"positionIdx": 0, // One-way position mode
 	}
 
-	logger.Infof("[Bybit] OpenShort placing order: %+v", params)
+	logger.Infof("[Bybit] OpenShort placing order: %+v (requested leverage: %dx)", params, leverage)
 
 	result, err := t.client.NewUtaBybitServiceWithParams(params).PlaceOrder(context.Background())
 	if err != nil {
@@ -455,6 +459,8 @@ func (t *BybitTrader) CloseShort(symbol string, quantity float64) (map[string]in
 
 // SetLeverage sets leverage
 func (t *BybitTrader) SetLeverage(symbol string, leverage int) error {
+	logger.Infof("[Bybit] SetLeverage: symbol=%s, leverage=%d", symbol, leverage)
+	
 	params := map[string]interface{}{
 		"category":     "linear",
 		"symbol":       symbol,
@@ -466,15 +472,19 @@ func (t *BybitTrader) SetLeverage(symbol string, leverage int) error {
 	if err != nil {
 		// If leverage is already at target value, Bybit will return an error, ignore this case
 		if strings.Contains(err.Error(), "leverage not modified") {
+			logger.Infof("[Bybit] SetLeverage: leverage already at %dx, no change needed", leverage)
 			return nil
 		}
+		logger.Infof("[Bybit] SetLeverage ERROR: %v", err)
 		return fmt.Errorf("failed to set leverage: %w", err)
 	}
 
 	if result.RetCode != 0 && result.RetCode != 110043 { // 110043 = leverage not modified
-		return fmt.Errorf("failed to set leverage: %s", result.RetMsg)
+		logger.Infof("[Bybit] SetLeverage failed: retCode=%d, retMsg=%s", result.RetCode, result.RetMsg)
+		return fmt.Errorf("failed to set leverage: %s (code: %d)", result.RetMsg, result.RetCode)
 	}
 
+	logger.Infof("[Bybit] SetLeverage SUCCESS: %s now at %dx", symbol, leverage)
 	return nil
 }
 

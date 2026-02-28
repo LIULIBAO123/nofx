@@ -163,6 +163,10 @@ type BacktestTrade struct {
 	AIAnalysis     string  `gorm:"column:ai_analysis;type:text;default:''"`
 	AIAnalysisTS   int64   `gorm:"column:ai_analysis_ts;type:bigint;default:0"`
 	AnalysisRating string  `gorm:"column:analysis_rating;default:''"`
+	StopLoss       float64 `gorm:"column:stop_loss;default:0"`
+	TakeProfit     float64 `gorm:"column:take_profit;default:0"`
+	ATRAtOpen      float64 `gorm:"column:atr_at_open;default:0"`
+	OpenTime       int64   `gorm:"column:open_time;type:bigint;default:0"` // 开仓时间（平仓事件用于展示持仓时间）
 }
 
 func (BacktestTrade) TableName() string {
@@ -208,6 +212,11 @@ func (s *BacktestStore) initTables() error {
 			s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_backtest_equity_run_ts ON backtest_equity(run_id, ts)`)
 			s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_backtest_trades_run_ts ON backtest_trades(run_id, ts)`)
 			s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_backtest_decisions_run_cycle ON backtest_decisions(run_id, cycle)`)
+			// Add optional columns for trade detail (stop_loss, take_profit, atr_at_open) if missing
+			s.db.Exec(`ALTER TABLE backtest_trades ADD COLUMN IF NOT EXISTS stop_loss DOUBLE PRECISION DEFAULT 0`)
+			s.db.Exec(`ALTER TABLE backtest_trades ADD COLUMN IF NOT EXISTS take_profit DOUBLE PRECISION DEFAULT 0`)
+			s.db.Exec(`ALTER TABLE backtest_trades ADD COLUMN IF NOT EXISTS atr_at_open DOUBLE PRECISION DEFAULT 0`)
+			s.db.Exec(`ALTER TABLE backtest_trades ADD COLUMN IF NOT EXISTS open_time BIGINT DEFAULT 0`)
 			return nil
 		}
 	}

@@ -427,18 +427,23 @@ func (tm *TraderManager) RemoveTrader(traderID string) {
 	}
 }
 
-// LoadUserTradersFromStore loads traders from store for a specific user to memory
+// LoadUserTradersFromStore loads traders from store for a specific user to memory (both live and simulation)
 func (tm *TraderManager) LoadUserTradersFromStore(st *store.Store, userID string) error {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 
-	// Get all traders for the specified user
-	traders, err := st.Trader().List(userID)
+	// Get live traders
+	liveTraders, err := st.Trader().List(userID, false)
 	if err != nil {
 		return fmt.Errorf("failed to get trader list for user %s: %w", userID, err)
 	}
-
-	logger.Infof("📋 Loading trader configurations for user %s: %d traders", userID, len(traders))
+	// Get simulation traders
+	simTraders, err := st.Trader().List(userID, true)
+	if err != nil {
+		return fmt.Errorf("failed to get simulation trader list for user %s: %w", userID, err)
+	}
+	traders := append(liveTraders, simTraders...)
+	logger.Infof("📋 Loading trader configurations for user %s: %d live + %d simulation = %d traders", userID, len(liveTraders), len(simTraders), len(traders))
 
 	// Get AI model and exchange lists (query only once outside loop)
 	aiModels, err := st.AIModel().List(userID)
@@ -447,7 +452,7 @@ func (tm *TraderManager) LoadUserTradersFromStore(st *store.Store, userID string
 		return fmt.Errorf("failed to get AI model config: %w", err)
 	}
 
-	exchanges, err := st.Exchange().List(userID)
+	exchanges, err := st.Exchange().List(userID, nil) // nil = 全部，用于按 ID 解析交易员所用交易所
 	if err != nil {
 		logger.Infof("⚠️ Failed to get exchange config for user %s: %v", userID, err)
 		return fmt.Errorf("failed to get exchange config: %w", err)
@@ -539,7 +544,7 @@ func (tm *TraderManager) LoadTradersFromStore(st *store.Store) error {
 	var allTraders []*store.Trader
 	for _, userID := range userIDs {
 		// Get traders for each user
-		traders, err := st.Trader().List(userID)
+		traders, err := st.Trader().List(userID, false)
 		if err != nil {
 			logger.Infof("⚠️ Failed to get traders for user %s: %v", userID, err)
 			continue
@@ -588,8 +593,8 @@ func (tm *TraderManager) LoadTradersFromStore(st *store.Store) error {
 			continue
 		}
 
-		// Get exchange config
-		exchanges, err := st.Exchange().List(traderCfg.UserID)
+		// Get exchange config (all exchanges to resolve by ID)
+		exchanges, err := st.Exchange().List(traderCfg.UserID, nil)
 		if err != nil {
 			logger.Infof("⚠️  Failed to get exchange config: %v", err)
 			continue
@@ -648,6 +653,17 @@ func (tm *TraderManager) addTraderFromStore(traderCfg *store.Trader, aiModelCfg 
 		return fmt.Errorf("trader %s has no strategy configured", traderCfg.Name)
 	}
 
+	// 决策间隔：DB 为 0 或 <3 时强制至少 3 分钟，避免前端设 5 分钟却按 0/1 分钟执行
+	scanMins := traderCfg.ScanIntervalMinutes
+	if scanMins < 3 {
+		if scanMins <= 0 {
+			logger.Infof("⚠️ Trader %s ScanIntervalMinutes=%d (invalid), using 3 min", traderCfg.Name, scanMins)
+		} else {
+			logger.Infof("⚠️ Trader %s ScanIntervalMinutes=%d (<3), using 3 min", traderCfg.Name, scanMins)
+		}
+		scanMins = 3
+	}
+
 	// Build AutoTraderConfig (ai500APIURL/oiTopAPIURL obtained from strategy config, used in StrategyEngine)
 	traderConfig := trader.AutoTraderConfig{
 		ID:                    traderCfg.ID,
@@ -664,15 +680,16 @@ func (tm *TraderManager) addTraderFromStore(traderCfg *store.Trader, aiModelCfg 
 		QwenKey:               "",
 		CustomAPIURL:          aiModelCfg.CustomAPIURL,
 		CustomModelName:       aiModelCfg.CustomModelName,
-		ScanInterval:         time.Duration(traderCfg.ScanIntervalMinutes) * time.Minute,
-		InitialBalance:       traderCfg.InitialBalance,
-		IsCrossMargin:        traderCfg.IsCrossMargin,
-		ShowInCompetition:    traderCfg.ShowInCompetition,
-		StrategyConfig:       strategyConfig,
+		ScanInterval:         time.Duration(scanMins) * time.Minute,
+		InitialBalance:        traderCfg.InitialBalance,
+		IsCrossMargin:         traderCfg.IsCrossMargin,
+		ShowInCompetition:     traderCfg.ShowInCompetition,
+		IsSimulation:          traderCfg.IsSimulation,
+		StrategyConfig:        strategyConfig,
 	}
 
 	logger.Infof("📊 Loading trader %s: ScanIntervalMinutes=%d (from DB), ScanInterval=%v",
-		traderCfg.Name, traderCfg.ScanIntervalMinutes, traderConfig.ScanInterval)
+		traderCfg.Name, scanMins, traderConfig.ScanInterval)
 
 	// Set API keys based on exchange type (convert EncryptedString to string)
 	switch exchangeCfg.ExchangeType {

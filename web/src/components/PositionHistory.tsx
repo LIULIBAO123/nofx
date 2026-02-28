@@ -1,9 +1,9 @@
-import { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { api } from '../lib/api'
 import { useLanguage } from '../contexts/LanguageContext'
 import { t } from '../i18n/translations'
 import { MetricTooltip } from './MetricTooltip'
-import { formatPrice, formatQuantity } from '../utils/format'
+import { formatPrice, formatQuantity, formatFull } from '../utils/format'
 import type {
   HistoricalPosition,
   TraderStats,
@@ -26,10 +26,10 @@ function formatNumber(value: number, decimals: number = 2): string {
   return value.toFixed(decimals)
 }
 
-// Format duration from minutes
+// Format duration from minutes (show 1 decimal when < 60 min so 5.2 vs 10.5 is visible)
 function formatDuration(minutes: number): string {
   if (!minutes || minutes <= 0) return '-'
-  if (minutes < 60) return `${minutes.toFixed(0)}m`
+  if (minutes < 60) return `${minutes < 10 ? minutes.toFixed(1) : minutes.toFixed(0)}m`
   if (minutes < 1440) return `${(minutes / 60).toFixed(1)}h`
   return `${(minutes / 1440).toFixed(1)}d`
 }
@@ -45,6 +45,76 @@ function formatDate(dateStr: string): string {
     hour: '2-digit',
     minute: '2-digit',
   })
+}
+
+// Parse close_reason into 平仓方式 (manual/system/ai) and 平仓类型 (detailed description)
+function parseCloseReason(
+  closeReason: string | undefined,
+  language: string
+): { method: string; type: string } {
+  if (!closeReason || closeReason === '') {
+    return {
+      method: language === 'zh' ? '—' : '—',
+      type: language === 'zh' ? '—' : '—',
+    }
+  }
+  const zh = language === 'zh'
+  if (closeReason === 'ai') {
+    return {
+      method: zh ? 'AI' : 'AI',
+      type: zh ? '通过AI分析判断' : 'AI analysis decision',
+    }
+  }
+  if (closeReason.startsWith('system:sl:')) {
+    const sub = closeReason.slice('system:sl:'.length)
+    // Parse trailing tier detail: "trailing:L2:3.50:2.50" => L2, peak 3.5%, retrace 2.5%
+    const trailingMatch = sub.match(/^trailing:L(\d+):([\d.]+):([\d.]+)$/)
+    if (trailingMatch) {
+      const tier = trailingMatch[1]
+      const peak = parseFloat(trailingMatch[2])
+      const retrace = parseFloat(trailingMatch[3])
+      const typeStr =
+        zh
+          ? `追踪止损 L${tier}（峰值 ${peak}%，回撤 ${retrace}%）`
+          : `Trailing stop L${tier} (peak ${peak}%, retrace ${retrace}%)`
+      return {
+        method: zh ? '系统' : 'System',
+        type: zh ? `触发动态止损：${typeStr}` : `Dynamic SL: ${typeStr}`,
+      }
+    }
+    const slTypes: Record<string, { zh: string; en: string }> = {
+      initial: { zh: '初始固定止损', en: 'Initial fixed stop' },
+      trailing: { zh: '追踪止损（分层）', en: 'Trailing stop (tiered)' },
+      atr: { zh: 'ATR 动态止损', en: 'ATR dynamic stop' },
+      support_resistance: { zh: '支撑/阻力止损', en: 'Support/Resistance stop' },
+      breakeven: { zh: '盈亏平衡止损（锁定利润后回撤）', en: 'Breakeven stop (after lock profit)' },
+      combined: { zh: '组合条件止损', en: 'Combined stop' },
+    }
+    const t = slTypes[sub] || { zh: sub, en: sub }
+    return {
+      method: zh ? '系统' : 'System',
+      type: zh ? `触发动态止损：${t.zh}` : `Dynamic SL: ${t.en}`,
+    }
+  }
+  if (closeReason.startsWith('system:tp:')) {
+    const sub = closeReason.slice('system:tp:'.length)
+    const tpTypes: Record<string, { zh: string; en: string }> = {
+      fixed: { zh: '固定止盈', en: 'Fixed take profit' },
+      scaled: { zh: '分层止盈', en: 'Scaled take profit' },
+      atr: { zh: 'ATR 动态止盈', en: 'ATR dynamic TP' },
+      resistance: { zh: '阻力位止盈', en: 'Resistance take profit' },
+    }
+    const t = tpTypes[sub] || { zh: sub, en: sub }
+    return {
+      method: zh ? '系统' : 'System',
+      type: zh ? `触发动态止盈：${t.zh}` : `Dynamic TP: ${t.en}`,
+    }
+  }
+  // sync, manual, or legacy
+  return {
+    method: zh ? '手动' : 'Manual',
+    type: zh ? '交易所/同步或手动平仓' : 'Exchange sync or manual close',
+  }
 }
 
 // Stats Card Component with formula tooltip
@@ -796,7 +866,64 @@ export function PositionHistory({ traderId }: PositionHistoryProps) {
             </thead>
             <tbody>
               {filteredPositions.map((position) => (
-                <PositionRow key={position.id} position={position} />
+                <React.Fragment key={position.id}>
+                  <PositionRow position={position} />
+                  {/* 固定实时参数：每条记录始终显示一行，标签与数值紧凑排列；平仓方式/平仓类型详细展示 */}
+                  <tr style={{ borderBottom: '1px solid #2B3139', background: 'rgba(0,0,0,0.2)' }}>
+                    <td colSpan={9} className="px-4 py-2">
+                      <div
+                        className="rounded-lg px-2.5 py-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] font-mono"
+                        style={{
+                          background: 'rgba(43,49,57,0.4)',
+                          border: '1px solid rgba(43,49,57,0.6)',
+                        }}
+                      >
+                        <div className="flex items-center gap-1">
+                          <span style={{ color: '#848E9C' }}>{language === 'zh' ? '止损价' : 'SL'}</span>
+                          <span style={(position.stop_loss != null && position.stop_loss > 0) ? { color: '#F87171' } : { color: '#848E9C' }}>{(position.stop_loss != null && position.stop_loss > 0) ? '$' + formatFull(position.stop_loss) : '—'}</span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <span style={{ color: '#848E9C' }}>{language === 'zh' ? '止盈价' : 'TP'}</span>
+                          <span style={(position.take_profit != null && position.take_profit > 0) ? { color: '#34D399' } : { color: '#848E9C' }}>{(position.take_profit != null && position.take_profit > 0) ? '$' + formatFull(position.take_profit) : '—'}</span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <span style={{ color: '#848E9C' }}>ATR×</span>
+                          <span style={{ color: '#EAECEF' }}>
+                            {((position.atr_multiple_sl != null && position.atr_multiple_sl > 0) || (position.atr_multiple_tp != null && position.atr_multiple_tp > 0))
+                              ? (position.atr_multiple_sl != null && position.atr_multiple_sl > 0 ? formatFull(position.atr_multiple_sl, 2) + '×' : '—') +
+                                ((position.atr_multiple_sl != null && position.atr_multiple_sl > 0) && (position.atr_multiple_tp != null && position.atr_multiple_tp > 0) ? ' / ' : '') +
+                                (position.atr_multiple_tp != null && position.atr_multiple_tp > 0 ? formatFull(position.atr_multiple_tp, 2) + '×' : '')
+                              : '—'}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <span style={{ color: '#848E9C' }}>ATR{language === 'zh' ? '值' : ''}</span>
+                          <span style={{ color: '#EAECEF' }}>{(position.atr_at_open != null && position.atr_at_open > 0) ? '$' + formatFull(position.atr_at_open, 6) : '—'}</span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <span style={{ color: '#848E9C' }}>ATR{language === 'zh' ? '周期' : ' period'}</span>
+                          <span style={{ color: '#848E9C' }}>{(position.atr_period != null && position.atr_period > 0) ? String(position.atr_period) : '—'}</span>
+                        </div>
+                        {(() => {
+                          const { method, type } = parseCloseReason(position.close_reason, language)
+                          return (
+                            <>
+                              <div className="flex items-center gap-1">
+                                <span style={{ color: '#848E9C' }}>{language === 'zh' ? '平仓方式' : 'Close by'}</span>
+                                <span style={{ color: '#B7BDC6' }}>{method}</span>
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <span style={{ color: '#848E9C' }}>{language === 'zh' ? '平仓类型' : 'Close type'}</span>
+                                <span style={{ color: '#B7BDC6' }}>{type}</span>
+                              </div>
+                            </>
+                          )
+                        })()}
+                      </div>
+                      <div className="text-[10px] mt-1" style={{ color: '#848E9C' }}>{language === 'zh' ? '参数在开仓时写入持仓记录，平仓后在此显示；平仓方式/类型由系统或AI记录。' : 'Params saved at open; close method/type from system or AI.'}</div>
+                    </td>
+                  </tr>
+                </React.Fragment>
               ))}
             </tbody>
           </table>

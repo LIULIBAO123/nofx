@@ -12,6 +12,7 @@ var supportedTimeframes = map[string]time.Duration{
 	"1m":  time.Minute,
 	"3m":  3 * time.Minute,
 	"5m":  5 * time.Minute,
+	"10m": 10 * time.Minute,
 	"15m": 15 * time.Minute,
 	"30m": 30 * time.Minute,
 	"1h":  time.Hour,

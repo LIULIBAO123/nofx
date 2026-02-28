@@ -36,6 +36,7 @@ type Exchange struct {
 	LighterPrivateKey       crypto.EncryptedString `gorm:"column:lighter_private_key;default:''" json:"lighterPrivateKey"`
 	LighterAPIKeyPrivateKey crypto.EncryptedString `gorm:"column:lighter_api_key_private_key;default:''" json:"lighterAPIKeyPrivateKey"`
 	LighterAPIKeyIndex      int             `gorm:"column:lighter_api_key_index;default:0" json:"lighterAPIKeyIndex"`
+	IsSimulation            bool            `gorm:"column:is_simulation;default:false" json:"is_simulation"` // true=仅用于实盘模拟，false=仅用于实盘交易
 	CreatedAt               time.Time       `json:"created_at"`
 	UpdatedAt               time.Time       `json:"updated_at"`
 }
@@ -56,6 +57,7 @@ func (s *ExchangeStore) initTables() error {
 			// Still run data migrations
 			s.migrateToMultiAccount()
 			s.db.Model(&Exchange{}).Where("account_name = '' OR account_name IS NULL").Update("account_name", "Default")
+			_ = s.migrateIsSimulation()
 			return nil
 		}
 	}
@@ -71,6 +73,11 @@ func (s *ExchangeStore) initTables() error {
 
 	// Fix empty account_name for existing records
 	s.db.Model(&Exchange{}).Where("account_name = '' OR account_name IS NULL").Update("account_name", "Default")
+
+	// Add is_simulation column if missing (实盘 vs 实盘模拟 分离)
+	if err := s.migrateIsSimulation(); err != nil {
+		logger.Warnf("is_simulation migration warning: %v", err)
+	}
 
 	return nil
 }
@@ -131,15 +138,27 @@ func (s *ExchangeStore) migrateToMultiAccount() error {
 	})
 }
 
+// migrateIsSimulation adds is_simulation column if not present (default false = 实盘用)
+func (s *ExchangeStore) migrateIsSimulation() error {
+	if s.db.Migrator().HasColumn(&Exchange{}, "IsSimulation") {
+		return nil
+	}
+	return s.db.Migrator().AddColumn(&Exchange{}, "IsSimulation")
+}
+
 func (s *ExchangeStore) initDefaultData() error {
 	// No longer pre-populate exchanges - create on demand when user configures
 	return nil
 }
 
-// List gets user's exchange list
-func (s *ExchangeStore) List(userID string) ([]*Exchange, error) {
+// List gets user's exchange list. simulationOnly: nil=全部, true=仅模拟用, false=仅实盘用
+func (s *ExchangeStore) List(userID string, simulationOnly *bool) ([]*Exchange, error) {
 	var exchanges []*Exchange
-	err := s.db.Where("user_id = ?", userID).Order("exchange_type, account_name").Find(&exchanges).Error
+	q := s.db.Where("user_id = ?", userID)
+	if simulationOnly != nil {
+		q = q.Where("is_simulation = ?", *simulationOnly)
+	}
+	err := q.Order("exchange_type, account_name").Find(&exchanges).Error
 	if err != nil {
 		return nil, err
 	}
@@ -182,7 +201,8 @@ func getExchangeNameAndType(exchangeType string) (name string, typ string) {
 func (s *ExchangeStore) Create(userID, exchangeType, accountName string, enabled bool,
 	apiKey, secretKey, passphrase string, testnet bool,
 	hyperliquidWalletAddr, asterUser, asterSigner, asterPrivateKey,
-	lighterWalletAddr, lighterPrivateKey, lighterApiKeyPrivateKey string, lighterApiKeyIndex int) (string, error) {
+	lighterWalletAddr, lighterPrivateKey, lighterApiKeyPrivateKey string, lighterApiKeyIndex int,
+	isSimulation bool) (string, error) {
 
 	id := uuid.New().String()
 	name, typ := getExchangeNameAndType(exchangeType)
@@ -191,8 +211,8 @@ func (s *ExchangeStore) Create(userID, exchangeType, accountName string, enabled
 		accountName = "Default"
 	}
 
-	logger.Debugf("🔧 ExchangeStore.Create: userID=%s, exchangeType=%s, accountName=%s, id=%s",
-		userID, exchangeType, accountName, id)
+	logger.Debugf("🔧 ExchangeStore.Create: userID=%s, exchangeType=%s, accountName=%s, isSimulation=%v, id=%s",
+		userID, exchangeType, accountName, isSimulation, id)
 
 	exchange := &Exchange{
 		ID:                      id,
@@ -214,6 +234,7 @@ func (s *ExchangeStore) Create(userID, exchangeType, accountName string, enabled
 		LighterPrivateKey:       crypto.EncryptedString(lighterPrivateKey),
 		LighterAPIKeyPrivateKey: crypto.EncryptedString(lighterApiKeyPrivateKey),
 		LighterAPIKeyIndex:      lighterApiKeyIndex,
+		IsSimulation:            isSimulation,
 	}
 
 	if err := s.db.Create(exchange).Error; err != nil {
@@ -307,7 +328,7 @@ func (s *ExchangeStore) CreateLegacy(userID, id, name, typ string, enabled bool,
 	// Check if this is an old-style ID (exchange type as ID)
 	if id == "binance" || id == "bybit" || id == "okx" || id == "bitget" || id == "hyperliquid" || id == "aster" || id == "lighter" {
 		_, err := s.Create(userID, id, "Default", enabled, apiKey, secretKey, "", testnet,
-			hyperliquidWalletAddr, asterUser, asterSigner, asterPrivateKey, "", "", "", 0)
+			hyperliquidWalletAddr, asterUser, asterSigner, asterPrivateKey, "", "", "", 0, false)
 		return err
 	}
 

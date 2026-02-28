@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import useSWR from 'swr'
+import useSWR, { mutate as swrMutate } from 'swr'
 import { api } from './lib/api'
 import { TraderDashboardPage } from './pages/TraderDashboardPage'
 
@@ -39,6 +39,7 @@ type Page =
   | 'competition'
   | 'traders'
   | 'trader'
+  | 'simulation'
   | 'backtest'
   | 'strategy'
   | 'strategy-market'
@@ -67,6 +68,7 @@ function App() {
     const hash = window.location.hash.slice(1) // 去掉 #
 
     if (path === '/traders' || hash === 'traders') return 'traders'
+    if (path === '/simulation' || hash === 'simulation') return 'simulation'
     if (path === '/backtest' || hash === 'backtest') return 'backtest'
     if (path === '/strategy' || hash === 'strategy') return 'strategy'
     if (path === '/strategy-market' || hash === 'strategy-market') return 'strategy-market'
@@ -94,6 +96,7 @@ function App() {
       'data': '/data',
       'traders': '/traders',
       'trader': '/dashboard',
+      'simulation': '/simulation',
       'backtest': '/backtest',
       'strategy': '/strategy',
       'debate': '/debate',
@@ -150,6 +153,9 @@ function App() {
 
       if (path === '/traders' || hash === 'traders') {
         setCurrentPage('traders')
+      } else if (path === '/simulation' || hash === 'simulation') {
+        setCurrentPage('simulation')
+        if (traderParam) setSelectedTraderSlug(traderParam)
       } else if (path === '/backtest' || hash === 'backtest') {
         setCurrentPage('backtest')
       } else if (path === '/strategy' || hash === 'strategy') {
@@ -194,113 +200,122 @@ function App() {
   //   window.location.hash = page === 'competition' ? '' : 'trader';
   // };
 
-  // 获取trader列表（仅在用户登录时）
+  // 获取实盘 trader 列表（仅在实盘相关页需要）
   const { data: traders, error: tradersError } = useSWR<TraderInfo[]>(
-    user && token ? 'traders' : null,
-    api.getTraders,
+    user && token && (currentPage === 'traders' || currentPage === 'trader') ? 'traders' : null,
+    () => api.getTraders(),
     {
       refreshInterval: 10000,
       shouldRetryOnError: false, // 避免在后端未运行时无限重试
     }
   )
 
-  // 获取exchanges列表（用于显示交易所名称）
+  // 获取交易所列表（实盘与实盘模拟分离：实盘用 / 模拟用 分别请求）
   const { data: exchanges } = useSWR<Exchange[]>(
-    user && token ? 'exchanges' : null,
-    api.getExchangeConfigs,
-    {
-      refreshInterval: 60000, // 1分钟刷新一次
-      shouldRetryOnError: false,
-    }
+    user && token && (currentPage === 'traders' || currentPage === 'trader') ? 'exchanges' : null,
+    () => api.getExchangeConfigs({ simulation: false }),
+    { refreshInterval: 60000, shouldRetryOnError: false }
+  )
+  const { data: simulationExchanges } = useSWR<Exchange[]>(
+    user && token && currentPage === 'simulation' ? 'exchanges-simulation' : null,
+    () => api.getExchangeConfigs({ simulation: true }),
+    { refreshInterval: 60000, shouldRetryOnError: false }
   )
 
-  // 当获取到traders后，根据 URL 中的 trader slug 设置选中的 trader，或默认选中第一个
-  useEffect(() => {
-    if (traders && traders.length > 0 && !selectedTraderId) {
-      if (selectedTraderSlug) {
-        // 通过 slug 找到对应的 trader
-        const trader = findTraderBySlug(selectedTraderSlug, traders)
-        if (trader) {
-          setSelectedTraderId(trader.trader_id)
-        } else {
-          // 如果找不到，选中第一个
-          setSelectedTraderId(traders[0].trader_id)
-        }
-      } else {
-        setSelectedTraderId(traders[0].trader_id)
-      }
-    }
-  }, [traders, selectedTraderId, selectedTraderSlug])
+  // 获取实盘模拟 trader 列表
+  const { data: simulationTraders } = useSWR<TraderInfo[]>(
+    user && token && currentPage === 'simulation' ? 'simulation-traders' : null,
+    () => api.getTraders({ simulation: true }),
+    { refreshInterval: 10000, shouldRetryOnError: false }
+  )
 
-  // 如果在trader页面，获取该trader的数据
+  // 当获取到 traders 后，根据 URL 中的 trader slug 或默认选中第一个（仅实盘看板）
+  const tradersForSelection = currentPage === 'simulation' ? simulationTraders : traders
+  useEffect(() => {
+    if (!tradersForSelection || tradersForSelection.length === 0) return
+    if (selectedTraderSlug) {
+      const trader = findTraderBySlug(selectedTraderSlug, tradersForSelection)
+      if (trader) setSelectedTraderId(trader.trader_id)
+      else if (currentPage === 'trader') setSelectedTraderId(tradersForSelection[0].trader_id)
+    } else if (currentPage === 'trader' && !selectedTraderId) {
+      setSelectedTraderId(tradersForSelection[0].trader_id)
+    }
+  }, [tradersForSelection, selectedTraderSlug, currentPage])
+
+  // 在实盘或实盘模拟看板时，获取该 trader 的数据（8 秒轮询以便更接近实时）
+  // 约定：实盘模拟看板的更新（轮询间隔、刷新、lastUpdate 等）与实盘看板保持一致，不单独分支
+  const isDashboard = currentPage === 'trader' || currentPage === 'simulation'
   const { data: status } = useSWR<SystemStatus>(
-    currentPage === 'trader' && selectedTraderId
-      ? `status-${selectedTraderId}`
-      : null,
-    () => api.getStatus(selectedTraderId),
+    isDashboard && selectedTraderId ? `status-${selectedTraderId}` : null,
+    () => api.getStatus(selectedTraderId!),
     {
-      refreshInterval: 15000, // 15秒刷新（配合后端15秒缓存）
-      revalidateOnFocus: false, // 禁用聚焦时重新验证，减少请求
-      dedupingInterval: 10000, // 10秒去重，防止短时间内重复请求
+      refreshInterval: 8000, // 8 秒刷新，看板信息更及时
+      revalidateOnFocus: true, // 切回标签页时立即刷新
+      dedupingInterval: 5000,
     }
   )
 
   const { data: account } = useSWR<AccountInfo>(
-    currentPage === 'trader' && selectedTraderId
-      ? `account-${selectedTraderId}`
-      : null,
-    () => api.getAccount(selectedTraderId),
+    isDashboard && selectedTraderId ? `account-${selectedTraderId}` : null,
+    () => api.getAccount(selectedTraderId!),
     {
-      refreshInterval: 15000, // 15秒刷新（配合后端15秒缓存）
-      revalidateOnFocus: false, // 禁用聚焦时重新验证，减少请求
-      dedupingInterval: 10000, // 10秒去重，防止短时间内重复请求
+      refreshInterval: 8000,
+      revalidateOnFocus: true,
+      dedupingInterval: 5000,
     }
   )
 
   const { data: positions } = useSWR<Position[]>(
-    currentPage === 'trader' && selectedTraderId
-      ? `positions-${selectedTraderId}`
-      : null,
-    () => api.getPositions(selectedTraderId),
+    isDashboard && selectedTraderId ? `positions-${selectedTraderId}` : null,
+    () => api.getPositions(selectedTraderId!),
     {
-      refreshInterval: 15000, // 15秒刷新（配合后端15秒缓存）
-      revalidateOnFocus: false, // 禁用聚焦时重新验证，减少请求
-      dedupingInterval: 10000, // 10秒去重，防止短时间内重复请求
+      refreshInterval: 8000,
+      revalidateOnFocus: true,
+      dedupingInterval: 5000,
     }
   )
 
   const { data: decisions } = useSWR<DecisionRecord[]>(
-    currentPage === 'trader' && selectedTraderId
+    isDashboard && selectedTraderId
       ? `decisions/latest-${selectedTraderId}-${decisionsLimit}`
       : null,
-    () => api.getLatestDecisions(selectedTraderId, decisionsLimit),
+    () => api.getLatestDecisions(selectedTraderId!, decisionsLimit),
     {
-      refreshInterval: 30000, // 30秒刷新（决策更新频率较低）
-      revalidateOnFocus: false,
-      dedupingInterval: 20000,
+      refreshInterval: 20000,
+      revalidateOnFocus: true,
+      dedupingInterval: 10000,
     }
   )
 
   const { data: stats } = useSWR<Statistics>(
-    currentPage === 'trader' && selectedTraderId
-      ? `statistics-${selectedTraderId}`
-      : null,
-    () => api.getStatistics(selectedTraderId),
+    isDashboard && selectedTraderId ? `statistics-${selectedTraderId}` : null,
+    () => api.getStatistics(selectedTraderId!),
     {
-      refreshInterval: 30000, // 30秒刷新（统计数据更新频率较低）
-      revalidateOnFocus: false,
-      dedupingInterval: 20000,
+      refreshInterval: 20000,
+      revalidateOnFocus: true,
+      dedupingInterval: 10000,
     }
   )
 
+  // 任一看板数据更新时刷新「最后更新」时间
   useEffect(() => {
-    if (account) {
-      const now = new Date().toLocaleTimeString()
-      setLastUpdate(now)
+    if (status != null || account != null || positions != null) {
+      setLastUpdate(new Date().toLocaleTimeString())
     }
-  }, [account])
+  }, [status, account, positions])
 
-  const selectedTrader = traders?.find((t) => t.trader_id === selectedTraderId)
+  // 手动刷新看板数据（供页面「刷新」按钮调用）
+  const refreshDashboardData = () => {
+    if (!selectedTraderId) return
+    void swrMutate(`status-${selectedTraderId}`)
+    void swrMutate(`account-${selectedTraderId}`)
+    void swrMutate(`positions-${selectedTraderId}`)
+    void swrMutate(`decisions/latest-${selectedTraderId}-${decisionsLimit}`)
+    void swrMutate(`statistics-${selectedTraderId}`)
+    setLastUpdate(new Date().toLocaleTimeString())
+  }
+
+  const selectedTrader = (currentPage === 'simulation' ? simulationTraders : traders)?.find((t) => t.trader_id === selectedTraderId)
 
   // Handle routing
   useEffect(() => {
@@ -317,6 +332,8 @@ function App() {
       setCurrentPage('competition')
     } else if (route === '/traders') {
       setCurrentPage('traders')
+    } else if (route === '/simulation') {
+      setCurrentPage('simulation')
     } else if (route === '/dashboard') {
       setCurrentPage('trader')
     }
@@ -472,6 +489,61 @@ function App() {
                   setCurrentPage('trader')
                 }}
               />
+            ) : currentPage === 'simulation' ? (
+              simulationTraders && simulationTraders.length > 0 && selectedTraderId && simulationTraders.some((t) => t.trader_id === selectedTraderId) ? (
+                <TraderDashboardPage
+                  selectedTrader={selectedTrader ?? undefined}
+                  status={status}
+                  account={account}
+                  positions={positions}
+                  decisions={decisions}
+                  decisionsLimit={decisionsLimit}
+                  onDecisionsLimitChange={setDecisionsLimit}
+                  stats={stats}
+                  lastUpdate={lastUpdate}
+                  language={language}
+                  traders={simulationTraders}
+                  tradersError={undefined}
+                  selectedTraderId={selectedTraderId}
+                  onTraderSelect={(traderId) => {
+                    setSelectedTraderId(traderId)
+                    const trader = simulationTraders.find((t) => t.trader_id === traderId)
+                    if (trader) {
+                      const url = new URL(window.location.href)
+                      url.pathname = '/simulation'
+                      url.searchParams.set('trader', getTraderSlug(trader))
+                      window.history.replaceState({}, '', url.toString())
+                    }
+                  }}
+                  onNavigateToTraders={() => {
+                    setSelectedTraderSlug(undefined)
+                    setSelectedTraderId(undefined)
+                    window.history.pushState({}, '', '/simulation')
+                    setRoute('/simulation')
+                    setCurrentPage('simulation')
+                  }}
+                  exchanges={simulationExchanges}
+                  isSimulation
+                  onRefresh={refreshDashboardData}
+                />
+              ) : (
+                <AITradersPage
+                  traders={simulationTraders}
+                  isSimulation
+                  onBack={() => window.history.back()}
+                  onTraderSelect={(traderId) => {
+                    setSelectedTraderId(traderId)
+                    const trader = simulationTraders?.find((t) => t.trader_id === traderId)
+                    if (trader) {
+                      const url = new URL(window.location.href)
+                      url.pathname = '/simulation'
+                      url.searchParams.set('trader', getTraderSlug(trader))
+                      window.history.pushState({}, '', url.toString())
+                      setRoute('/simulation')
+                    }
+                  }}
+                />
+              )
             ) : currentPage === 'backtest' ? (
               <BacktestPage />
             ) : currentPage === 'strategy' ? (
@@ -503,6 +575,7 @@ function App() {
                     window.history.replaceState({}, '', url.toString())
                   }
                 }}
+                onRefresh={refreshDashboardData}
                 onNavigateToTraders={() => {
                   window.history.pushState({}, '', '/traders')
                   setRoute('/traders')

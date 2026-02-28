@@ -7,6 +7,7 @@ import type {
   TraderInfo,
   TraderConfigData,
   AIModel,
+  AIUsage,
   Exchange,
   CreateTraderRequest,
   CreateExchangeRequest,
@@ -71,9 +72,10 @@ async function handleJSONResponse<T>(res: Response): Promise<T> {
 }
 
 export const api = {
-  // AI交易员管理接口
-  async getTraders(): Promise<TraderInfo[]> {
-    const result = await httpClient.get<TraderInfo[]>(`${API_BASE}/my-traders`)
+  // AI交易员管理接口（simulation=true 仅返回实盘模拟交易员）
+  async getTraders(opts?: { simulation?: boolean }): Promise<TraderInfo[]> {
+    const q = opts?.simulation ? '?simulation=true' : ''
+    const result = await httpClient.get<TraderInfo[]>(`${API_BASE}/my-traders${q}`)
     if (!result.success) throw new Error('获取trader列表失败')
     return Array.isArray(result.data) ? result.data : []
   },
@@ -103,7 +105,7 @@ export const api = {
     const result = await httpClient.post(
       `${API_BASE}/traders/${traderId}/start`
     )
-    if (!result.success) throw new Error('启动交易员失败')
+    if (!result.success) throw new Error(result.message || '启动交易员失败')
   },
 
   async stopTrader(traderId: string): Promise<void> {
@@ -166,6 +168,23 @@ export const api = {
     return Array.isArray(result.data) ? result.data : []
   },
 
+  /** 最近一次 AI 调用的 token 用量（含 Prompt Caching 统计）
+   * runId: 回测 run_id 时返回该回测的用量
+   * traderId: 实盘/模拟交易员 ID 时返回该交易员的用量
+   * context: 策略工作室等场景传 'strategy_studio' 返回该场景用量
+   */
+  async getAIUsage(runId?: string, traderId?: string, context?: string): Promise<AIUsage | null> {
+    const params = new URLSearchParams()
+    if (runId) params.set('run_id', runId)
+    if (traderId) params.set('trader_id', traderId)
+    if (context) params.set('context', context)
+    const qs = params.toString()
+    const url = qs ? `${API_BASE}/ai-usage?${qs}` : `${API_BASE}/ai-usage`
+    const res = await fetch(url, { headers: getAuthHeaders() })
+    const data = await res.json().catch(() => ({}))
+    return data.usage ?? null
+  },
+
   // 获取系统支持的AI模型列表（无需认证）
   async getSupportedModels(): Promise<AIModel[]> {
     const result = await httpClient.get<AIModel[]>(
@@ -219,8 +238,10 @@ export const api = {
   },
 
   // 交易所配置接口
-  async getExchangeConfigs(): Promise<Exchange[]> {
-    const result = await httpClient.get<Exchange[]>(`${API_BASE}/exchanges`)
+  /** 获取交易所配置。simulation=true 仅模拟用，simulation=false 仅实盘用，与实盘模拟分离 */
+  async getExchangeConfigs(opts?: { simulation?: boolean }): Promise<Exchange[]> {
+    const q = opts?.simulation === true ? '?simulation=true' : opts?.simulation === false ? '?simulation=false' : ''
+    const result = await httpClient.get<Exchange[]>(`${API_BASE}/exchanges${q}`)
     if (!result.success) throw new Error('获取交易所配置失败')
     return result.data!
   },

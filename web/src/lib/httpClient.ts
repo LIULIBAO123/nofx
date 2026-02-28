@@ -138,18 +138,28 @@ export class HttpClient {
       throw new Error('Permission denied')
     }
 
-    // Handle 404 Not Found - system error
+    // Handle 404 Not Found - show backend message when present (e.g. trader not found)
     if (status === 404) {
-      toast.error('API Not Found', {
-        description: 'The requested endpoint does not exist (404)',
+      const data = error.response?.data as { error?: string; message?: string } | undefined
+      const msg = data?.error || data?.message
+      toast.error(msg ? 'Not Found' : 'API Not Found', {
+        description: msg || 'The requested endpoint does not exist (404)',
       })
-      throw new Error('API not found')
+      throw new Error(msg || 'API not found')
     }
 
-    // Handle 500+ Server Error - system error
+    // Handle 500+ Server Error - 轮询请求用温和提示并去重，避免同一接口短时多次弹窗
     if (status >= 500) {
-      toast.error('Server Error', {
-        description: 'Please try again later or contact support',
+      const config = error.config
+      const url = config?.url ? String(config.url) : ''
+      const isGet = !config?.method || config.method?.toUpperCase() === 'GET'
+      const toastId = `server-error-${url}`
+      toast.error(isGet ? 'Data temporarily unavailable' : 'Server Error', {
+        description: isGet
+          ? 'Retrying automatically. If it persists, try refreshing the page.'
+          : 'Please try again later or contact support',
+        id: toastId,
+        duration: 5000,
       })
       throw new Error('Server error')
     }

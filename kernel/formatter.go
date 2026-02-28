@@ -242,14 +242,10 @@ func formatCurrentPositionsZH(ctx *Context) string {
 		sb.WriteString(fmt.Sprintf("保证金 %.0f USDT | ", pos.MarginUsed))
 		sb.WriteString(fmt.Sprintf("强平价 %.4f\n", pos.LiquidationPrice))
 
-		// 添加分析提示
-		if drawdown < -0.30*pos.PeakPnLPct && pos.PeakPnLPct > 0.02 {
-			sb.WriteString(fmt.Sprintf("   ⚠️ **止盈提示**: 当前盈亏从峰值 %.2f%% 回撤到 %.2f%%，回撤幅度 %.2f%%，建议考虑止盈\n",
-				pos.PeakPnLPct, pos.UnrealizedPnLPct, (drawdown/pos.PeakPnLPct)*100))
-		}
-
-		if pos.UnrealizedPnLPct < -4.0 {
-			sb.WriteString("   ⚠️ **止损提示**: 亏损接近-5%止损线，建议考虑止损\n")
+		// 仅提供数据参考，不按固定比例建议止盈/止损（实际由策略动态执行）
+		if drawdown != 0 && pos.PeakPnLPct != 0 {
+			sb.WriteString(fmt.Sprintf("   📉 相对峰值回撤: %.2f%%（仅供参考；实际止盈由策略分层/追踪执行）\n",
+				(drawdown/pos.PeakPnLPct)*100))
 		}
 
 		// 显示当前价格（如果有市场数据）
@@ -517,14 +513,10 @@ func formatCurrentPositionsEN(ctx *Context) string {
 		sb.WriteString(fmt.Sprintf("Margin %.0f USDT | ", pos.MarginUsed))
 		sb.WriteString(fmt.Sprintf("Liq Price %.4f\n", pos.LiquidationPrice))
 
-		// Analysis hints
-		if drawdown < -0.30*pos.PeakPnLPct && pos.PeakPnLPct > 0.02 {
-			sb.WriteString(fmt.Sprintf("   ⚠️ **Take Profit Alert**: PnL dropped from peak %.2f%% to %.2f%%, drawdown %.2f%%, consider taking profit\n",
-				pos.PeakPnLPct, pos.UnrealizedPnLPct, (drawdown/pos.PeakPnLPct)*100))
-		}
-
-		if pos.UnrealizedPnLPct < -4.0 {
-			sb.WriteString("   ⚠️ **Stop Loss Alert**: Loss approaching -5% threshold, consider cutting loss\n")
+		// Data only; no fixed % prompts (actual SL/TP executed by strategy)
+		if drawdown != 0 && pos.PeakPnLPct != 0 {
+			sb.WriteString(fmt.Sprintf("   📉 Drawdown from peak: %.2f%% (reference only; actual TP by strategy scaled/trailing)\n",
+				(drawdown/pos.PeakPnLPct)*100))
 		}
 
 		if ctx.MarketDataMap != nil {

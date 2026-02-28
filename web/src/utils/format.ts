@@ -2,7 +2,16 @@
  * 数字格式化工具
  *
  * formatPrice: 根据数值大小自适应显示精度，避免极小数显示为 0.0000
+ * formatFull: 完整数值，不四舍五入，最多保留 maxDecimals 并去除尾部零
  */
+
+/** 完整数值显示，不四舍五入，去除尾部零（用于价格、数量等需完整精度场景） */
+export function formatFull(v: number | undefined | null, maxDecimals = 8): string {
+  if (v == null || Number.isNaN(v)) return '—'
+  const s = Number(v).toFixed(maxDecimals)
+  const m = s.match(/^(\d*(?:\.\d*?))0+$/)
+  return m ? m[1].replace(/\.$/, '') : s
+}
 
 /**
  * 格式化价格，根据数值大小自适应精度

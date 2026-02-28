@@ -23,10 +23,9 @@ export function DynamicStopLossEditor({
       triggerLogicAnyDesc: { zh: '任一启用的止损条件触发即平仓', en: 'Close position when any enabled condition triggers' },
       triggerLogicAllDesc: { zh: '所有启用的止损条件都触发才平仓', en: 'Close position only when all enabled conditions trigger' },
       
-      // Initial Stop Loss
-      initialStopLoss: { zh: '初始固定止损（必需）', en: 'Initial Stop Loss (Required)' },
-      initialStopPercent: { zh: '初始止损百分比', en: 'Initial Stop Percent' },
-      initialStopPercentDesc: { zh: '开仓时的固定止损距离，作为保底止损', en: 'Fixed stop distance at entry, acts as safety net' },
+      // Min hold (initial fixed stop removed; only dynamic/ATR/trailing)
+      minHoldMinutes: { zh: '最小持仓时间（分钟）', en: 'Min hold (minutes)' },
+      minHoldMinutesDesc: { zh: '未满此时间不触发动态止损，避免开仓即止损。0=不限制', en: 'Do not trigger before this many minutes; 0=no limit' },
       
       // Trailing Stop - Tiered
       trailingStop: { zh: '追踪止损（分层模式）', en: 'Trailing Stop (Tiered)' },
@@ -55,6 +54,14 @@ export function DynamicStopLossEditor({
       enableSupportResistance: { zh: '启用支撑阻力止损', en: 'Enable S/R Stop' },
       srBuffer: { zh: '支撑/阻力缓冲', en: 'S/R Buffer' },
       srBufferDesc: { zh: '在支撑/阻力位基础上的缓冲百分比', en: 'Buffer percentage from support/resistance' },
+
+      confirmCycles: { zh: '连续确认周期数', en: 'Confirm cycles' },
+      confirmCyclesDesc: { zh: '止损条件连续满足 N 个周期后才执行，减少单 K 线假跌破。1=立即执行', en: 'Execute stop only after condition holds N consecutive cycles; 1=immediate' },
+      atrTolerance: { zh: '高波动宽容', en: 'ATR volatility tolerance' },
+      enableAtrTolerance: { zh: '启用高波动宽容', en: 'Enable high-vol tolerance' },
+      atrToleranceDesc: { zh: '高波动时多要求 1 个确认周期且 ATR 止损放宽', en: 'In high vol: +1 confirm cycle and wider ATR stop' },
+      atrHighMult: { zh: '高波动阈值倍数', en: 'High vol threshold' },
+      atrHighMultDesc: { zh: '当前 ATR > 长期 ATR × 此值视为高波动', en: 'Current ATR > long-term ATR × this = high volatility' },
     }
     return translations[key]?.[language] || key
   }
@@ -62,7 +69,8 @@ export function DynamicStopLossEditor({
   const defaultConfig: DynamicStopLossConfig = {
     enabled: true,
     trigger_logic: 'any',
-    initial_stop_percent: 3,
+    min_hold_minutes: 5,
+    initial_stop_percent: 0, // 0=removed fixed initial stop, only dynamic/ATR/trailing
     trailing_enabled: false,
     trailing_levels: [
       { profit_threshold: 2, trailing_percent: 1.5 },
@@ -76,6 +84,9 @@ export function DynamicStopLossEditor({
     atr_period_altcoin: 14,
     support_resistance_enabled: false,
     support_resistance_buffer: 0.5,
+    confirm_cycles: 2,
+    atr_tolerance_enabled: true,
+    atr_high_multiplier: 1.2,
   }
 
   const currentConfig = config || defaultConfig
@@ -191,30 +202,79 @@ export function DynamicStopLossEditor({
             </div>
           </div>
 
-          {/* Initial Stop Loss (Required) */}
+          {/* Min hold (fixed initial stop removed; only dynamic/ATR/trailing) */}
           <div className="p-4 rounded-xl shadow-lg" style={{ background: 'linear-gradient(135deg, #2a1418 0%, #1a0c0f 100%)', border: '1px solid #F6465D' }}>
-            <label className="block text-sm mb-2 font-semibold flex items-center gap-2" style={{ color: '#EAECEF' }}>
-              <div className="w-2 h-2 rounded-full bg-red-500"></div>
-              {t('initialStopLoss')}
-            </label>
             <p className="text-xs mb-3 leading-relaxed" style={{ color: '#848E9C' }}>
-              {t('initialStopPercentDesc')}
+              {language === 'zh' ? '已移除固定初始止损，仅使用动态/ATR/追踪止损。请设置最小持仓时间避免开仓即止损。' : 'Fixed initial stop removed; only dynamic/ATR/trailing stop. Set min hold to avoid stop right after open.'}
             </p>
-            <div className="flex items-center gap-3">
-              <input
-                type="range"
-                value={currentConfig.initial_stop_percent}
-                onChange={(e) => updateField('initial_stop_percent', parseFloat(e.target.value))}
-                disabled={disabled}
-                min={0.5}
-                max={10}
-                step={0.5}
-                className="flex-1 h-2 accent-red-500"
-                style={{ background: 'linear-gradient(to right, #F6465D 0%, #F6465D ' + (currentConfig.initial_stop_percent / 10 * 100) + '%, #2B3139 ' + (currentConfig.initial_stop_percent / 10 * 100) + '%, #2B3139 100%)' }}
-              />
-              <span className="w-20 text-center font-bold text-lg px-3 py-1 rounded-lg" style={{ color: '#F6465D', background: 'rgba(246, 70, 93, 0.1)' }}>
-                {currentConfig.initial_stop_percent}%
-              </span>
+            <div>
+              <label className="text-xs block mb-1" style={{ color: '#848E9C' }}>{t('minHoldMinutes')}</label>
+              <div className="flex items-center gap-2 flex-wrap">
+                <input
+                  type="number"
+                  min={0}
+                  max={120}
+                  step={1}
+                  value={currentConfig.min_hold_minutes ?? 5}
+                  onChange={(e) => updateField('min_hold_minutes', parseFloat(e.target.value) || 0)}
+                  disabled={disabled}
+                  className="w-16 rounded px-2 py-1 text-sm"
+                  style={{ background: '#1E2329', border: '1px solid #2B3139', color: '#EAECEF' }}
+                />
+                <span className="text-xs" style={{ color: '#848E9C' }}>{language === 'zh' ? '分钟' : 'min'}</span>
+                <span className="text-[10px]" style={{ color: '#5E6673' }}>{t('minHoldMinutesDesc')}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Confirm cycles + ATR tolerance */}
+          <div className="p-4 rounded-xl shadow-lg" style={{ background: 'linear-gradient(135deg, #1a1d24 0%, #0f1115 100%)', border: '1px solid #2B3139' }}>
+            <p className="text-xs mb-3 leading-relaxed" style={{ color: '#848E9C' }}>
+              {language === 'zh' ? '连续确认再止损：条件连续满足 N 周期后才执行，减少单 K 线假跌破。高波动时更宽容（多 1 个确认周期 + ATR 止损放宽）。' : 'Confirm before execute: require N consecutive cycles; high vol = +1 confirm and wider ATR stop.'}
+            </p>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs block mb-1" style={{ color: '#848E9C' }}>{t('confirmCycles')}</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={5}
+                  value={currentConfig.confirm_cycles ?? 2}
+                  onChange={(e) => updateField('confirm_cycles', Math.max(1, parseInt(e.target.value, 10) || 1))}
+                  disabled={disabled}
+                  className="w-16 rounded px-2 py-1 text-sm"
+                  style={{ background: '#1E2329', border: '1px solid #2B3139', color: '#EAECEF' }}
+                />
+                <span className="text-[10px] ml-2" style={{ color: '#5E6673' }}>{t('confirmCyclesDesc')}</span>
+              </div>
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={currentConfig.atr_tolerance_enabled ?? true}
+                  onChange={(e) => updateField('atr_tolerance_enabled', e.target.checked)}
+                  disabled={disabled}
+                  className="w-5 h-5 accent-red-500 rounded"
+                />
+                <span className="text-sm" style={{ color: '#EAECEF' }}>{t('enableAtrTolerance')}</span>
+              </label>
+              <p className="text-[10px]" style={{ color: '#848E9C' }}>{t('atrToleranceDesc')}</p>
+              {currentConfig.atr_tolerance_enabled !== false && (
+                <div>
+                  <label className="text-xs block mb-1" style={{ color: '#848E9C' }}>{t('atrHighMult')}</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={2}
+                    step={0.1}
+                    value={currentConfig.atr_high_multiplier ?? 1.2}
+                    onChange={(e) => updateField('atr_high_multiplier', parseFloat(e.target.value) || 1.2)}
+                    disabled={disabled}
+                    className="w-20 rounded px-2 py-1 text-sm"
+                    style={{ background: '#1E2329', border: '1px solid #2B3139', color: '#EAECEF' }}
+                  />
+                  <span className="text-[10px] ml-2" style={{ color: '#5E6673' }}>{t('atrHighMultDesc')}</span>
+                </div>
+              )}
             </div>
           </div>
 

@@ -202,32 +202,43 @@ func (c *TakeProfitChecker) checkATRTakeProfit(position *PositionInfo, currentPr
 	return &TakeProfitSignal{Triggered: false}
 }
 
-// checkResistanceTakeProfit checks resistance-based take profit
-func (c *TakeProfitChecker) checkResistanceTakeProfit(position *PositionInfo, currentPrice float64, resistanceLevel float64) *TakeProfitSignal {
+// checkResistanceTakeProfit checks resistance/support-based take profit
+// Caller should pass: resistanceLevel for long positions, supportLevel for short positions
+func (c *TakeProfitChecker) checkResistanceTakeProfit(position *PositionInfo, currentPrice float64, srLevel float64) *TakeProfitSignal {
 	buffer := getFloat64Value(c.config.ResistanceBuffer, 0.5)
 
 	var targetPrice float64
 	if position.Side == "long" {
 		// For long positions, take profit near resistance level
-		targetPrice = resistanceLevel * (1 - buffer/100)
-		if currentPrice >= targetPrice {
+		// IMPORTANT: resistance must be ABOVE entry price, otherwise it's not a valid take profit target
+		if srLevel <= position.EntryPrice {
+			return &TakeProfitSignal{Triggered: false}
+		}
+		targetPrice = srLevel * (1 - buffer/100)
+		// Also verify we're actually in profit
+		if currentPrice >= targetPrice && currentPrice > position.EntryPrice {
 			profitPct := ((currentPrice - position.EntryPrice) / position.EntryPrice) * 100
 			return &TakeProfitSignal{
 				Triggered:      true,
-				Reason:         fmt.Sprintf("Resistance level reached: price at %.2f (resistance: %.2f, %.2f%% profit)", currentPrice, resistanceLevel, profitPct),
+				Reason:         fmt.Sprintf("Resistance level reached: price at %.2f (resistance: %.2f, %.2f%% profit)", currentPrice, srLevel, profitPct),
 				Price:          targetPrice,
 				Type:           "resistance",
 				PartialPercent: 100,
 			}
 		}
 	} else { // short
-		// For short positions, take profit near support level (use resistanceLevel as support)
-		targetPrice = resistanceLevel * (1 + buffer/100)
-		if currentPrice <= targetPrice {
+		// For short positions, take profit near support level
+		// IMPORTANT: support must be BELOW entry price, otherwise it's not a valid take profit target
+		if srLevel >= position.EntryPrice {
+			return &TakeProfitSignal{Triggered: false}
+		}
+		targetPrice = srLevel * (1 + buffer/100)
+		// Also verify we're actually in profit
+		if currentPrice <= targetPrice && currentPrice < position.EntryPrice {
 			profitPct := ((position.EntryPrice - currentPrice) / position.EntryPrice) * 100
 			return &TakeProfitSignal{
 				Triggered:      true,
-				Reason:         fmt.Sprintf("Support level reached: price at %.2f (support: %.2f, %.2f%% profit)", currentPrice, resistanceLevel, profitPct),
+				Reason:         fmt.Sprintf("Support level reached: price at %.2f (support: %.2f, %.2f%% profit)", currentPrice, srLevel, profitPct),
 				Price:          targetPrice,
 				Type:           "resistance",
 				PartialPercent: 100,
@@ -239,11 +250,17 @@ func (c *TakeProfitChecker) checkResistanceTakeProfit(position *PositionInfo, cu
 }
 
 // isLevelTaken checks if a specific profit level has already been taken
-// This prevents triggering the same level multiple times
+// This prevents triggering the same level multiple times (e.g. backtest passes ScaledLevelsTaken).
 func (c *TakeProfitChecker) isLevelTaken(position *PositionInfo, profitPercent float64, levelType string) bool {
-	// In a real implementation, this would check position metadata
-	// For now, we'll assume levels are not tracked (always return false)
-	// TODO: Add level tracking to PositionInfo
+	if position == nil || len(position.ScaledLevelsTaken) == 0 {
+		return false
+	}
+	const tol = 0.15
+	for _, taken := range position.ScaledLevelsTaken {
+		if taken >= profitPercent-tol && taken <= profitPercent+tol {
+			return true
+		}
+	}
 	return false
 }
 

@@ -263,6 +263,7 @@ func (t *BitgetTrader) SyncOrdersFromBitget(traderID string, exchangeID string, 
 			symbol, positionSide, trade.OrderAction,
 			trade.FillQty, trade.FillPrice, trade.Fee, trade.ProfitLoss,
 			execTimeMs, trade.TradeID,
+			"sync",
 		); err != nil {
 			logger.Infof("  ⚠️ Failed to sync position for trade %s: %v", trade.TradeID, err)
 		} else {

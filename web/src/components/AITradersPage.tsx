@@ -32,6 +32,7 @@ import {
   ExternalLink,
   Copy,
   Check,
+  ArrowLeft,
 } from 'lucide-react'
 import { confirmToast } from '../lib/notify'
 import { toast } from 'sonner'
@@ -101,6 +102,12 @@ const AI_PROVIDER_CONFIG: Record<string, {
 
 interface AITradersPageProps {
   onTraderSelect?: (traderId: string) => void
+  /** 外部传入的列表（如实盘模拟页传入 simulationTraders），不传则内部请求 */
+  traders?: TraderInfo[]
+  /** 实盘模拟模式：标题/创建时 is_simulation 与虚拟资金 */
+  isSimulation?: boolean
+  /** 实盘模拟配置页的「返回看板」回调，点击返回时调用（如 history.back） */
+  onBack?: () => void
 }
 
 // Helper function to get exchange display name from exchange ID (UUID)
@@ -141,7 +148,7 @@ function truncateAddress(address: string, startLen = 6, endLen = 4): string {
   return `${address.slice(0, startLen)}...${address.slice(-endLen)}`
 }
 
-export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
+export function AITradersPage({ onTraderSelect, traders: tradersProp, isSimulation, onBack }: AITradersPageProps) {
   const { language } = useLanguage()
   const { user, token } = useAuth()
   const navigate = useNavigate()
@@ -196,11 +203,12 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
     }
   }
 
-  const { data: traders, mutate: mutateTraders, isLoading: isTradersLoading } = useSWR<TraderInfo[]>(
-    user && token ? 'traders' : null,
-    api.getTraders,
+  const { data: fetchedTraders, mutate: mutateTraders, isLoading: isTradersLoading } = useSWR<TraderInfo[]>(
+    !tradersProp && user && token ? (isSimulation ? 'simulation-traders' : 'traders') : null,
+    () => api.getTraders(isSimulation ? { simulation: true } : undefined),
     { refreshInterval: 5000 }
   )
+  const traders = tradersProp ?? fetchedTraders ?? []
 
   // 加载AI模型和交易所配置
   useEffect(() => {
@@ -223,7 +231,7 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
           supportedModels,
         ] = await Promise.all([
           api.getModelConfigs(),
-          api.getExchangeConfigs(),
+          api.getExchangeConfigs(isSimulation ? { simulation: true } : undefined),
           api.getSupportedModels(),
         ])
         setAllModels(modelConfigs)
@@ -345,7 +353,15 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
         return
       }
 
-      await toast.promise(api.createTrader(data), {
+      const createPayload: CreateTraderRequest = { ...data }
+      if (isSimulation) {
+        createPayload.is_simulation = true
+        if (createPayload.initial_balance == null || createPayload.initial_balance <= 0) {
+          createPayload.initial_balance = 10000
+        }
+      }
+
+      await toast.promise(api.createTrader(createPayload), {
         loading: '正在创建…',
         success: '创建成功',
         error: '创建失败',
@@ -445,13 +461,13 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
         await toast.promise(api.stopTrader(traderId), {
           loading: '正在停止…',
           success: '已停止',
-          error: '停止失败',
+          error: (e) => (e instanceof Error ? e.message : '停止失败'),
         })
       } else {
         await toast.promise(api.startTrader(traderId), {
           loading: '正在启动…',
           success: '已启动',
-          error: '启动失败',
+          error: (e) => (e instanceof Error ? e.message : '启动失败'),
         })
       }
 
@@ -691,8 +707,8 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
         error: language === 'zh' ? '删除交易所账户失败' : 'Failed to delete exchange account',
       })
 
-      // 重新获取用户配置以确保数据同步
-      const refreshedExchanges = await api.getExchangeConfigs()
+      // 重新获取用户配置以确保数据同步（实盘/模拟分离）
+      const refreshedExchanges = await api.getExchangeConfigs(isSimulation ? { simulation: true } : undefined)
       setAllExchanges(refreshedExchanges)
 
       setShowExchangeModal(false)
@@ -760,6 +776,7 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
           exchange_type: exchangeType,
           account_name: accountName,
           enabled: true,
+          is_simulation: isSimulation || false,
           api_key: apiKey || '',
           secret_key: secretKey || '',
           passphrase: passphrase || '',
@@ -781,8 +798,8 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
         })
       }
 
-      // 重新获取用户配置以确保数据同步
-      const refreshedExchanges = await api.getExchangeConfigs()
+      // 重新获取用户配置以确保数据同步（实盘/模拟分离）
+      const refreshedExchanges = await api.getExchangeConfigs(isSimulation ? { simulation: true } : undefined)
       setAllExchanges(refreshedExchanges)
 
       setShowExchangeModal(false)
@@ -810,6 +827,17 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
         {/* Header - Meridian Style */}
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 pb-6">
           <div className="flex items-center gap-4">
+            {isSimulation && (onBack != null) && (
+              <button
+                type="button"
+                onClick={() => (onBack ? onBack() : window.history.back())}
+                className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border border-amber-500/30 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-colors shrink-0"
+                title={language === 'zh' ? '返回看板' : 'Back to dashboard'}
+              >
+                <ArrowLeft className="w-4 h-4" />
+                {language === 'zh' ? '返回看板' : 'Back'}
+              </button>
+            )}
             <div className="relative group">
               <div className="absolute -inset-1 bg-teal-500/20 rounded-xl blur opacity-0 group-hover:opacity-100 transition duration-500"></div>
               <div className="w-12 h-12 md:w-14 md:h-14 rounded-xl flex items-center justify-center bg-gradient-to-br from-teal-500/10 to-cyan-500/10 border border-teal-500/30 text-teal-400 relative z-10 shadow-glow-teal">
@@ -818,14 +846,18 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
             </div>
             <div>
               <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-white flex items-center gap-3">
-                {t('aiTraders', language)}
+                {isSimulation ? (language === 'zh' ? '实盘模拟' : 'Paper') : t('aiTraders', language)}
                 <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-teal-500/10 text-teal-400 border border-teal-500/20">
                   {traders?.length || 0} Active
                 </span>
               </h1>
               <p className="text-sm text-zinc-400 mt-1 flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-teal-500 animate-pulse"></span>
-                System Ready
+                {isSimulation ? (language === 'zh' ? '虚拟资金，不发出真实订单' : 'Virtual funds, no real orders') : (
+                  <>
+                    <span className="w-1.5 h-1.5 rounded-full bg-teal-500 animate-pulse"></span>
+                    System Ready
+                  </>
+                )}
               </p>
             </div>
           </div>
@@ -847,7 +879,7 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
             >
               <div className="flex items-center gap-2">
                 <Plus className="w-4 h-4" />
-                <span>Exchanges</span>
+                <span>{isSimulation ? (language === 'zh' ? '模拟交易所' : 'Paper Exchanges') : 'Exchanges'}</span>
               </div>
             </button>
 
@@ -933,12 +965,12 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
             </div>
           </div>
 
-          {/* Exchanges Card */}
+          {/* Exchanges Card（实盘与实盘模拟分离） */}
           <div className="modern-card overflow-hidden">
             <div className="px-4 py-3 border-b border-white/5 bg-white/[0.02] flex items-center gap-2 backdrop-blur-sm">
               <Landmark className="w-4 h-4 text-teal-400" />
               <h3 className="text-sm font-semibold text-zinc-200">
-                {t('exchanges', language)}
+                {isSimulation ? (language === 'zh' ? '模拟交易所' : 'Paper Exchanges') : t('exchanges', language)}
               </h3>
             </div>
 
@@ -1034,7 +1066,7 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
           <div className="flex items-center justify-between mb-4 md:mb-5">
             <h2 className="text-lg md:text-xl font-bold flex items-center gap-2 text-white">
               <Users className="w-5 h-5 md:w-6 md:h-6 text-teal-400" />
-              {t('currentTraders', language)}
+              {isSimulation ? (language === 'zh' ? '模拟交易员' : 'Paper Traders') : t('currentTraders', language)}
             </h2>
           </div>
 
@@ -1263,6 +1295,7 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
           <TraderConfigModal
             isOpen={showCreateModal}
             isEditMode={false}
+            isSimulation={isSimulation}
             availableModels={enabledModels}
             availableExchanges={enabledExchanges}
             onSave={handleCreateTrader}

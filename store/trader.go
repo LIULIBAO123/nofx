@@ -30,6 +30,7 @@ type Trader struct {
 	IsRunning           bool      `gorm:"column:is_running;default:false" json:"is_running"`
 	IsCrossMargin       bool      `gorm:"column:is_cross_margin;default:true" json:"is_cross_margin"`
 	ShowInCompetition   bool      `gorm:"column:show_in_competition;default:true" json:"show_in_competition"`
+	IsSimulation        bool      `gorm:"column:is_simulation;default:false" json:"is_simulation"` // 实盘模拟：虚拟资金，不发出真实订单
 	CreatedAt           time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
 	UpdatedAt           time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 
@@ -78,12 +79,11 @@ func (s *TraderStore) Create(trader *Trader) error {
 	return s.db.Create(trader).Error
 }
 
-// List gets user's trader list
-func (s *TraderStore) List(userID string) ([]*Trader, error) {
+// List gets user's trader list. simulationOnly=true 仅模拟，false 仅实盘，两者隔离
+func (s *TraderStore) List(userID string, simulationOnly bool) ([]*Trader, error) {
 	var traders []*Trader
-	err := s.db.Where("user_id = ?", userID).
-		Order("created_at DESC").
-		Find(&traders).Error
+	q := s.db.Where("user_id = ?", userID).Where("is_simulation = ?", simulationOnly)
+	err := q.Order("created_at DESC").Find(&traders).Error
 	if err != nil {
 		return nil, err
 	}

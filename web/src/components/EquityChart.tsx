@@ -34,9 +34,11 @@ interface EquityPoint {
 interface EquityChartProps {
   traderId?: string
   embedded?: boolean // 嵌入模式（不显示外层卡片）
+  /** 实盘模拟：无历史数据时显示友好提示，不显示“获取历史数据失败” */
+  isSimulation?: boolean
 }
 
-export function EquityChart({ traderId, embedded = false }: EquityChartProps) {
+export function EquityChart({ traderId, embedded = false, isSimulation = false }: EquityChartProps) {
   const { language } = useLanguage()
   const { user, token } = useAuth()
   const [displayMode, setDisplayMode] = useState<'dollar' | 'percent'>('dollar')
@@ -78,22 +80,27 @@ export function EquityChart({ traderId, embedded = false }: EquityChartProps) {
   }
 
   if (error) {
+    const isSimulationEmpty = isSimulation
     return (
       <div className={embedded ? 'p-6' : 'binance-card p-6'}>
         <div
           className="flex items-center gap-3 p-4 rounded"
           style={{
-            background: 'rgba(246, 70, 93, 0.1)',
-            border: '1px solid rgba(246, 70, 93, 0.2)',
+            background: isSimulationEmpty ? 'rgba(14, 165, 233, 0.08)' : 'rgba(246, 70, 93, 0.1)',
+            border: isSimulationEmpty ? '1px solid rgba(14, 165, 233, 0.2)' : '1px solid rgba(246, 70, 93, 0.2)',
           }}
         >
-          <AlertTriangle className="w-6 h-6" style={{ color: '#F6465D' }} />
+          <AlertTriangle className="w-6 h-6" style={{ color: isSimulationEmpty ? '#0EA5E9' : '#F6465D' }} />
           <div>
-            <div className="font-semibold" style={{ color: '#F6465D' }}>
-              {t('loadingError', language)}
+            <div className="font-semibold" style={{ color: isSimulationEmpty ? '#0EA5E9' : '#F6465D' }}>
+              {isSimulationEmpty
+                ? (language === 'zh' ? '模拟交易暂无历史数据' : 'No paper trading history yet')
+                : t('loadingError', language)}
             </div>
             <div className="text-sm" style={{ color: '#848E9C' }}>
-              {error.message}
+              {isSimulationEmpty
+                ? (language === 'zh' ? '启动模拟交易并产生成交后，将在此显示账户净值曲线。' : 'Equity curve will appear here after paper trades are executed.')
+                : error.message}
             </div>
           </div>
         </div>
@@ -105,6 +112,9 @@ export function EquityChart({ traderId, embedded = false }: EquityChartProps) {
   const validHistory = history?.filter((point) => point.total_equity > 1) || []
 
   if (!validHistory || validHistory.length === 0) {
+    const emptyMessage = isSimulation
+      ? (language === 'zh' ? '模拟交易暂无历史数据，产生成交后将显示净值曲线。' : 'No paper trading history yet. Equity curve will show after trades.')
+      : t('noHistoricalData', language)
     return (
       <div className={embedded ? 'p-6' : 'binance-card p-6'}>
         {!embedded && (
@@ -117,7 +127,7 @@ export function EquityChart({ traderId, embedded = false }: EquityChartProps) {
             <BarChart3 className="w-16 h-16" />
           </div>
           <div className="text-lg font-semibold mb-2">
-            {t('noHistoricalData', language)}
+            {emptyMessage}
           </div>
           <div className="text-sm">{t('dataWillAppear', language)}</div>
         </div>

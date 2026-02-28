@@ -25,17 +25,18 @@ func NewPositionBuilder(positionStore *PositionStore) *PositionBuilder {
 }
 
 // ProcessTrade processes a single trade and updates position accordingly
-// tradeTimeMs is Unix milliseconds UTC
+// tradeTimeMs is Unix milliseconds UTC; closeReason used when action is close_* (e.g. "system:sl:trailing", "ai", "manual")
 func (pb *PositionBuilder) ProcessTrade(
 	traderID, exchangeID, exchangeType, symbol, side, action string,
 	quantity, price, fee, realizedPnL float64,
 	tradeTimeMs int64,
 	orderID string,
+	closeReason string,
 ) error {
 	if strings.HasPrefix(action, "open_") {
 		return pb.handleOpen(traderID, exchangeID, exchangeType, symbol, side, quantity, price, fee, tradeTimeMs, orderID)
 	} else if strings.HasPrefix(action, "close_") {
-		return pb.handleClose(traderID, exchangeID, exchangeType, symbol, side, quantity, price, fee, realizedPnL, tradeTimeMs, orderID)
+		return pb.handleClose(traderID, exchangeID, exchangeType, symbol, side, quantity, price, fee, realizedPnL, tradeTimeMs, orderID, closeReason)
 	}
 	return nil
 }
@@ -93,12 +94,13 @@ func (pb *PositionBuilder) handleOpen(
 }
 
 // handleClose handles closing positions (partial or full)
-// tradeTimeMs is Unix milliseconds UTC
+// tradeTimeMs is Unix milliseconds UTC; closeReason e.g. "system:sl:trailing", "ai", "manual", "sync"
 func (pb *PositionBuilder) handleClose(
 	traderID, exchangeID, exchangeType, symbol, side string,
 	quantity, price, fee, realizedPnL float64,
 	tradeTimeMs int64,
 	orderID string,
+	closeReason string,
 ) error {
 	// Get OPEN position
 	position, err := pb.positionStore.GetOpenPositionBySymbol(traderID, symbol, side)
@@ -162,6 +164,16 @@ func (pb *PositionBuilder) handleClose(
 		logger.Infof("  ✅ Full close: %s %s %.6f @ %.2f (avg exit: %.2f, entry: %.2f, PnL: %.2f)",
 			symbol, side, closeQty, price, finalExitPrice, position.EntryPrice, totalPnL)
 
+		// If closeReason is "sync" (OrderSync default), check if position already has a preset closeReason
+		// This handles cases where executeStopLoss/executeTakeProfit pre-set the reason before OrderSync runs
+		if closeReason == "" || closeReason == "sync" {
+			if position.CloseReason != "" {
+				closeReason = position.CloseReason
+				logger.Infof("  📌 Using preset close reason from position: %s", closeReason)
+			} else {
+				closeReason = "sync"
+			}
+		}
 		return pb.positionStore.ClosePositionFully(
 			position.ID,
 			finalExitPrice,
@@ -169,7 +181,7 @@ func (pb *PositionBuilder) handleClose(
 			tradeTimeMs,
 			totalPnL,
 			totalFee,
-			"sync",
+			closeReason,
 		)
 	}
 }

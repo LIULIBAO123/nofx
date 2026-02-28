@@ -37,20 +37,27 @@ var (
 // AI API Call with Prompt Caching
 // ============================================================================
 
-// callAIWithCaching calls AI API with prompt caching enabled for system prompt
-func callAIWithCaching(mcpClient mcp.AIClient, systemPrompt, userPrompt string) (string, error) {
+// callAIWithCaching calls AI API with prompt caching enabled for system prompt.
+// runID is optional (e.g. backtest run_id); when set, token usage is recorded per-run for GET /api/ai-usage?run_id=
+func callAIWithCaching(mcpClient mcp.AIClient, systemPrompt, userPrompt, runID string) (string, error) {
 	// Try to use the advanced Request API with caching
 	// If the client doesn't support it, fall back to simple CallWithMessages
-	
+
 	// Build request with caching enabled for system prompt
 	systemMsg := mcp.NewSystemMessageWithCache(systemPrompt)
 	userMsg := mcp.NewUserMessage(userPrompt)
-	
-	req := mcp.NewRequestBuilder().
+
+	req, buildErr := mcp.NewRequestBuilder().
 		AddMessage(systemMsg).
 		AddMessage(userMsg).
+		WithStream(true). // 流式输出，避免思维链等长输出受单次响应长度限制
 		Build()
-	
+	if buildErr != nil {
+		logger.Infof("⚠️  Request build failed, falling back to simple API: %v", buildErr)
+		return mcpClient.CallWithMessages(systemPrompt, userPrompt)
+	}
+	req.RunID = runID
+
 	// Try to call with Request API (supports caching)
 	result, err := mcpClient.CallWithRequest(req)
 	if err != nil {
@@ -68,18 +75,19 @@ func callAIWithCaching(mcpClient mcp.AIClient, systemPrompt, userPrompt string) 
 
 // PositionInfo position information
 type PositionInfo struct {
-	Symbol           string  `json:"symbol"`
-	Side             string  `json:"side"` // "long" or "short"
-	EntryPrice       float64 `json:"entry_price"`
-	MarkPrice        float64 `json:"mark_price"`
-	Quantity         float64 `json:"quantity"`
-	Leverage         int     `json:"leverage"`
-	UnrealizedPnL    float64 `json:"unrealized_pnl"`
-	UnrealizedPnLPct float64 `json:"unrealized_pnl_pct"`
-	PeakPnLPct       float64 `json:"peak_pnl_pct"` // Historical peak profit percentage
-	LiquidationPrice float64 `json:"liquidation_price"`
-	MarginUsed       float64 `json:"margin_used"`
-	UpdateTime       int64   `json:"update_time"` // Position update timestamp (milliseconds)
+	Symbol             string    `json:"symbol"`
+	Side               string    `json:"side"` // "long" or "short"
+	EntryPrice         float64   `json:"entry_price"`
+	MarkPrice          float64   `json:"mark_price"`
+	Quantity           float64   `json:"quantity"`
+	Leverage           int       `json:"leverage"`
+	UnrealizedPnL      float64   `json:"unrealized_pnl"`
+	UnrealizedPnLPct   float64   `json:"unrealized_pnl_pct"`
+	PeakPnLPct         float64   `json:"peak_pnl_pct"` // Historical peak profit percentage
+	LiquidationPrice   float64   `json:"liquidation_price"`
+	MarginUsed         float64   `json:"margin_used"`
+	UpdateTime         int64     `json:"update_time"` // Position update timestamp (milliseconds)
+	ScaledLevelsTaken  []float64 `json:"scaled_levels_taken,omitempty"` // Profit percents already taken (for layered TP)
 }
 
 // AccountInfo account information
@@ -133,18 +141,27 @@ type RecentOrder struct {
 	HoldDuration string  `json:"hold_duration"` // Hold duration, e.g. "2h30m"
 }
 
+// StrategyTriggeredClose 本周期内由策略（动态止损/止盈）触发的平仓，供 AI 提示与决策记录
+type StrategyTriggeredClose struct {
+	Symbol string  `json:"symbol"`
+	Side   string  `json:"side"`
+	Reason string  `json:"reason"` // e.g. "initial_stop", "trailing_stop", "fixed_tp"
+	Price  float64 `json:"price"`
+}
+
 // Context trading context (complete information passed to AI)
 type Context struct {
-	CurrentTime     string                             `json:"current_time"`
-	RuntimeMinutes  int                                `json:"runtime_minutes"`
-	CallCount       int                                `json:"call_count"`
-	Account         AccountInfo                        `json:"account"`
-	Positions       []PositionInfo                     `json:"positions"`
-	CandidateCoins  []CandidateCoin                    `json:"candidate_coins"`
-	PromptVariant   string                             `json:"prompt_variant,omitempty"`
-	TradingStats    *TradingStats                      `json:"trading_stats,omitempty"`
-	RecentOrders    []RecentOrder                      `json:"recent_orders,omitempty"`
-	MarketDataMap   map[string]*market.Data            `json:"-"`
+	CurrentTime             string                             `json:"current_time"`
+	RuntimeMinutes          int                                `json:"runtime_minutes"`
+	CallCount               int                                `json:"call_count"`
+	Account                 AccountInfo                        `json:"account"`
+	Positions               []PositionInfo                     `json:"positions"`
+	CandidateCoins          []CandidateCoin                    `json:"candidate_coins"`
+	PromptVariant           string                             `json:"prompt_variant,omitempty"`
+	StrategyTriggeredCloses []StrategyTriggeredClose            `json:"-"` // 本周期已由策略触发的平仓，写入 prompt 与决策记录
+	TradingStats            *TradingStats                      `json:"trading_stats,omitempty"`
+	RecentOrders            []RecentOrder                      `json:"recent_orders,omitempty"`
+	MarketDataMap           map[string]*market.Data            `json:"-"`
 	MultiTFMarket   map[string]map[string]*market.Data `json:"-"`
 	OITopDataMap    map[string]*OITopData              `json:"-"`
 	QuantDataMap    map[string]*QuantData              `json:"-"`
@@ -167,6 +184,9 @@ type Decision struct {
 	PositionSizeUSD float64 `json:"position_size_usd,omitempty"`
 	StopLoss        float64 `json:"stop_loss,omitempty"`
 	TakeProfit      float64 `json:"take_profit,omitempty"`
+
+	// Close position: when > 0, close this quantity (partial close); 0 = close all
+	CloseQuantity float64 `json:"close_quantity,omitempty"`
 
 	// Grid trading parameters
 	Price      float64 `json:"price,omitempty"`       // Limit order price (for grid)
@@ -278,11 +298,12 @@ func (e *StrategyEngine) GetConfig() *store.StrategyConfig {
 func GetFullDecision(ctx *Context, mcpClient mcp.AIClient) (*FullDecision, error) {
 	defaultConfig := store.GetDefaultStrategyConfig("en")
 	engine := NewStrategyEngine(&defaultConfig)
-	return GetFullDecisionWithStrategy(ctx, mcpClient, engine, "")
+	return GetFullDecisionWithStrategy(ctx, mcpClient, engine, "", "")
 }
 
-// GetFullDecisionWithStrategy uses StrategyEngine to get AI decision (unified prompt generation)
-func GetFullDecisionWithStrategy(ctx *Context, mcpClient mcp.AIClient, engine *StrategyEngine, variant string) (*FullDecision, error) {
+// GetFullDecisionWithStrategy uses StrategyEngine to get AI decision (unified prompt generation).
+// runID is optional (e.g. backtest run_id); when set, token usage is stored per-run for GET /api/ai-usage?run_id=
+func GetFullDecisionWithStrategy(ctx *Context, mcpClient mcp.AIClient, engine *StrategyEngine, variant, runID string) (*FullDecision, error) {
 	if ctx == nil {
 		return nil, fmt.Errorf("context is nil")
 	}
@@ -323,7 +344,7 @@ func GetFullDecisionWithStrategy(ctx *Context, mcpClient mcp.AIClient, engine *S
 
 	// 4. Call AI API with prompt caching enabled
 	aiCallStart := time.Now()
-	aiResponse, err := callAIWithCaching(mcpClient, systemPrompt, userPrompt)
+	aiResponse, err := callAIWithCaching(mcpClient, systemPrompt, userPrompt, runID)
 	aiCallDuration := time.Since(aiCallStart)
 	if err != nil {
 		return nil, fmt.Errorf("AI API call failed: %w", err)
@@ -397,17 +418,31 @@ func fetchMarketDataWithStrategy(ctx *Context, engine *StrategyEngine) error {
 		ctx.MarketDataMap[pos.Symbol] = data
 	}
 
-	// 2. Fetch data for all candidate coins
+	// 2. Fetch data for candidate coins (cap count to control prompt size / token usage)
+	// 回测只对 r.cfg.Symbols 拉行情（通常 3～5 个），实盘/模拟候选列表可能很多，故此处限制写入 prompt 的候选数，减轻 token 差距
 	positionSymbols := make(map[string]bool)
 	for _, pos := range ctx.Positions {
 		positionSymbols[pos.Symbol] = true
 	}
 
 	const minOIThresholdMillions = 15.0 // 15M USD minimum open interest value
+	maxCandidateCoinsForPrompt := config.Indicators.Klines.MaxCoinsInPrompt
+	if maxCandidateCoinsForPrompt <= 0 {
+		maxCandidateCoinsForPrompt = 8 // default
+	}
 
+	candidateCoinsAdded := 0
 	for _, coin := range ctx.CandidateCoins {
 		if _, exists := ctx.MarketDataMap[coin.Symbol]; exists {
 			continue
+		}
+		if positionSymbols[coin.Symbol] {
+			continue
+		}
+		if candidateCoinsAdded >= maxCandidateCoinsForPrompt {
+			logger.Infof("📊 Capping candidate coins in prompt at %d (total candidates: %d) to keep token usage close to backtest",
+				maxCandidateCoinsForPrompt, len(ctx.CandidateCoins))
+			break
 		}
 
 		data, err := market.GetWithTimeframes(coin.Symbol, timeframes, primaryTimeframe, klineCount)
@@ -417,9 +452,8 @@ func fetchMarketDataWithStrategy(ctx *Context, engine *StrategyEngine) error {
 		}
 
 		// Liquidity filter (skip for xyz dex assets - they don't have OI data from Binance)
-		isExistingPosition := positionSymbols[coin.Symbol]
 		isXyzAsset := market.IsXyzDexAsset(coin.Symbol)
-		if !isExistingPosition && !isXyzAsset && data.OpenInterest != nil && data.CurrentPrice > 0 {
+		if !isXyzAsset && data.OpenInterest != nil && data.CurrentPrice > 0 {
 			oiValue := data.OpenInterest.Latest * data.CurrentPrice
 			oiValueInMillions := oiValue / 1_000_000
 			if oiValueInMillions < minOIThresholdMillions {
@@ -430,9 +464,11 @@ func fetchMarketDataWithStrategy(ctx *Context, engine *StrategyEngine) error {
 		}
 
 		ctx.MarketDataMap[coin.Symbol] = data
+		candidateCoinsAdded++
 	}
 
-	logger.Infof("📊 Successfully fetched multi-timeframe market data for %d coins", len(ctx.MarketDataMap))
+	logger.Infof("📊 Successfully fetched multi-timeframe market data for %d coins (positions + up to %d candidates)",
+		len(ctx.MarketDataMap), maxCandidateCoinsForPrompt)
 	return nil
 }
 
@@ -993,6 +1029,7 @@ func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string
 	sb.WriteString("# Hard Constraints (Risk Control)\n\n")
 	sb.WriteString("## CODE ENFORCED (Backend validation, cannot be bypassed):\n")
 	sb.WriteString(fmt.Sprintf("- Max Positions: %d coins simultaneously\n", riskControl.MaxPositions))
+	sb.WriteString("- **When current position count already equals Max Positions, do NOT output open_long or open_short for any new symbol; only hold, close_long, close_short for existing positions are allowed.**\n")
 	sb.WriteString(fmt.Sprintf("- Position Value Limit (Altcoins): max %.0f USDT (= equity %.0f × %.1fx)\n",
 		accountEquity*altcoinPosValueRatio, accountEquity, altcoinPosValueRatio))
 	sb.WriteString(fmt.Sprintf("- Position Value Limit (BTC/ETH): max %.0f USDT (= equity %.0f × %.1fx)\n",
@@ -1049,19 +1086,15 @@ func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string
 		sb.WriteString("# 📋 Decision Process\n\n")
 		sb.WriteString("1. Check positions → Should we take profit/stop-loss\n")
 		sb.WriteString("2. Scan candidate coins + multi-timeframe → Are there strong signals\n")
-		sb.WriteString("3. Write chain of thought first, then output structured JSON\n\n")
+		sb.WriteString("3. Output structured JSON first, then write chain of thought (never omit the JSON)\n\n")
 	}
 
 	// 7. Output format
 	sb.WriteString("# Output Format (Strictly Follow)\n\n")
 	sb.WriteString("**Must use XML tags <reasoning> and <decision> to separate chain of thought and decision JSON, avoiding parsing errors**\n\n")
 	sb.WriteString("## Format Requirements\n\n")
-	sb.WriteString("<reasoning>\n")
-	sb.WriteString("Your chain of thought analysis...\n")
-	sb.WriteString("- Briefly analyze your thinking process \n")
-	sb.WriteString("</reasoning>\n\n")
 	sb.WriteString("<decision>\n")
-	sb.WriteString("Step 2: JSON decision array\n\n")
+	sb.WriteString("Step 1: JSON decision array (MUST output this first; if unsure, output a single wait decision)\n\n")
 	sb.WriteString("```json\n[\n")
 	// Use the actual configured position value ratio for BTC/ETH in the example
 	examplePositionSize := accountEquity * btcEthPosValueRatio
@@ -1070,6 +1103,9 @@ func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string
 	sb.WriteString("  {\"symbol\": \"ETHUSDT\", \"action\": \"close_long\"}\n")
 	sb.WriteString("]\n```\n")
 	sb.WriteString("</decision>\n\n")
+	sb.WriteString("<reasoning>\n")
+	sb.WriteString("Step 2: Your chain of thought analysis (keep concise; do not include JSON here)\n")
+	sb.WriteString("</reasoning>\n\n")
 	sb.WriteString("## Field Description\n\n")
 	sb.WriteString("- `action`: open_long | open_short | close_long | close_short | hold | wait\n")
 	sb.WriteString(fmt.Sprintf("- `confidence`: 0-100 (opening recommended ≥ %d)\n", riskControl.MinConfidence))
@@ -1183,6 +1219,47 @@ func (e *StrategyEngine) BuildUserPrompt(ctx *Context) string {
 		ctx.Account.MarginUsedPct,
 		ctx.Account.PositionCount))
 
+	maxPos := 3
+	if e.config.RiskControl.MaxPositions > 0 {
+		maxPos = e.config.RiskControl.MaxPositions
+	}
+	if ctx.Account.PositionCount >= maxPos {
+		if e.GetLanguage() == LangChinese {
+			sb.WriteString(fmt.Sprintf("**约束：当前持仓 %d / 最大 %d（已达上限）。本周期不得对新标的输出 open_long 或 open_short，仅可对现有持仓输出 hold、close_long、close_short。**\n\n", ctx.Account.PositionCount, maxPos))
+		} else {
+			sb.WriteString(fmt.Sprintf("**Constraint: Current positions %d / Max %d (at limit). This period do NOT output open_long or open_short for new symbols; only hold, close_long, or close_short for existing positions.**\n\n", ctx.Account.PositionCount, maxPos))
+		}
+	}
+
+	// AI 仅开仓模式：对已有持仓一律输出 hold，平仓由策略动态 SL/TP 执行
+	if e.config.RiskControl.AIOnlyEntry {
+		if e.GetLanguage() == LangChinese {
+			sb.WriteString("**当前为「AI 仅开仓」模式：你只负责预测市场、决定开仓方向与开仓时的止损/止盈参数；持仓的平仓完全由策略（动态止损、追踪止损、分层止盈）执行。对已有持仓请一律输出 hold，不要输出 close_long 或 close_short。**\n\n")
+		} else {
+			sb.WriteString("**AI-only-entry mode: You only predict market and decide entry direction/params; strategy handles all exits (dynamic SL/TP, trailing, scaled TP). For existing positions always output hold, do NOT output close_long or close_short.**\n\n")
+		}
+	}
+
+	// 本周期已由策略触发的平仓（动态止损/止盈），供 AI 思维链与后续决策参考
+	if len(ctx.StrategyTriggeredCloses) > 0 {
+		if e.GetLanguage() == LangChinese {
+			sb.WriteString("## 本周期已由策略触发的平仓（动态止损/止盈）\n")
+			for _, c := range ctx.StrategyTriggeredCloses {
+				sb.WriteString(fmt.Sprintf("- %s %s 已平仓 @ %.4f（原因: %s）\n", c.Symbol, c.Side, c.Price, c.Reason))
+			}
+		} else {
+			sb.WriteString("## Strategy-triggered closes this period (dynamic SL/TP)\n")
+			for _, c := range ctx.StrategyTriggeredCloses {
+				sb.WriteString(fmt.Sprintf("- %s %s closed @ %.4f (reason: %s)\n", c.Symbol, c.Side, c.Price, c.Reason))
+			}
+		}
+		sb.WriteString("\n")
+	}
+
+	// 策略动态止损/止盈配置：供 reasoning 中明确写出初始止损、止盈、ATR倍数/周期，并说明追踪止损与分层止盈由策略执行
+	sb.WriteString(e.formatStrategyDynamicSLTP())
+	sb.WriteString("\n")
+
 	// Recently completed orders (placed before positions to ensure visibility)
 	if len(ctx.RecentOrders) > 0 {
 		sb.WriteString("## Recent Completed Trades\n")
@@ -1272,6 +1349,9 @@ func (e *StrategyEngine) BuildUserPrompt(ctx *Context) string {
 	}
 
 	// Candidate coins (exclude coins already in positions to avoid duplicate data)
+	// 输入 token 差异说明：回测时 MarketDataMap 仅包含 r.cfg.Symbols（如 3～5 个），故只有这些币种会写入 prompt；
+	// 实盘/模拟时 MarketDataMap = 持仓 + 最多 maxCandidateCoinsForPrompt 个候选，写入的币种更多，且还有 RecentOrders、TradingStats，
+	// 所以即使「扫描到的候选数量」相同，实盘/模拟的 input token 仍会明显多于回测。
 	positionSymbols := make(map[string]bool)
 	for _, pos := range ctx.Positions {
 		// Normalize symbol to handle both "ETH" and "ETHUSDT" formats
@@ -1374,6 +1454,124 @@ func (e *StrategyEngine) formatPositionInfo(index int, pos PositionInfo, ctx *Co
 	return sb.String()
 }
 
+// formatStrategyDynamicSLTP returns a short summary of strategy dynamic SL/TP for the AI prompt,
+// so reasoning can explicitly mention 初始止损、止盈、ATR倍数/周期 and that 追踪止损/分层止盈由策略执行.
+func (e *StrategyEngine) formatStrategyDynamicSLTP() string {
+	rc := e.config.RiskControl
+	sl := rc.DynamicStopLoss
+	tp := rc.DynamicTakeProfit
+	if (sl == nil || !sl.Enabled) && (tp == nil || !tp.Enabled) {
+		return ""
+	}
+	zh := e.GetLanguage() == LangChinese
+	var sb strings.Builder
+	if zh {
+		sb.WriteString("## 策略动态止损/止盈配置（无固定初始止损；请在 reasoning 中写出止损价、止盈价、ATR倍数与周期，并说明追踪止损与分层止盈由策略执行）\n")
+	} else {
+		sb.WriteString("## Strategy dynamic SL/TP config (no fixed initial stop; in reasoning state stop price, take profit, ATR multiplier & period; state that trailing stop and scaled take profit are executed by strategy)\n")
+	}
+	if sl != nil && sl.Enabled {
+		if zh {
+			sb.WriteString(fmt.Sprintf("- 最小持仓: %.0f 分钟（未满不触发动态止损）", sl.MinHoldMinutes))
+		} else {
+			sb.WriteString(fmt.Sprintf("- Min hold: %.0f min (no dynamic SL before this)", sl.MinHoldMinutes))
+		}
+		if sl.TrailingEnabled != nil && *sl.TrailingEnabled && len(sl.TrailingLevels) > 0 {
+			if zh {
+				sb.WriteString(" | 追踪止损(分层): 开")
+			} else {
+				sb.WriteString(" | Trailing stop (tiered): on")
+			}
+		}
+		if sl.ATREnabled != nil && *sl.ATREnabled {
+			min, max := 0.0, 0.0
+			if sl.ATRMultiplierMin != nil {
+				min = *sl.ATRMultiplierMin
+			}
+			if sl.ATRMultiplierMax != nil {
+				max = *sl.ATRMultiplierMax
+			}
+			if zh {
+				sb.WriteString(fmt.Sprintf(" | ATR止损倍数: %.1f–%.1f", min, max))
+			} else {
+				sb.WriteString(fmt.Sprintf(" | ATR stop multiplier: %.1f–%.1f", min, max))
+			}
+		}
+		if sl.SupportResistanceEnabled != nil && *sl.SupportResistanceEnabled {
+			if zh {
+				sb.WriteString(" | 支撑阻力止损: 开")
+			} else {
+				sb.WriteString(" | Support/Resistance stop: on")
+			}
+			if sl.SupportResistanceBuffer != nil && *sl.SupportResistanceBuffer > 0 {
+				if zh {
+					sb.WriteString(fmt.Sprintf("(缓冲%.2f%%)", *sl.SupportResistanceBuffer))
+				} else {
+					sb.WriteString(fmt.Sprintf("(buffer %.2f%%)", *sl.SupportResistanceBuffer))
+				}
+			}
+		}
+		sb.WriteString("\n")
+	}
+	if tp != nil && tp.Enabled {
+		if zh {
+			sb.WriteString(fmt.Sprintf("- 止盈: 最小持仓 %.0f 分钟", tp.MinHoldMinutes))
+		} else {
+			sb.WriteString(fmt.Sprintf("- Take profit: min hold %.0f min", tp.MinHoldMinutes))
+		}
+		if tp.ScaledEnabled != nil && *tp.ScaledEnabled && len(tp.ScaledLevels) > 0 {
+			if zh {
+				sb.WriteString(" | 分层止盈: ")
+			} else {
+				sb.WriteString(" | Scaled TP: ")
+			}
+			for i, lv := range tp.ScaledLevels {
+				if i > 0 {
+					sb.WriteString(", ")
+				}
+				sb.WriteString(fmt.Sprintf("%.1f%%平%.0f%%", lv.ProfitPercent, lv.ClosePercent))
+			}
+		}
+		if tp.ATREnabled != nil && *tp.ATREnabled {
+			min, max := 0.0, 0.0
+			if tp.ATRMultiplierMin != nil {
+				min = *tp.ATRMultiplierMin
+			}
+			if tp.ATRMultiplierMax != nil {
+				max = *tp.ATRMultiplierMax
+			}
+			if zh {
+				sb.WriteString(fmt.Sprintf(" | ATR止盈倍数: %.1f–%.1f", min, max))
+			} else {
+				sb.WriteString(fmt.Sprintf(" | ATR TP multiplier: %.1f–%.1f", min, max))
+			}
+		}
+		if tp.ResistanceEnabled != nil && *tp.ResistanceEnabled {
+			if zh {
+				sb.WriteString(" | 阻力位止盈: 开")
+			} else {
+				sb.WriteString(" | Resistance take profit: on")
+			}
+			if tp.ResistanceBuffer != nil && *tp.ResistanceBuffer > 0 {
+				if zh {
+					sb.WriteString(fmt.Sprintf("(缓冲%.2f%%)", *tp.ResistanceBuffer))
+				} else {
+					sb.WriteString(fmt.Sprintf("(buffer %.2f%%)", *tp.ResistanceBuffer))
+				}
+			}
+		}
+		if tp.LockProfitPercent != nil && *tp.LockProfitPercent > 0 {
+			if zh {
+				sb.WriteString(fmt.Sprintf(" | 锁定利润: 达%.1f%%后移动止损到盈亏平衡", *tp.LockProfitPercent))
+			} else {
+				sb.WriteString(fmt.Sprintf(" | Lock profit: move stop to breakeven after %.1f%%", *tp.LockProfitPercent))
+			}
+		}
+		sb.WriteString("\n")
+	}
+	return sb.String()
+}
+
 func (e *StrategyEngine) formatCoinSourceTag(sources []string) string {
 	if len(sources) > 1 {
 		// 多信号源组合
@@ -1425,6 +1623,14 @@ func (e *StrategyEngine) formatMarketData(data *market.Data) string {
 
 	// 明确标注币种
 	sb.WriteString(fmt.Sprintf("=== %s Market Data ===\n\n", data.Symbol))
+	// 多周期涨跌提示，便于先定趋势再定多空（减少逆势与入场时机误判）
+	if data.PriceChange1h != 0 || data.PriceChange4h != 0 {
+		if e.GetLanguage() == LangChinese {
+			sb.WriteString(fmt.Sprintf("多周期涨跌: 1h %+.2f%% 4h %+.2f%%（负=偏空 正=偏多，供趋势参考）\n\n", data.PriceChange1h, data.PriceChange4h))
+		} else {
+			sb.WriteString(fmt.Sprintf("Multi-timeframe: 1h %+.2f%% 4h %+.2f%% (negative=bearish, positive=bullish, for trend reference)\n\n", data.PriceChange1h, data.PriceChange4h))
+		}
+	}
 	sb.WriteString(fmt.Sprintf("current_price = %.4f", data.CurrentPrice))
 
 	if indicators.EnableEMA {
@@ -1455,11 +1661,22 @@ func (e *StrategyEngine) formatMarketData(data *market.Data) string {
 	}
 
 	if len(data.TimeframeData) > 0 {
+		primaryTf := indicators.Klines.PrimaryTimeframe
+		if primaryTf == "" && len(indicators.Klines.SelectedTimeframes) > 0 {
+			primaryTf = indicators.Klines.SelectedTimeframes[0]
+		}
+		compactNonPrimary := indicators.CompactNonPrimaryTimeframe
 		timeframeOrder := []string{"1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d", "3d", "1w"}
 		for _, tf := range timeframeOrder {
 			if tfData, ok := data.TimeframeData[tf]; ok {
-				sb.WriteString(fmt.Sprintf("=== %s Timeframe (oldest → latest) ===\n\n", strings.ToUpper(tf)))
-				e.formatTimeframeSeriesData(&sb, tfData, indicators)
+				isPrimary := (tf == primaryTf)
+				if compactNonPrimary && !isPrimary {
+					sb.WriteString(fmt.Sprintf("=== %s (compact) ===\n", strings.ToUpper(tf)))
+					e.formatTimeframeSeriesDataCompact(&sb, tfData, indicators)
+				} else {
+					sb.WriteString(fmt.Sprintf("=== %s Timeframe (oldest → latest) ===\n\n", strings.ToUpper(tf)))
+					e.formatTimeframeSeriesData(&sb, tfData, indicators)
+				}
 			}
 		}
 	} else {
@@ -1527,6 +1744,30 @@ func (e *StrategyEngine) formatMarketData(data *market.Data) string {
 	}
 
 	return sb.String()
+}
+
+// formatTimeframeSeriesDataCompact writes a one-line summary for token saving (latest close, EMA20, EMA50, ATR14).
+func (e *StrategyEngine) formatTimeframeSeriesDataCompact(sb *strings.Builder, data *market.TimeframeSeriesData, indicators store.IndicatorConfig) {
+	closeStr := "n/a"
+	if len(data.Klines) > 0 {
+		closeStr = fmt.Sprintf("%.4f", data.Klines[len(data.Klines)-1].Close)
+	} else if len(data.MidPrices) > 0 {
+		closeStr = fmt.Sprintf("%.4f", data.MidPrices[len(data.MidPrices)-1])
+	}
+	ema20Str, ema50Str := "", ""
+	if indicators.EnableEMA {
+		if len(data.EMA20Values) > 0 {
+			ema20Str = fmt.Sprintf(" EMA20=%.3f", data.EMA20Values[len(data.EMA20Values)-1])
+		}
+		if len(data.EMA50Values) > 0 {
+			ema50Str = fmt.Sprintf(" EMA50=%.3f", data.EMA50Values[len(data.EMA50Values)-1])
+		}
+	}
+	atrStr := ""
+	if indicators.EnableATR && data.ATR14 > 0 {
+		atrStr = fmt.Sprintf(" ATR14=%.4f", data.ATR14)
+	}
+	sb.WriteString(fmt.Sprintf("Close=%s%s%s%s\n\n", closeStr, ema20Str, ema50Str, atrStr))
 }
 
 func (e *StrategyEngine) formatTimeframeSeriesData(sb *strings.Builder, data *market.TimeframeSeriesData, indicators store.IndicatorConfig) {

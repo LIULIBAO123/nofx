@@ -729,6 +729,10 @@ func getMarketRegimeGuideZH() string {
 - 建议使用 1.5-1.8 倍 ATR
 - 原因：低波动时收紧止损，提高资金效率
 
+**震荡市（4h 横盘、区间内波动）**：
+- 建议使用 **2.0-2.5 倍 ATR** 止损
+- 原因：拿住持仓，避免被区间内正常波动洗出；系统会连续确认再执行，单根 K 线触及不立即平仓
+
 **币种差异**：
 - BTC/ETH：建议使用较大倍数（2.0-2.5倍），价格波动相对稳定
 - 主流山寨币：建议使用中等倍数（1.8-2.2倍）
@@ -746,7 +750,12 @@ func getMarketRegimeGuideZH() string {
 
 **弱趋势/震荡市场（方向不明确）**：
 - 建议使用 2.5-3.0 倍 ATR
-- 原因：快速止盈，避免利润回吐
+- 原因：**盈利后平仓**，不贪大趋势；达到合理利润即落袋，由分层止盈与追踪止损执行
+
+**震荡市操作（拿住仓 + 盈利后平仓）**：
+- 可在区间下沿附近做多、上沿附近做空；不在区间中间或方向不明时追单
+- 止损：2.0-2.5× ATR，拿住持仓，扛住区间内波动
+- 止盈：2.5-3.0× ATR 或区间对侧，盈利即平仓；系统分层止盈与 LockProfit 会自动锁利
 
 **币种差异**：
 - BTC/ETH：可以使用较大倍数（3.0-4.0倍），趋势持续性好
@@ -784,13 +793,23 @@ func getMarketRegimeGuideZH() string {
 - 止盈价: 0.50 + 2.5×0.008 = 0.52 USDT
 - 理由: 低波动收紧止损，弱趋势快速止盈避免反转
 
+### 系统执行方式（无需 AI 额外操作）
+
+- **连续确认**：止损条件需**连续 N 个检查周期**（策略可配置，如 2 周期）都满足后才会执行平仓，单根 K 线触及止损价不会立即平仓，可减少假跌破触发。
+- **高波动宽容**：当「当前 ATR > 长期 ATR×阈值」时，系统会自动使用更宽的 ATR 止损倍数，并多要求 1 个确认周期再执行，高波动时更宽容、减少噪音触发。
+- 你只需在开仓时设定合理的止损/止盈价与倍数，无需因「价格一度触及止损」就建议平仓；是否执行由策略按上述规则自动处理。
+
 ### 重要提醒
 
 1. **必须在允许范围内选择**: 止损1.5-2.5倍，止盈2.5-4.0倍，不能超出范围
 2. **综合考虑多个因素**: 波动率、币种特性、趋势强度、多周期共振
 3. **动态调整**: 不同市场状态使用不同倍数，不要固定使用某个值
 4. **风险优先**: 不确定时选择较小倍数，控制风险
-5. **记录理由**: 在reasoning中说明为什么选择该倍数
+5. **记录理由**: 在reasoning中必须明确写出：（1）**止损价**与**止盈价**及对应**ATR倍数**（如：止损1.8×ATR=某价，止盈3×ATR=某价）；（2）**ATR周期**（如3m/15m）；（3）**盈亏比**（开仓时必写：如「盈亏比 6.8:1（止盈幅度÷止损幅度）」），便于与开仓卡片上的盈亏比对照；（4）若策略启用**追踪止损（分层）**，说明「追踪止损由策略执行」；（5）若策略启用**分层止盈**，说明「分层止盈由策略执行」及各档位（如3%平33%、5%平50%）。系统无固定初始止损，仅按动态/ATR/追踪止损执行。
+6. **策略合理性**: 未设置最小持仓时间易导致「开仓即平仓」，建议配置 MinHoldMinutes（如 5 分钟）后再允许动态止损/止盈触发
+7. **对已有持仓的平仓建议**: 实际止盈与止损由**策略动态执行**（最小持仓、追踪止损、ATR、分层止盈）。不要仅因「亏损接近某固定%」或「峰值回撤某%」就建议平仓；若建议 close_long/close_short，须基于**强烈看反转或结构破坏**等理由，并在 reasoning 中说明是否已过最小持仓、是否与策略动态规则一致。
+8. **结构破坏即减仓**: 一旦 1h 收盘价跌破 EMA20（多单）或升破 EMA20（空单），可视为结构破坏，即可建议平仓，不必等 4h 完全转势，以减小单笔亏损。
+9. **明确反转可反手**: 当多周期与 OI 已明确转空（当前持多）或转多（当前持空）时，可在**同一计划**中对同一标的输出两条决策：先 close_long 再 open_short（或先 close_short 再 open_long）。系统会先执行平仓再执行开仓；反手新仓需重新设定止损、止盈与仓位，并在 reasoning 中说明反手理由。
 
 `
 }
@@ -833,6 +852,10 @@ The system supports ATR-based dynamic stop-loss and take-profit. You need to cho
 - Recommend using 1.5-1.8× ATR
 - Reason: Tighten stop-loss in low volatility, improve capital efficiency
 
+**Ranging Market (4h sideways, price oscillating in range)**:
+- Recommend using **2.0-2.5× ATR** for stop-loss
+- Reason: Hold the position through chop; avoid being stopped out by normal range noise; system uses confirm cycles so a single bar touch does not close immediately
+
 **Coin Differences**:
 - BTC/ETH: Recommend larger multipliers (2.0-2.5x), relatively stable price movement
 - Major altcoins: Recommend medium multipliers (1.8-2.2x)
@@ -850,7 +873,12 @@ The system supports ATR-based dynamic stop-loss and take-profit. You need to cho
 
 **Weak Trend/Choppy Market (Direction unclear)**:
 - Recommend using 2.5-3.0× ATR
-- Reason: Quick take-profit, avoid profit giveback
+- Reason: **Exit in profit**; do not chase big trend; lock in reasonable profit; scaled TP and trailing stop will execute automatically
+
+**Ranging Market (hold through chop, exit in profit)**:
+- Open near range low (long) or range high (short); do not chase in the middle of the range
+- Stop-loss: 2.0-2.5× ATR to hold through range oscillation
+- Take-profit: 2.5-3.0× ATR or opposite side of range; exit when profit is reached; scaled TP and LockProfit will lock in gains
 
 **Coin Differences**:
 - BTC/ETH: Can use larger multipliers (3.0-4.0x), good trend persistence
@@ -888,13 +916,23 @@ The system supports ATR-based dynamic stop-loss and take-profit. You need to cho
 - Take-Profit Price: 0.50 + 2.5×0.008 = 0.52 USDT
 - Reason: Low volatility tightens stop-loss, weak trend quick profit to avoid reversal
 
+### System Execution (no extra AI action)
+
+- **Confirm cycles**: Stop-loss is executed only after the condition is met for **N consecutive check cycles** (configurable, e.g. 2). A single bar touching the stop level does not trigger immediate close, reducing false breakouts.
+- **High-vol tolerance**: When current ATR > long-term ATR×threshold, the system automatically uses a wider ATR stop multiplier and requires one extra confirm cycle before executing, so execution is more tolerant in high volatility.
+- You only need to set reasonable stop/take-profit levels and multipliers on entry; do not recommend closing solely because price briefly touched the stop—execution is handled by the strategy with the above rules.
+
 ### Important Reminders
 
 1. **Must choose within allowed ranges**: Stop-loss 1.5-2.5x, take-profit 2.5-4.0x, cannot exceed ranges
 2. **Consider multiple factors**: Volatility, coin characteristics, trend strength, multi-timeframe alignment
 3. **Dynamic adjustment**: Use different multipliers for different market states, don't fix on one value
 4. **Risk first**: When uncertain, choose smaller multipliers to control risk
-5. **Document reasoning**: Explain in reasoning why you chose that multiplier
+5. **Document reasoning**: In reasoning you must state: (1) **stop price** and **take profit price** and **ATR multipliers** (e.g. stop 1.8×ATR=price, TP 3×ATR=price); (2) **ATR period** (e.g. 3m/15m); (3) **risk/reward ratio** when opening (e.g. "R/R 6.8:1 (reward÷risk)") so it can be checked against the decision card; (4) if strategy has **trailing stop (tiered)**, state "trailing stop executed by strategy"; (5) if strategy has **scaled take profit**, state "scaled TP executed by strategy" and levels (e.g. 3% close 33%, 5% close 50%). System has no fixed initial stop; only dynamic/ATR/trailing stop is used.
+6. **Strategy sanity**: No MinHoldMinutes can cause "open then immediately close"; recommend MinHoldMinutes (e.g. 5) before dynamic SL/TP trigger
+7. **Closing existing positions**: Actual take-profit and stop-loss are **executed by the strategy** (min hold, trailing stop, ATR, scaled TP). Do not recommend close solely because "loss near some fixed %" or "drawdown from peak some %"; if you recommend close_long/close_short, base it on **strong reversal or structure break** and state in reasoning whether min hold has passed and that it aligns with strategy dynamic rules.
+8. **Exit on structure break**: Once 1h close is below EMA20 (for longs) or above EMA20 (for shorts), treat as structure break and you may recommend closing the position without waiting for 4h to fully reverse, to reduce loss size.
+9. **Flip on clear reversal**: When multi-timeframe and OI clearly show a reversal (e.g. bearish while long, or bullish while short), you may in the **same plan** output two decisions for the same symbol: close_long then open_short, or close_short then open_long. The system executes close first then open; set new stop-loss, take-profit and size for the new position and state the flip reason in reasoning.
 
 `
 }
@@ -917,7 +955,7 @@ func getMultiTimeframeGuideZH() string {
 - **强烈看多**: 4h上升 + 1h上升 + 15m上升（三周期共振）
 - **看多**: 4h上升 + 1h上升 + 15m震荡/回调（等待15m转多）
 - **谨慎看多**: 4h上升 + 1h震荡 + 15m上升（1h可能转多）
-- **观望**: 4h震荡 或 各周期方向不一致
+- **观望**: 4h震荡 或 各周期方向不一致，且**无明确区间支撑/阻力**时观望；若有清晰区间，可在区间下沿附近做多、上沿附近做空（见下「震荡市拿住仓」）。
 - **谨慎看空**: 4h下降 + 1h震荡 + 15m下降（1h可能转空）
 - **看空**: 4h下降 + 1h下降 + 15m震荡/反弹（等待15m转空）
 - **强烈看空**: 4h下降 + 1h下降 + 15m下降（三周期共振）
@@ -946,7 +984,7 @@ func getMultiTimeframeGuideEN() string {
 - **Strong Bullish**: 4h up + 1h up + 15m up (triple timeframe alignment)
 - **Bullish**: 4h up + 1h up + 15m sideways/pullback (wait for 15m to turn bullish)
 - **Cautiously Bullish**: 4h up + 1h sideways + 15m up (1h may turn bullish)
-- **Wait**: 4h sideways OR timeframes not aligned
+- **Wait**: 4h sideways OR timeframes not aligned, and **no clear range support/resistance**—then wait; if there is a clear range, you may open near range low (long) or range high (short) (see "Ranging: hold through chop" below).
 - **Cautiously Bearish**: 4h down + 1h sideways + 15m down (1h may turn bearish)
 - **Bearish**: 4h down + 1h down + 15m sideways/bounce (wait for 15m to turn bearish)
 - **Strong Bearish**: 4h down + 1h down + 15m down (triple timeframe alignment)

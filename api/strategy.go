@@ -708,6 +708,9 @@ func (s *Server) runRealAITest(userID, modelID, systemPrompt, userPrompt string)
 		aiClient.SetAPIKey(apiKey, model.CustomAPIURL, model.CustomModelName)
 	}
 
+	// Record token usage under "strategy_studio" so GET /api/ai-usage?context=strategy_studio returns this only
+	aiClient.SetUsageScope("strategy_studio")
+
 	// Call AI API
 	response, err := aiClient.CallWithMessages(systemPrompt, userPrompt)
 	if err != nil {

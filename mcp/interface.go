@@ -9,6 +9,7 @@ import (
 type AIClient interface {
 	SetAPIKey(apiKey string, customURL string, customModel string)
 	SetTimeout(timeout time.Duration)
+	SetUsageScope(scope string) // When set (e.g. "strategy_studio"), token usage is stored per-scope
 	CallWithMessages(systemPrompt, userPrompt string) (string, error)
 	CallWithRequest(req *Request) (string, error) // Builder pattern API (supports advanced features)
 }
@@ -21,10 +22,11 @@ type clientHooks interface {
 	call(systemPrompt, userPrompt string) (string, error)
 
 	buildMCPRequestBody(systemPrompt, userPrompt string) map[string]any
+	buildRequestBodyFromRequest(req *Request) map[string]any
 	buildUrl() string
 	buildRequest(url string, jsonData []byte) (*http.Request, error)
 	setAuthHeader(reqHeaders http.Header)
 	marshalRequestBody(requestBody map[string]any) ([]byte, error)
-	parseMCPResponse(body []byte) (string, error)
+	parseMCPResponse(body []byte) (string, *TokenUsage, error)
 	isRetryableError(err error) bool
 }

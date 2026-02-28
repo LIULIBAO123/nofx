@@ -99,8 +99,15 @@ type TraderPosition struct {
 	Status             string  `gorm:"column:status;default:OPEN;index:idx_positions_status" json:"status"`
 	CloseReason        string  `gorm:"column:close_reason;default:''" json:"close_reason"`
 	Source             string  `gorm:"column:source;default:system" json:"source"`
-	CreatedAt          int64   `gorm:"column:created_at" json:"created_at"`   // Unix milliseconds UTC
-	UpdatedAt          int64   `gorm:"column:updated_at" json:"updated_at"`   // Unix milliseconds UTC
+	// Fixed params at open (for history UI, same as backtest trade params)
+	StopLoss      float64 `gorm:"column:stop_loss;default:0" json:"stop_loss,omitempty"`
+	TakeProfit    float64 `gorm:"column:take_profit;default:0" json:"take_profit,omitempty"`
+	ATRAtOpen     float64 `gorm:"column:atr_at_open;default:0" json:"atr_at_open,omitempty"`
+	ATRMultipleSL float64 `gorm:"column:atr_multiple_sl;default:0" json:"atr_multiple_sl,omitempty"`
+	ATRMultipleTP float64 `gorm:"column:atr_multiple_tp;default:0" json:"atr_multiple_tp,omitempty"`
+	ATRPeriod     int     `gorm:"column:atr_period;default:0" json:"atr_period,omitempty"`
+	CreatedAt     int64   `gorm:"column:created_at" json:"created_at"`   // Unix milliseconds UTC
+	UpdatedAt     int64   `gorm:"column:updated_at" json:"updated_at"`   // Unix milliseconds UTC
 }
 
 // TableName returns the table name
@@ -144,6 +151,18 @@ func (s *PositionStore) InitTables() error {
 
 			// Just ensure index exists
 			s.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_positions_exchange_pos_unique ON trader_positions(exchange_id, exchange_position_id) WHERE exchange_position_id != ''`)
+
+			// Add fixed-param columns if missing (for history UI, same as backtest)
+			for _, q := range []string{
+				`ALTER TABLE trader_positions ADD COLUMN IF NOT EXISTS stop_loss DOUBLE PRECISION DEFAULT 0`,
+				`ALTER TABLE trader_positions ADD COLUMN IF NOT EXISTS take_profit DOUBLE PRECISION DEFAULT 0`,
+				`ALTER TABLE trader_positions ADD COLUMN IF NOT EXISTS atr_at_open DOUBLE PRECISION DEFAULT 0`,
+				`ALTER TABLE trader_positions ADD COLUMN IF NOT EXISTS atr_multiple_sl DOUBLE PRECISION DEFAULT 0`,
+				`ALTER TABLE trader_positions ADD COLUMN IF NOT EXISTS atr_multiple_tp DOUBLE PRECISION DEFAULT 0`,
+				`ALTER TABLE trader_positions ADD COLUMN IF NOT EXISTS atr_period INTEGER DEFAULT 0`,
+			} {
+				s.db.Exec(q)
+			}
 			return nil
 		}
 	}
@@ -304,6 +323,46 @@ func (s *PositionStore) ClosePositionFully(id int64, exitPrice float64, exitOrde
 		"close_reason":   closeReason,
 		"updated_at":     time.Now().UTC().UnixMilli(),
 	}).Error
+}
+
+// UpdatePositionParams updates fixed params on a position (e.g. after close, to show in history).
+func (s *PositionStore) UpdatePositionParams(id int64, stopLoss, takeProfit, atrAtOpen, atrMultipleSL, atrMultipleTP float64, atrPeriod int) error {
+	upd := map[string]interface{}{
+		"updated_at": time.Now().UTC().UnixMilli(),
+	}
+	if stopLoss > 0 {
+		upd["stop_loss"] = stopLoss
+	}
+	if takeProfit > 0 {
+		upd["take_profit"] = takeProfit
+	}
+	if atrAtOpen > 0 {
+		upd["atr_at_open"] = atrAtOpen
+	}
+	if atrMultipleSL > 0 {
+		upd["atr_multiple_sl"] = atrMultipleSL
+	}
+	if atrMultipleTP > 0 {
+		upd["atr_multiple_tp"] = atrMultipleTP
+	}
+	if atrPeriod > 0 {
+		upd["atr_period"] = atrPeriod
+	}
+	return s.db.Model(&TraderPosition{}).Where("id = ?", id).Updates(upd).Error
+}
+
+// SetPendingCloseReason pre-sets close_reason on an OPEN position (before OrderSync processes the close).
+// This allows strategy-triggered stops (system:sl:xxx, system:tp:xxx) to be recorded correctly.
+func (s *PositionStore) SetPendingCloseReason(id int64, closeReason string) error {
+	return s.db.Model(&TraderPosition{}).Where("id = ? AND status = ?", id, "OPEN").
+		Update("close_reason", closeReason).Error
+}
+
+// SetPendingCloseReasonBySymbol pre-sets close_reason on an OPEN position by symbol and side.
+func (s *PositionStore) SetPendingCloseReasonBySymbol(traderID, symbol, side, closeReason string) error {
+	return s.db.Model(&TraderPosition{}).
+		Where("trader_id = ? AND symbol = ? AND side = ? AND status = ?", traderID, symbol, side, "OPEN").
+		Update("close_reason", closeReason).Error
 }
 
 // DeleteAllOpenPositions deletes all OPEN positions for a trader

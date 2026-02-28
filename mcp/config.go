@@ -35,20 +35,23 @@ type Config struct {
 	HTTPClient *http.Client
 }
 
-// DefaultConfig returns default configuration
+// DefaultConfig returns default configuration.
+// Timeout can be overridden with AI_TIMEOUT_SECONDS (default 300); use 600+ for Claude/reasoner to reduce 504s.
 func DefaultConfig() *Config {
+	timeoutSec := getEnvInt("AI_TIMEOUT_SECONDS", 300)
+	timeout := time.Duration(timeoutSec) * time.Second
 	return &Config{
 		// Default values
-		MaxTokens:      getEnvInt("AI_MAX_TOKENS", 2000),
-		Temperature:    MCPClientTemperature,
-		MaxRetries:     MaxRetryTimes,
-		RetryWaitBase:  2 * time.Second,
-		Timeout:        DefaultTimeout,
+		MaxTokens:       getEnvInt("AI_MAX_TOKENS", 2000),
+		Temperature:     MCPClientTemperature,
+		MaxRetries:      MaxRetryTimes,
+		RetryWaitBase:   2 * time.Second,
+		Timeout:         timeout,
 		RetryableErrors: retryableErrors,
 
 		// Default dependencies (use global logger)
 		Logger:     logger.NewMCPLogger(),
-		HTTPClient: &http.Client{Timeout: DefaultTimeout},
+		HTTPClient: &http.Client{Timeout: timeout},
 	}
 }
 

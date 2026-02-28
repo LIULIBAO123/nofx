@@ -10,8 +10,9 @@ import (
 	"nofx/backtest"
 	"nofx/config"
 	"nofx/crypto"
-	"nofx/logger"
-	"nofx/manager"
+		"nofx/logger"
+		"nofx/manager"
+		"nofx/mcp"
 	"nofx/market"
 	"nofx/provider/alpaca"
 	"nofx/provider/coinank/coinank_api"
@@ -171,6 +172,7 @@ func (s *Server) setupRoutes() {
 			// AI model configuration
 			protected.GET("/models", s.handleGetModelConfigs)
 			protected.PUT("/models", s.handleUpdateModelConfigs)
+			protected.GET("/ai-usage", s.handleGetAIUsage)
 
 			// Exchange configuration
 			protected.GET("/exchanges", s.handleGetExchangeConfigs)
@@ -224,6 +226,49 @@ func (s *Server) setupRoutes() {
 			s.registerBacktestRoutes(backtest)
 		}
 	}
+}
+
+// handleGetAIUsage returns latest AI token usage (including prompt cache stats) for frontend display.
+// Query run_id: when set (e.g. backtest run), returns that run's usage if available.
+// Query trader_id: when set (e.g. live/simulation trader), returns that trader's usage if available.
+// Query context: when set (e.g. strategy_studio), returns that scope's usage if available.
+// If none match or no specific usage found, returns latest global usage.
+func (s *Server) handleGetAIUsage(c *gin.Context) {
+	runID := strings.TrimSpace(c.Query("run_id"))
+	traderID := strings.TrimSpace(c.Query("trader_id"))
+	contextScope := strings.TrimSpace(c.Query("context"))
+
+	var usage *mcp.TokenUsage
+
+	// Priority: run_id > trader_id > context > global
+	if runID != "" {
+		usage = mcp.GetTokenUsageForRun(runID)
+	}
+	if usage == nil && traderID != "" {
+		usage = mcp.GetTokenUsageForTrader(traderID)
+	}
+	if usage == nil && contextScope != "" {
+		usage = mcp.GetTokenUsageForScope(contextScope)
+	}
+	if usage == nil {
+		usage = mcp.GetLastTokenUsage()
+	}
+
+	if usage == nil {
+		c.JSON(http.StatusOK, gin.H{"usage": nil})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"usage": gin.H{
+			"provider":                   usage.Provider,
+			"model":                      usage.Model,
+			"prompt_tokens":              usage.PromptTokens,
+			"completion_tokens":          usage.CompletionTokens,
+			"total_tokens":               usage.TotalTokens,
+			"cache_read_input_tokens":    usage.CacheReadInputTokens,
+			"cache_creation_input_tokens": usage.CacheCreationInputTokens,
+		},
+	})
 }
 
 // handleHealth Health check
@@ -385,22 +430,32 @@ func (s *Server) getTraderFromQuery(c *gin.Context) (*manager.TraderManager, str
 		logger.Infof("⚠️ Failed to load traders for user %s: %v", userID, err)
 	}
 
-	if traderID == "" {
-		// If no trader_id specified, return first trader for this user
-		ids := s.traderManager.GetTraderIDs()
-		if len(ids) == 0 {
-			return nil, "", fmt.Errorf("No available traders")
+	if traderID != "" {
+		// 校验 trader 属于当前用户（含实盘模拟）
+		record, err := s.store.Trader().GetByID(traderID)
+		if err != nil || record == nil || record.UserID != userID {
+			return nil, "", fmt.Errorf("trader not found")
 		}
-
-		// Get user's trader list, prioritize returning user's own traders
-		userTraders, err := s.store.Trader().List(userID)
-		if err == nil && len(userTraders) > 0 {
-			traderID = userTraders[0].ID
-		} else {
-			traderID = ids[0]
-		}
+		return s.traderManager, traderID, nil
 	}
 
+	// If no trader_id specified, return first trader for this user
+	ids := s.traderManager.GetTraderIDs()
+	if len(ids) == 0 {
+		// 可能只有实盘模拟，从 store 取第一个
+		userTraders, err := s.store.Trader().List(userID, false)
+		if err == nil && len(userTraders) > 0 {
+			return s.traderManager, userTraders[0].ID, nil
+		}
+		return nil, "", fmt.Errorf("No available traders")
+	}
+
+	userTraders, err := s.store.Trader().List(userID, false)
+	if err == nil && len(userTraders) > 0 {
+		traderID = userTraders[0].ID
+	} else {
+		traderID = ids[0]
+	}
 	return s.traderManager, traderID, nil
 }
 
@@ -414,6 +469,7 @@ type CreateTraderRequest struct {
 	ScanIntervalMinutes int     `json:"scan_interval_minutes"`
 	IsCrossMargin       *bool   `json:"is_cross_margin"`     // Pointer type, nil means use default value true
 	ShowInCompetition   *bool   `json:"show_in_competition"` // Pointer type, nil means use default value true
+	IsSimulation        *bool   `json:"is_simulation"`      // 实盘模拟：虚拟资金，不发出真实订单；为 true 时 initial_balance 为自定义虚拟初始资金
 	// The following fields are kept for backward compatibility, new version uses strategy config
 	BTCETHLeverage       int    `json:"btc_eth_leverage"`
 	AltcoinLeverage      int    `json:"altcoin_leverage"`
@@ -467,6 +523,7 @@ type SafeExchangeConfig struct {
 	AsterUser             string `json:"asterUser"`             // Aster username (not sensitive)
 	AsterSigner           string `json:"asterSigner"`           // Aster signer (not sensitive)
 	LighterWalletAddr     string `json:"lighterWalletAddr"`     // LIGHTER wallet address (not sensitive)
+	IsSimulation          bool   `json:"is_simulation"`         // true=仅用于实盘模拟
 }
 
 type UpdateModelConfigRequest struct {
@@ -567,25 +624,35 @@ func (s *Server) handleCreateTrader(c *gin.Context) {
 		scanIntervalMinutes = 3 // Default 3 minutes, not allowed to be less than 3
 	}
 
-	// Query exchange actual balance, override user input
+	// 实盘模拟：使用自定义虚拟资金，不查询交易所
+	isSimulation := req.IsSimulation != nil && *req.IsSimulation
 	actualBalance := req.InitialBalance // Default to use user input
-	exchanges, err := s.store.Exchange().List(userID)
-	if err != nil {
-		logger.Infof("⚠️ Failed to get exchange config, using user input for initial balance: %v", err)
-	}
-
-	// Find matching exchange configuration
-	var exchangeCfg *store.Exchange
-	for _, ex := range exchanges {
-		if ex.ID == req.ExchangeID {
-			exchangeCfg = ex
-			break
+	if isSimulation {
+		if actualBalance <= 0 {
+			actualBalance = 10000 // 默认模拟初始资金 10000 USDT
 		}
+		logger.Infof("📋 Creating simulation trader with virtual initial balance: %.2f USDT", actualBalance)
 	}
 
-	if exchangeCfg == nil {
-		logger.Infof("⚠️ Exchange %s configuration not found, using user input for initial balance", req.ExchangeID)
-	} else if !exchangeCfg.Enabled {
+	// 实盘/模拟分离：所选交易所必须与交易员类型一致
+	exch, err := s.store.Exchange().GetByID(userID, req.ExchangeID)
+	if err != nil || exch == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Exchange not found or not yours"})
+		return
+	}
+	if exch.IsSimulation != isSimulation {
+		if isSimulation {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "请选择「模拟交易所」中配置的交易所，与实盘交易分离"})
+		} else {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "请选择「实盘交易所」中配置的交易所"})
+		}
+		return
+	}
+
+	// Query exchange actual balance (skip for simulation)
+	if !isSimulation {
+		exchangeCfg := exch
+		if !exchangeCfg.Enabled {
 		logger.Infof("⚠️ Exchange %s not enabled, using user input for initial balance", req.ExchangeID)
 	} else {
 		// Create temporary trader based on exchange type to query balance
@@ -675,8 +742,9 @@ func (s *Server) handleCreateTrader(c *gin.Context) {
 				if actualBalance <= 0 {
 					logger.Infof("⚠️ Unable to extract total equity from balance info, balanceInfo=%v, using user input for initial balance", balanceInfo)
 				}
-			}
 		}
+	}
+	}
 	}
 
 	// Create trader configuration (database entity)
@@ -701,6 +769,7 @@ func (s *Server) handleCreateTrader(c *gin.Context) {
 		ShowInCompetition:    showInCompetition,
 		ScanIntervalMinutes:  scanIntervalMinutes,
 		IsRunning:            false,
+		IsSimulation:         isSimulation,
 	}
 
 	// Save to database
@@ -762,23 +831,15 @@ func (s *Server) handleUpdateTrader(c *gin.Context) {
 		return
 	}
 
-	// Check if trader exists and belongs to current user
-	traders, err := s.store.Trader().List(userID)
+	// Check if trader exists and belongs to current user (include both live and simulation)
+	fullCfg, err := s.store.Trader().GetFullConfig(userID, traderID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get trader list"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "Trader does not exist or no access permission"})
 		return
 	}
-
-	var existingTrader *store.Trader
-	for _, t := range traders {
-		if t.ID == traderID {
-			existingTrader = t
-			break
-		}
-	}
-
+	existingTrader := fullCfg.Trader
 	if existingTrader == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Trader does not exist"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "Trader does not exist or no access permission"})
 		return
 	}
 
@@ -991,7 +1052,7 @@ func (s *Server) handleStartTrader(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load trader: " + loadErr.Error()})
 			return
 		}
-		c.JSON(http.StatusNotFound, gin.H{"error": "Failed to load trader, please check AI model, exchange and strategy configuration"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to load trader, please check AI model, exchange and strategy configuration"})
 		return
 	}
 
@@ -1027,7 +1088,7 @@ func (s *Server) handleStopTrader(c *gin.Context) {
 
 	trader, err := s.traderManager.GetTrader(traderID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Trader does not exist"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Trader is not running"})
 		return
 	}
 
@@ -1145,7 +1206,7 @@ func (s *Server) handleSyncBalance(c *gin.Context) {
 	// Get trader configuration from database (including exchange info)
 	fullConfig, err := s.store.Trader().GetFullConfig(userID, traderID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Trader does not exist"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "Trader does not exist or no access permission"})
 		return
 	}
 
@@ -1309,7 +1370,7 @@ func (s *Server) handleClosePosition(c *gin.Context) {
 	// Get trader configuration from database (including exchange info)
 	fullConfig, err := s.store.Trader().GetFullConfig(userID, traderID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Trader does not exist"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "Trader does not exist or no access permission"})
 		return
 	}
 
@@ -1799,11 +1860,23 @@ func (s *Server) handleUpdateModelConfigs(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Model configuration updated"})
 }
 
-// handleGetExchangeConfigs Get exchange configurations
+// handleGetExchangeConfigs Get exchange configurations. ?simulation=true 仅模拟用，?simulation=false 仅实盘用，缺省=实盘
 func (s *Server) handleGetExchangeConfigs(c *gin.Context) {
 	userID := c.GetString("user_id")
-	logger.Infof("🔍 Querying exchange configs for user %s", userID)
-	exchanges, err := s.store.Exchange().List(userID)
+	simulationOnly := (*bool)(nil)
+	if v := c.Query("simulation"); v == "true" {
+		trueVal := true
+		simulationOnly = &trueVal
+	} else if v == "false" {
+		falseVal := false
+		simulationOnly = &falseVal
+	} else {
+		// 缺省只返回实盘用，兼容旧前端
+		falseVal := false
+		simulationOnly = &falseVal
+	}
+	logger.Infof("🔍 Querying exchange configs for user %s (simulation=%v)", userID, simulationOnly != nil && *simulationOnly)
+	exchanges, err := s.store.Exchange().List(userID, simulationOnly)
 	if err != nil {
 		SafeInternalError(c, "Failed to get exchange configs", err)
 		return
@@ -1833,6 +1906,7 @@ func (s *Server) handleGetExchangeConfigs(c *gin.Context) {
 			AsterUser:             exchange.AsterUser,
 			AsterSigner:           exchange.AsterSigner,
 			LighterWalletAddr:     exchange.LighterWalletAddr,
+			IsSimulation:          exchange.IsSimulation,
 		}
 	}
 
@@ -1937,6 +2011,7 @@ type CreateExchangeRequest struct {
 	ExchangeType            string `json:"exchange_type" binding:"required"` // "binance", "bybit", "okx", "hyperliquid", "aster", "lighter"
 	AccountName             string `json:"account_name"`                     // User-defined account name
 	Enabled                 bool   `json:"enabled"`
+	IsSimulation            bool   `json:"is_simulation"`                   // true=仅用于实盘模拟，与实盘交易分离
 	APIKey                  string `json:"api_key"`
 	SecretKey               string `json:"secret_key"`
 	Passphrase              string `json:"passphrase"`
@@ -2018,6 +2093,7 @@ func (s *Server) handleCreateExchange(c *gin.Context) {
 		req.APIKey, req.SecretKey, req.Passphrase, req.Testnet,
 		req.HyperliquidWalletAddr, req.AsterUser, req.AsterSigner, req.AsterPrivateKey,
 		req.LighterWalletAddr, req.LighterPrivateKey, req.LighterAPIKeyPrivateKey, req.LighterAPIKeyIndex,
+		req.IsSimulation,
 	)
 	if err != nil {
 		logger.Infof("❌ Failed to create exchange account: %v", err)
@@ -2042,21 +2118,24 @@ func (s *Server) handleDeleteExchange(c *gin.Context) {
 		return
 	}
 
-	// Check if any traders are using this exchange
-	traders, err := s.store.Trader().List(userID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check traders"})
-		return
-	}
-
-	for _, trader := range traders {
-		if trader.ExchangeID == exchangeID {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error":       "Cannot delete exchange account that is in use by traders",
-				"trader_id":   trader.ID,
-				"trader_name": trader.Name,
-			})
+	// Check if any traders (live or simulation) are using this exchange
+	var err error
+	for _, simulationOnly := range []bool{false, true} {
+		var traders []*store.Trader
+		traders, err = s.store.Trader().List(userID, simulationOnly)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check traders"})
 			return
+		}
+		for _, trader := range traders {
+			if trader.ExchangeID == exchangeID {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"error":       "Cannot delete exchange account that is in use by traders",
+					"trader_id":   trader.ID,
+					"trader_name": trader.Name,
+				})
+				return
+			}
 		}
 	}
 
@@ -2075,7 +2154,8 @@ func (s *Server) handleDeleteExchange(c *gin.Context) {
 // handleTraderList Trader list
 func (s *Server) handleTraderList(c *gin.Context) {
 	userID := c.GetString("user_id")
-	traders, err := s.store.Trader().List(userID)
+	simulationOnly := c.Query("simulation") == "true"
+	traders, err := s.store.Trader().List(userID, simulationOnly)
 	if err != nil {
 		SafeInternalError(c, "Failed to get trader list", err)
 		return
@@ -2083,12 +2163,14 @@ func (s *Server) handleTraderList(c *gin.Context) {
 
 	result := make([]map[string]interface{}, 0, len(traders))
 	for _, trader := range traders {
-		// Get real-time running status
+		// Get real-time running status (simulation traders are not in manager)
 		isRunning := trader.IsRunning
-		if at, err := s.traderManager.GetTrader(trader.ID); err == nil {
+		if !trader.IsSimulation {
+			if at, err := s.traderManager.GetTrader(trader.ID); err == nil {
 			status := at.GetStatus()
-			if running, ok := status["is_running"].(bool); ok {
-				isRunning = running
+				if running, ok := status["is_running"].(bool); ok {
+					isRunning = running
+				}
 			}
 		}
 
@@ -2112,6 +2194,7 @@ func (s *Server) handleTraderList(c *gin.Context) {
 			"initial_balance":     trader.InitialBalance,
 			"strategy_id":         trader.StrategyID,
 			"strategy_name":       strategyName,
+			"is_simulation":       trader.IsSimulation,
 		})
 	}
 
@@ -2169,75 +2252,135 @@ func (s *Server) handleGetTraderConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
-// handleStatus System status
+// handleStatus System status (实盘或实盘模拟)
+// 约定：与实盘模拟看板相关的接口更新（如重试、缓存）需同时适用于实盘；仅「交易员未在内存时的回退」为模拟专用
 func (s *Server) handleStatus(c *gin.Context) {
+	userID := c.GetString("user_id")
 	_, traderID, err := s.getTraderFromQuery(c)
 	if err != nil {
 		SafeBadRequest(c, "Invalid trader ID")
 		return
 	}
 
+	traderRecord, _ := s.store.Trader().GetByID(traderID)
+	isSimulation := traderRecord != nil && traderRecord.UserID == userID && traderRecord.IsSimulation
+
 	trader, err := s.traderManager.GetTrader(traderID)
-	if err != nil {
-		SafeNotFound(c, "Trader")
+	if err == nil {
+		// 运行中（实盘或模拟）：返回内存中的 status
+		status := trader.GetStatus()
+		c.JSON(http.StatusOK, status)
+		return
+	}
+	if isSimulation {
+		// 模拟交易员未启动：返回 DB 静态信息
+		c.JSON(http.StatusOK, gin.H{
+			"trader_id":       traderRecord.ID,
+			"trader_name":    traderRecord.Name,
+			"ai_model":       traderRecord.AIModelID,
+			"is_running":     traderRecord.IsRunning,
+			"initial_balance": traderRecord.InitialBalance,
+			"scan_interval":  fmt.Sprintf("%dm", traderRecord.ScanIntervalMinutes),
+		})
 		return
 	}
 
-	status := trader.GetStatus()
-	c.JSON(http.StatusOK, status)
+	SafeNotFound(c, "Trader")
 }
 
-// handleAccount Account information
+// handleAccount Account information (实盘或实盘模拟虚拟账户)
 func (s *Server) handleAccount(c *gin.Context) {
+	userID := c.GetString("user_id")
 	_, traderID, err := s.getTraderFromQuery(c)
 	if err != nil {
 		SafeBadRequest(c, "Invalid trader ID")
 		return
 	}
 
+	traderRecord, _ := s.store.Trader().GetByID(traderID)
+	isSimulation := traderRecord != nil && traderRecord.UserID == userID && traderRecord.IsSimulation
+
 	trader, err := s.traderManager.GetTrader(traderID)
-	if err != nil {
-		SafeNotFound(c, "Trader")
+	if err == nil {
+		logger.Infof("📊 Received account info request [%s]", trader.GetName())
+		account, err := trader.GetAccountInfo()
+		for retry := 0; err != nil && retry < 2; retry++ {
+			time.Sleep(400 * time.Millisecond)
+			account, err = trader.GetAccountInfo()
+		}
+		if err != nil {
+			SafeInternalError(c, "Get account info", err)
+			return
+		}
+		logger.Infof("✓ Returning account info [%s]: equity=%.2f", trader.GetName(), account["total_equity"])
+		c.JSON(http.StatusOK, account)
 		return
 	}
-
-	logger.Infof("📊 Received account info request [%s]", trader.GetName())
-	account, err := trader.GetAccountInfo()
-	if err != nil {
-		SafeInternalError(c, "Get account info", err)
+	if isSimulation {
+		initialBalance := traderRecord.InitialBalance
+		realizedPnL := 0.0
+		if s.store != nil {
+			if stats, err := s.store.Position().GetFullStats(traderID); err == nil && stats != nil {
+				realizedPnL = stats.TotalPnL
+			}
+		}
+		// Total equity = initial balance + realized PnL (when trader is not running)
+		eq := initialBalance + realizedPnL
+		totalPnL := realizedPnL
+		totalPnLPct := 0.0
+		if initialBalance > 0 {
+			totalPnLPct = (totalPnL / initialBalance) * 100
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"total_equity":       eq,
+			"wallet_balance":     eq,
+			"unrealized_profit":  0,
+			"available_balance":  eq,
+			"total_pnl":          totalPnL,
+			"total_pnl_pct":      totalPnLPct,
+			"realized_pnl":       realizedPnL,
+			"initial_balance":    initialBalance,
+			"daily_pnl":          0,
+			"position_count":     0,
+			"margin_used":        0,
+			"margin_used_pct":    0,
+		})
 		return
 	}
-
-	logger.Infof("✓ Returning account info [%s]: equity=%.2f, available=%.2f, pnl=%.2f (%.2f%%)",
-		trader.GetName(),
-		account["total_equity"],
-		account["available_balance"],
-		account["total_pnl"],
-		account["total_pnl_pct"])
-	c.JSON(http.StatusOK, account)
+	SafeNotFound(c, "Trader")
 }
 
-// handlePositions Position list
+// handlePositions Position list (实盘或实盘模拟，模拟暂无持仓)
 func (s *Server) handlePositions(c *gin.Context) {
+	userID := c.GetString("user_id")
 	_, traderID, err := s.getTraderFromQuery(c)
 	if err != nil {
 		SafeBadRequest(c, "Invalid trader ID")
 		return
 	}
 
+	traderRecord, _ := s.store.Trader().GetByID(traderID)
+	isSimulation := traderRecord != nil && traderRecord.UserID == userID && traderRecord.IsSimulation
+
 	trader, err := s.traderManager.GetTrader(traderID)
-	if err != nil {
-		SafeNotFound(c, "Trader")
+	if err == nil {
+		positions, err := trader.GetPositions()
+		for retry := 0; err != nil && retry < 2; retry++ {
+			time.Sleep(400 * time.Millisecond)
+			positions, err = trader.GetPositions()
+		}
+		if err != nil {
+			SafeInternalError(c, "Get positions", err)
+			return
+		}
+		c.JSON(http.StatusOK, positions)
 		return
 	}
-
-	positions, err := trader.GetPositions()
-	if err != nil {
-		SafeInternalError(c, "Get positions", err)
+	if isSimulation {
+		c.JSON(http.StatusOK, []interface{}{})
 		return
 	}
-
-	c.JSON(http.StatusOK, positions)
+	SafeNotFound(c, "Trader")
 }
 
 // handlePositionHistory Historical closed positions with statistics
@@ -3112,89 +3255,139 @@ func (s *Server) getCommonSymbols() []SymbolInfo {
 
 // handleDecisions Decision log list
 func (s *Server) handleDecisions(c *gin.Context) {
+	userID := c.GetString("user_id")
 	_, traderID, err := s.getTraderFromQuery(c)
 	if err != nil {
 		SafeBadRequest(c, "Invalid trader ID")
 		return
 	}
 
+	traderRecord, _ := s.store.Trader().GetByID(traderID)
+	isSimulation := traderRecord != nil && traderRecord.UserID == userID && traderRecord.IsSimulation
+
 	trader, err := s.traderManager.GetTrader(traderID)
-	if err != nil {
-		SafeNotFound(c, "Trader")
+	if err == nil {
+		records, err := trader.GetStore().Decision().GetLatestRecords(trader.GetID(), 10000)
+		if err != nil {
+			SafeInternalError(c, "Get decision log", err)
+			return
+		}
+		c.JSON(http.StatusOK, records)
 		return
 	}
-
-	// Get all historical decision records (unlimited)
-	records, err := trader.GetStore().Decision().GetLatestRecords(trader.GetID(), 10000)
-	if err != nil {
-		SafeInternalError(c, "Get decision log", err)
+	// 实盘模拟暂停时交易员不在内存，从 DB 拉决策记录，避免 404/前端报错
+	if isSimulation {
+		records, err := s.store.Decision().GetLatestRecords(traderID, 10000)
+		if err != nil {
+			SafeInternalError(c, "Get decision log", err)
+			return
+		}
+		c.JSON(http.StatusOK, records)
 		return
 	}
-
-	c.JSON(http.StatusOK, records)
+	SafeNotFound(c, "Trader")
 }
 
 // handleLatestDecisions Latest decision logs (newest first, supports limit parameter)
 func (s *Server) handleLatestDecisions(c *gin.Context) {
+	userID := c.GetString("user_id")
 	_, traderID, err := s.getTraderFromQuery(c)
 	if err != nil {
 		SafeBadRequest(c, "Invalid trader ID")
 		return
 	}
 
-	trader, err := s.traderManager.GetTrader(traderID)
-	if err != nil {
-		SafeNotFound(c, "Trader")
-		return
-	}
-
-	// Get limit from query parameter, default to 5
 	limit := 5
 	if limitStr := c.Query("limit"); limitStr != "" {
 		if parsedLimit, err := strconv.Atoi(limitStr); err == nil && parsedLimit > 0 {
 			limit = parsedLimit
 			if limit > 100 {
-				limit = 100 // Max 100 to prevent abuse
+				limit = 100
 			}
 		}
 	}
 
-	records, err := trader.GetStore().Decision().GetLatestRecords(trader.GetID(), limit)
-	if err != nil {
-		SafeInternalError(c, "Get decision log", err)
+	traderRecord, _ := s.store.Trader().GetByID(traderID)
+	isSimulation := traderRecord != nil && traderRecord.UserID == userID && traderRecord.IsSimulation
+
+	trader, err := s.traderManager.GetTrader(traderID)
+	if err == nil {
+		records, err := trader.GetStore().Decision().GetLatestRecords(trader.GetID(), limit)
+		if err != nil {
+			time.Sleep(200 * time.Millisecond)
+			records, err = trader.GetStore().Decision().GetLatestRecords(trader.GetID(), limit)
+		}
+		if err != nil {
+			SafeInternalError(c, "Get decision log", err)
+			return
+		}
+		for i, j := 0, len(records)-1; i < j; i, j = i+1, j-1 {
+			records[i], records[j] = records[j], records[i]
+		}
+		c.JSON(http.StatusOK, records)
 		return
 	}
-
-	// Reverse array to put newest first (for list display)
-	// GetLatestRecords returns oldest to newest (for charts), here we need newest to oldest
-	for i, j := 0, len(records)-1; i < j; i, j = i+1, j-1 {
-		records[i], records[j] = records[j], records[i]
+	// 实盘模拟暂停时从 DB 拉最近决策，避免 404/前端弹出 Server Error
+	if isSimulation {
+		records, err := s.store.Decision().GetLatestRecords(traderID, limit)
+		if err != nil {
+			time.Sleep(200 * time.Millisecond)
+			records, err = s.store.Decision().GetLatestRecords(traderID, limit)
+		}
+		if err != nil {
+			SafeInternalError(c, "Get decision log", err)
+			return
+		}
+		for i, j := 0, len(records)-1; i < j; i, j = i+1, j-1 {
+			records[i], records[j] = records[j], records[i]
+		}
+		c.JSON(http.StatusOK, records)
+		return
 	}
-
-	c.JSON(http.StatusOK, records)
+	SafeNotFound(c, "Trader")
 }
 
 // handleStatistics Statistics information
 func (s *Server) handleStatistics(c *gin.Context) {
+	userID := c.GetString("user_id")
 	_, traderID, err := s.getTraderFromQuery(c)
 	if err != nil {
 		SafeBadRequest(c, "Invalid trader ID")
 		return
 	}
 
+	traderRecord, _ := s.store.Trader().GetByID(traderID)
+	isSimulation := traderRecord != nil && traderRecord.UserID == userID && traderRecord.IsSimulation
+
 	trader, err := s.traderManager.GetTrader(traderID)
-	if err != nil {
-		SafeNotFound(c, "Trader")
+	if err == nil {
+		stats, err := trader.GetStore().Decision().GetStatistics(trader.GetID())
+		if err != nil {
+			time.Sleep(200 * time.Millisecond)
+			stats, err = trader.GetStore().Decision().GetStatistics(trader.GetID())
+		}
+		if err != nil {
+			SafeInternalError(c, "Get statistics", err)
+			return
+		}
+		c.JSON(http.StatusOK, stats)
 		return
 	}
-
-	stats, err := trader.GetStore().Decision().GetStatistics(trader.GetID())
-	if err != nil {
-		SafeInternalError(c, "Get statistics", err)
+	// 实盘模拟暂停时从 DB 拉统计，避免 404/前端报错
+	if isSimulation {
+		stats, err := s.store.Decision().GetStatistics(traderID)
+		if err != nil {
+			time.Sleep(200 * time.Millisecond)
+			stats, err = s.store.Decision().GetStatistics(traderID)
+		}
+		if err != nil {
+			SafeInternalError(c, "Get statistics", err)
+			return
+		}
+		c.JSON(http.StatusOK, stats)
 		return
 	}
-
-	c.JSON(http.StatusOK, stats)
+	SafeNotFound(c, "Trader")
 }
 
 // handleCompetition Competition overview (compare all traders)
@@ -3219,6 +3412,7 @@ func (s *Server) handleCompetition(c *gin.Context) {
 // handleEquityHistory Return rate historical data
 // Query directly from database, not dependent on trader in memory (so historical data can be retrieved after restart)
 func (s *Server) handleEquityHistory(c *gin.Context) {
+	userID := c.GetString("user_id")
 	_, traderID, err := s.getTraderFromQuery(c)
 	if err != nil {
 		SafeBadRequest(c, "Invalid trader ID")
@@ -3229,6 +3423,12 @@ func (s *Server) handleEquityHistory(c *gin.Context) {
 	// Every 3 minutes per cycle: 10000 records = about 20 days of data
 	snapshots, err := s.store.Equity().GetLatest(traderID, 10000)
 	if err != nil {
+		// 实盘模拟暂停或新账户可能尚无净值快照，返回空避免前端弹出 Server Error
+		traderRecord, _ := s.store.Trader().GetByID(traderID)
+		if traderRecord != nil && traderRecord.UserID == userID && traderRecord.IsSimulation {
+			c.JSON(http.StatusOK, []interface{}{})
+			return
+		}
 		SafeInternalError(c, "Get historical data", err)
 		return
 	}
@@ -3982,7 +4182,7 @@ func (s *Server) getEquityHistoryForTraders(traderIDs []string, hours int) map[s
 	return result
 }
 
-// handleGetPublicTraderConfig Get public trader configuration information (no authentication required, does not include sensitive information)
+// handleGetPublicTraderConfig Get public trader configuration information (no authentication required, does not include sensitive data)
 func (s *Server) handleGetPublicTraderConfig(c *gin.Context) {
 	traderID := c.Param("id")
 	if traderID == "" {
@@ -3990,25 +4190,32 @@ func (s *Server) handleGetPublicTraderConfig(c *gin.Context) {
 		return
 	}
 
-	trader, err := s.traderManager.GetTrader(traderID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Trader does not exist"})
+	t, err := s.traderManager.GetTrader(traderID)
+	if err == nil {
+		status := t.GetStatus()
+		result := map[string]interface{}{
+			"trader_id":   t.GetID(),
+			"trader_name": t.GetName(),
+			"ai_model":    t.GetAIModel(),
+			"exchange":    t.GetExchange(),
+			"is_running":  status["is_running"],
+			"ai_provider": status["ai_provider"],
+			"start_time":  status["start_time"],
+		}
+		c.JSON(http.StatusOK, result)
 		return
 	}
 
-	// Get trader status information
-	status := trader.GetStatus()
-
-	// Only return public configuration information, not including sensitive data like API keys
-	result := map[string]interface{}{
-		"trader_id":   trader.GetID(),
-		"trader_name": trader.GetName(),
-		"ai_model":    trader.GetAIModel(),
-		"exchange":    trader.GetExchange(),
-		"is_running":  status["is_running"],
-		"ai_provider": status["ai_provider"],
-		"start_time":  status["start_time"],
+	// Not in manager (e.g. not started): try DB for basic public info
+	dbTrader, dbErr := s.store.Trader().GetByID(traderID)
+	if dbErr != nil || dbTrader == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Trader does not exist"})
+		return
 	}
-
+	result := map[string]interface{}{
+		"trader_id":   dbTrader.ID,
+		"trader_name": dbTrader.Name,
+		"is_running":  dbTrader.IsRunning,
+	}
 	c.JSON(http.StatusOK, result)
 }

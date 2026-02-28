@@ -42,6 +42,8 @@ interface TraderConfigModalProps {
   onClose: () => void
   traderData?: TraderConfigData | null
   isEditMode?: boolean
+  /** 实盘模拟：创建时显示并必填虚拟初始资金 */
+  isSimulation?: boolean
   availableModels?: AIModel[]
   availableExchanges?: Exchange[]
   onSave?: (data: CreateTraderRequest) => Promise<void>
@@ -52,6 +54,7 @@ export function TraderConfigModal({
   onClose,
   traderData,
   isEditMode = false,
+  isSimulation = false,
   availableModels = [],
   availableExchanges = [],
   onSave,
@@ -113,9 +116,10 @@ export function TraderConfigModal({
         is_cross_margin: true,
         show_in_competition: true,
         scan_interval_minutes: 3,
+        initial_balance: isSimulation ? 10000 : undefined,
       })
     }
-  }, [traderData, isEditMode, availableModels, availableExchanges])
+  }, [traderData, isEditMode, isSimulation, availableModels, availableExchanges])
 
   if (!isOpen) return null
 
@@ -156,6 +160,10 @@ export function TraderConfigModal({
 
   const handleSave = async () => {
     if (!onSave) return
+    if (isSimulation && !isEditMode && (!formData.initial_balance || formData.initial_balance <= 0)) {
+      toast.error(language === 'zh' ? '请填写虚拟初始资金' : 'Please enter virtual initial balance')
+      return
+    }
 
     setIsSaving(true)
     try {
@@ -169,10 +177,11 @@ export function TraderConfigModal({
         scan_interval_minutes: formData.scan_interval_minutes,
       }
 
-      // 只在编辑模式时包含initial_balance
-      if (isEditMode && formData.initial_balance !== undefined) {
+      // 编辑模式或实盘模拟创建时包含 initial_balance
+      if (formData.initial_balance !== undefined && (isEditMode || isSimulation)) {
         saveData.initial_balance = formData.initial_balance
       }
+      if (isSimulation) saveData.is_simulation = true
 
       await toast.promise(onSave(saveData), {
         loading: t('saving', language),
@@ -477,7 +486,7 @@ export function TraderConfigModal({
                 </p>
               </div>
 
-              {/* Initial Balance (Edit mode only) */}
+              {/* Initial Balance: 编辑模式可同步交易所余额；实盘模拟创建时为必填虚拟资金 */}
               {isEditMode && (
                 <div>
                   <div className="flex items-center justify-between mb-2">
@@ -508,12 +517,35 @@ export function TraderConfigModal({
                   />
                     <p className="text-xs text-[#848E9C] mt-1">
                       {t('balanceUpdateHint', language)}
-                  </p>
+                    </p>
                   {balanceFetchError && (
                     <p className="text-xs text-red-500 mt-1">
                       {balanceFetchError}
                     </p>
                   )}
+                </div>
+              )}
+              {!isEditMode && isSimulation && (
+                <div>
+                  <label className="text-sm text-[#EAECEF] block mb-2">
+                    {language === 'zh' ? '虚拟初始资金' : 'Virtual initial balance'} <span className="text-red-400">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    value={formData.initial_balance ?? 10000}
+                    onChange={(e) =>
+                      handleInputChange(
+                        'initial_balance',
+                        Number(e.target.value)
+                      )
+                    }
+                    className="w-full px-3 py-2 bg-[#0B0E11] border border-[#2B3139] rounded text-[#EAECEF] focus:border-[#F0B90B] focus:outline-none"
+                    min="1"
+                    step="1"
+                  />
+                  <p className="text-xs text-[#848E9C] mt-1">
+                    {language === 'zh' ? '模拟账户使用的虚拟资金，不会发生真实交易。' : 'Virtual balance for paper trading; no real orders.'}
+                  </p>
                 </div>
               )}
 

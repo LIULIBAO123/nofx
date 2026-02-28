@@ -10,6 +10,7 @@ type Page =
   | 'competition'
   | 'traders'
   | 'trader'
+  | 'simulation'
   | 'backtest'
   | 'strategy'
   | 'strategy-market'
@@ -103,6 +104,7 @@ export default function HeaderBar({
                 { page: 'strategy-market', path: '/strategy-market', label: language === 'zh' ? '策略市场' : 'Market', requiresAuth: true },
                 { page: 'traders', path: '/traders', label: t('configNav', language), requiresAuth: true },
                 { page: 'trader', path: '/dashboard', label: t('dashboardNav', language), requiresAuth: true },
+                { page: 'simulation', path: '/simulation', label: language === 'zh' ? '实盘模拟' : 'Paper', requiresAuth: true },
                 { page: 'strategy', path: '/strategy', label: t('strategyNav', language), requiresAuth: true },
                 { page: 'competition', path: '/competition', label: t('realtimeNav', language), requiresAuth: true },
                 { page: 'debate', path: '/debate', label: t('debateNav', language), requiresAuth: true },

@@ -26,6 +26,9 @@ type PositionSnapshot struct {
 	MarginUsed       float64 `json:"margin_used"`
 	OpenTime         int64   `json:"open_time"`
 	AccumulatedFee   float64 `json:"accumulated_fee,omitempty"` // Opening fees accumulated
+	StopLoss         float64 `json:"stop_loss,omitempty"`
+	TakeProfit       float64 `json:"take_profit,omitempty"`
+	ATRAtOpen        float64 `json:"atr_at_open,omitempty"`
 }
 
 // BacktestState represents the real-time state during execution (in-memory state).
@@ -76,6 +79,22 @@ type TradeEvent struct {
 	LiquidationFlag bool           `json:"liquidation"`
 	Note            string         `json:"note,omitempty"`
 	AIAnalysis      *TradeAnalysis `json:"ai_analysis,omitempty"` // AI analysis of this trade
+	// OpenTime is set for close events (close_long/close_short/liquidated); used to display 持仓时间
+	OpenTime int64 `json:"open_time,omitempty"`
+	// CloseReason set when closed by strategy: "initial_stop", "trailing_stop", "fixed_tp", "scaled_tp", "liquidated", etc.
+	CloseReason string `json:"close_reason,omitempty"`
+	// Dynamic opening params (for open_* and close_*; displayed in positions/trades UI)
+	StopLoss   float64 `json:"stop_loss,omitempty"`
+	TakeProfit float64 `json:"take_profit,omitempty"`
+	ATRAtOpen  float64 `json:"atr_at_open,omitempty"`
+	// Final-at-close snapshot (for close_* only; real-time values become fixed at close)
+	ATRMultipleSL         float64 `json:"atr_multiple_sl,omitempty"`
+	ATRMultipleTP         float64 `json:"atr_multiple_tp,omitempty"`
+	ATRPeriod             int     `json:"atr_period,omitempty"`
+	ScaledTPLevel         int     `json:"scaled_tp_level,omitempty"`
+	ScaledTPClosedPct      float64 `json:"scaled_tp_closed_pct,omitempty"`
+	TrailingTierActivated  int     `json:"trailing_tier_activated,omitempty"`
+	TrailingAllowedDrawdown float64 `json:"trailing_allowed_drawdown,omitempty"`
 }
 
 // TradeAnalysis contains AI-generated analysis of a trade
@@ -181,13 +200,31 @@ type StatusPayload struct {
 
 // PositionStatus represents a position with unrealized P&L for status display.
 type PositionStatus struct {
-	Symbol           string  `json:"symbol"`
-	Side             string  `json:"side"`
-	Quantity         float64 `json:"quantity"`
-	EntryPrice       float64 `json:"entry_price"`
-	MarkPrice        float64 `json:"mark_price"`
-	Leverage         int     `json:"leverage"`
-	UnrealizedPnL    float64 `json:"unrealized_pnl"`
-	UnrealizedPnLPct float64 `json:"unrealized_pnl_pct"`
-	MarginUsed       float64 `json:"margin_used"`
+	Symbol            string  `json:"symbol"`
+	Side              string  `json:"side"`
+	Quantity          float64 `json:"quantity"`
+	EntryPrice        float64 `json:"entry_price"`
+	MarkPrice         float64 `json:"mark_price"`
+	Leverage          int     `json:"leverage"`
+	UnrealizedPnL     float64 `json:"unrealized_pnl"`
+	UnrealizedPnLPct  float64 `json:"unrealized_pnl_pct"`
+	MarginUsed        float64 `json:"margin_used"`
+	StopLoss          float64 `json:"stop_loss,omitempty"`
+	TakeProfit        float64 `json:"take_profit,omitempty"`
+	ATRAtOpen         float64 `json:"atr_at_open,omitempty"`
+	// ATR as multiples (e.g. 1.6 = 1.6× ATR) for display instead of raw ATR value
+	ATRMultipleSL float64 `json:"atr_multiple_sl,omitempty"`
+	ATRMultipleTP float64 `json:"atr_multiple_tp,omitempty"`
+	// Real-time: distance from current price to SL/TP (as % of mark price)
+	DistanceToSLPct float64 `json:"distance_to_sl_pct,omitempty"`
+	DistanceToTPPct float64 `json:"distance_to_tp_pct,omitempty"`
+	// Strategy flags (same for all positions when strategy is loaded)
+	TrailingEnabled  bool `json:"trailing_enabled,omitempty"`
+	ScaledTPEnabled  bool `json:"scaled_tp_enabled,omitempty"`
+	ScaledTPLevel    int  `json:"scaled_tp_level,omitempty"` // 0-based: how many scaled TP levels already taken (0 = none)
+	ScaledTPClosedPct float64 `json:"scaled_tp_closed_pct,omitempty"` // cumulative % of position closed by scaled TP (0–100)
+	// Real-time: trailing stop activation (by profit threshold, not checkbox)
+	TrailingTierActivated   int     `json:"trailing_tier_activated,omitempty"`   // 0=none, 1=first tier, 2=second...
+	TrailingAllowedDrawdown float64 `json:"trailing_allowed_drawdown,omitempty"` // allowed drawback % at current tier
+	ATRPeriod               int     `json:"atr_period,omitempty"`               // ATR period used (e.g. 14) for display
 }

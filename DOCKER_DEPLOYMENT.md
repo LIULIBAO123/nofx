@@ -9,7 +9,23 @@
 
 ## 🚀 快速开始
 
-### 1. 环境配置
+### 方式 A：一键脚本（推荐本地）
+
+**Linux / Mac / Git Bash：**
+```bash
+bash scripts/deploy-local.sh
+```
+
+**Windows PowerShell：**
+```powershell
+.\scripts\deploy-local.ps1
+```
+
+脚本会自动：检查/创建 `.env`、`data/`、`keys/`，若无 RSA 密钥则用 OpenSSL 生成，然后执行 `docker compose up -d --build`。
+
+### 方式 B：手动步骤
+
+#### 1. 环境配置
 
 确保 `.env` 文件已配置：
 
@@ -37,7 +53,17 @@ AI_MAX_TOKENS=8000
 DATABASE_PATH=./data/nofx.db
 ```
 
-### 2. 构建和启动
+#### 2. RSA 密钥（首次部署）
+
+后端需要 RSA 密钥用于传输加密，若 `keys/private.pem` 不存在需先生成：
+
+```bash
+mkdir -p keys
+openssl genrsa -out keys/private.pem 2048
+openssl rsa -in keys/private.pem -pubout -out keys/public.pem
+```
+
+#### 3. 构建和启动
 
 ```bash
 # 构建镜像
@@ -50,7 +76,7 @@ docker-compose up -d
 docker-compose logs -f
 ```
 
-### 3. 验证部署
+#### 4. 验证部署
 
 ```bash
 # 检查服务状态

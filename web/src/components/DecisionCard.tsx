@@ -152,41 +152,46 @@ function ActionCard({ action, language, onSymbolClick }: { action: DecisionActio
         </div>
       )}
 
-      {/* Risk/Reward Ratio for open positions */}
+      {/* Risk/Reward Ratio for open positions - displayed as Reward:Risk (e.g., 6.8:1); show formula so user can verify from thinking chain */}
       {isOpen && action.stop_loss && action.take_profit && action.price && (
-        <div className="mt-3 pt-3 flex items-center justify-between" style={{ borderTop: '1px solid #2B3139' }}>
-          <span className="text-xs" style={{ color: '#848E9C' }}>{t('riskReward', language)}</span>
-          <div className="flex items-center gap-2">
-            {(() => {
-              const slDist = Math.abs(action.price - action.stop_loss)
-              const tpDist = Math.abs(action.take_profit - action.price)
-              const ratio = slDist > 0 ? (tpDist / slDist) : 0
-              const ratioColor = ratio >= 3 ? '#0ECB81' : ratio >= 2 ? '#F0B90B' : '#F6465D'
-              return (
-                <>
-                  <div className="flex gap-1">
-                    <span style={{ color: '#F6465D' }}>1</span>
-                    <span style={{ color: '#848E9C' }}>:</span>
-                    <span style={{ color: '#0ECB81' }}>{ratio.toFixed(1)}</span>
-                  </div>
-                  <div
-                    className="h-1.5 rounded-full"
-                    style={{
-                      width: '60px',
-                      background: '#2B3139',
-                    }}
-                  >
+        <div className="mt-3 pt-3" style={{ borderTop: '1px solid #2B3139' }}>
+          <div className="flex items-center justify-between">
+            <span className="text-xs" style={{ color: '#848E9C' }}>{t('riskReward', language)}</span>
+            <div className="flex items-center gap-2">
+              {(() => {
+                const slDist = Math.abs(action.price - action.stop_loss)
+                const tpDist = Math.abs(action.take_profit - action.price)
+                const ratio = slDist > 0 ? (tpDist / slDist) : 0
+                const ratioColor = ratio >= 3 ? '#0ECB81' : ratio >= 2 ? '#F0B90B' : '#F6465D'
+                return (
+                  <>
+                    <div className="flex gap-1">
+                      <span style={{ color: '#0ECB81' }}>{ratio.toFixed(1)}</span>
+                      <span style={{ color: '#848E9C' }}>:</span>
+                      <span style={{ color: '#F6465D' }}>1</span>
+                    </div>
                     <div
-                      className="h-full rounded-full transition-all duration-300"
+                      className="h-1.5 rounded-full"
                       style={{
-                        width: `${Math.min(ratio / 5 * 100, 100)}%`,
-                        background: ratioColor
+                        width: '60px',
+                        background: '#2B3139',
                       }}
-                    />
-                  </div>
-                </>
-              )
-            })()}
+                    >
+                      <div
+                        className="h-full rounded-full transition-all duration-300"
+                        style={{
+                          width: `${Math.min(ratio / 5 * 100, 100)}%`,
+                          background: ratioColor
+                        }}
+                      />
+                    </div>
+                  </>
+                )
+              })()}
+            </div>
+          </div>
+          <div className="text-[10px] mt-1" style={{ color: '#5E6673' }} title={language === 'zh' ? '由入场价、止损价、止盈价计算：止盈距离 ÷ 止损距离' : 'Computed as (TP − entry) ÷ |entry − SL|'}>
+            {language === 'zh' ? '计算：止盈距离 ÷ 止损距离 = (TP−入场) ÷ |入场−SL|' : 'Formula: (TP−entry) ÷ |entry−SL|'}
           </div>
         </div>
       )}
@@ -217,10 +222,29 @@ function ActionCard({ action, language, onSymbolClick }: { action: DecisionActio
   )
 }
 
+// One-line summary of key open/close actions for collapsed view (close first, then open, so "先平后开" is clear)
+function keyActionsSummary(decisions: DecisionAction[] | undefined, language: Language): string {
+  if (!decisions || decisions.length === 0) return ''
+  const parts = decisions.map((a) => {
+    const config = ACTION_CONFIG[a.action] || ACTION_CONFIG.wait
+    const sym = a.symbol.replace('USDT', '')
+    return `${sym} ${config.label}`
+  })
+  const hasClose = decisions.some((a) => a.action === 'close_long' || a.action === 'close_short')
+  const hasOpen = decisions.some((a) => a.action === 'open_long' || a.action === 'open_short')
+  const suffix =
+    hasClose && hasOpen
+      ? (language === 'zh' ? ' (含先平后开)' : ' (close then open)')
+      : ''
+  return parts.join(' · ') + suffix
+}
+
 export function DecisionCard({ decision, language, onSymbolClick }: DecisionCardProps) {
+  const [cycleBlockExpanded, setCycleBlockExpanded] = useState(false)
   const [showSystemPrompt, setShowSystemPrompt] = useState(false)
   const [showInputPrompt, setShowInputPrompt] = useState(false)
   const [showCoT, setShowCoT] = useState(false)
+  const summary = keyActionsSummary(decision.decisions, language)
 
   // Copy text to clipboard
   const copyToClipboard = async (text: string, label: string) => {
@@ -254,11 +278,15 @@ export function DecisionCard({ decision, language, onSymbolClick }: DecisionCard
         boxShadow: '0 4px 16px rgba(0, 0, 0, 0.3)',
       }}
     >
-      {/* Header */}
-      <div className="flex items-center justify-between mb-4">
+      {/* Cycle block header: click to expand/collapse. Collapsed = cycle time + key open/close only */}
+      <button
+        type="button"
+        onClick={() => setCycleBlockExpanded(!cycleBlockExpanded)}
+        className="w-full text-left flex items-center justify-between mb-4 rounded-lg p-1 -m-1 hover:bg-white/5 transition-colors"
+      >
         <div className="flex items-center gap-3">
           <div
-            className="w-10 h-10 rounded-lg flex items-center justify-center"
+            className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0"
             style={{ background: 'rgba(240, 185, 11, 0.15)' }}
           >
             <span className="text-xl">🤖</span>
@@ -270,20 +298,33 @@ export function DecisionCard({ decision, language, onSymbolClick }: DecisionCard
             <div className="text-xs" style={{ color: '#848E9C' }}>
               {new Date(decision.timestamp).toLocaleString()}
             </div>
+            {/* When collapsed: show key open/close summary */}
+            {!cycleBlockExpanded && summary && (
+              <div className="text-xs mt-1 font-mono" style={{ color: '#848E9C' }}>
+                {summary}
+              </div>
+            )}
           </div>
         </div>
-        <div
-          className="px-4 py-1.5 rounded-full text-xs font-bold tracking-wider"
-          style={
-            decision.success
-              ? { background: 'rgba(14, 203, 129, 0.15)', color: '#0ECB81', border: '1px solid rgba(14, 203, 129, 0.3)' }
-              : { background: 'rgba(246, 70, 93, 0.15)', color: '#F6465D', border: '1px solid rgba(246, 70, 93, 0.3)' }
-          }
-        >
-          {t(decision.success ? 'success' : 'failed', language)}
+        <div className="flex items-center gap-2 shrink-0">
+          <div
+            className="px-4 py-1.5 rounded-full text-xs font-bold tracking-wider"
+            style={
+              decision.success
+                ? { background: 'rgba(14, 203, 129, 0.15)', color: '#0ECB81', border: '1px solid rgba(14, 203, 129, 0.3)' }
+                : { background: 'rgba(246, 70, 93, 0.15)', color: '#F6465D', border: '1px solid rgba(246, 70, 93, 0.3)' }
+            }
+          >
+            {t(decision.success ? 'success' : 'failed', language)}
+          </div>
+          <span className="text-nofx-text-muted text-sm" aria-hidden>
+            {cycleBlockExpanded ? '▼' : '▶'}
+          </span>
         </div>
-      </div>
+      </button>
 
+      {cycleBlockExpanded && (
+        <>
       {/* Decision Actions - Beautiful Grid */}
       {decision.decisions && decision.decisions.length > 0 && (
         <div className="space-y-3 mb-4">
@@ -475,6 +516,8 @@ export function DecisionCard({ decision, language, onSymbolClick }: DecisionCard
         >
           ❌ {decision.error_message}
         </div>
+      )}
+        </>
       )}
     </div>
   )

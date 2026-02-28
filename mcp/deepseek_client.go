@@ -1,6 +1,8 @@
 package mcp
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 )
 
@@ -80,4 +82,44 @@ func (dsClient *DeepSeekClient) SetAPIKey(apiKey string, customURL string, custo
 
 func (dsClient *DeepSeekClient) setAuthHeader(reqHeaders http.Header) {
 	dsClient.Client.setAuthHeader(reqHeaders)
+}
+
+// parseMCPResponse parses DeepSeek response and returns usage including prompt_cache_hit_tokens / prompt_cache_miss_tokens.
+func (dsClient *DeepSeekClient) parseMCPResponse(body []byte) (string, *TokenUsage, error) {
+	var result struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+		Usage struct {
+			PromptTokens           int `json:"prompt_tokens"`
+			CompletionTokens       int `json:"completion_tokens"`
+			TotalTokens            int `json:"total_tokens"`
+			PromptCacheHitTokens   int `json:"prompt_cache_hit_tokens"`
+			PromptCacheMissTokens  int `json:"prompt_cache_miss_tokens"`
+		} `json:"usage"`
+	}
+
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	if len(result.Choices) == 0 {
+		return "", nil, fmt.Errorf("API returned empty response")
+	}
+
+	var usage *TokenUsage
+	if result.Usage.TotalTokens > 0 {
+		usage = &TokenUsage{
+			Provider:                 dsClient.Provider,
+			Model:                    dsClient.Model,
+			PromptTokens:            result.Usage.PromptTokens,
+			CompletionTokens:        result.Usage.CompletionTokens,
+			TotalTokens:             result.Usage.TotalTokens,
+			CacheReadInputTokens:    result.Usage.PromptCacheHitTokens,
+			CacheCreationInputTokens: result.Usage.PromptCacheMissTokens,
+		}
+	}
+	return result.Choices[0].Message.Content, usage, nil
 }

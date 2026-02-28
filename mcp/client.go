@@ -30,19 +30,28 @@ var (
 		"no such host",
 		"stream error",   // HTTP/2 stream error
 		"INTERNAL_ERROR", // Server internal error
+		"status 502",    // Bad Gateway (proxy/upstream)
+		"status 503",    // Service Unavailable (overload)
+		"status 504",    // Gateway Timeout (e.g. Claude/proxy timeout, retry often succeeds)
 	}
 
-	// TokenUsageCallback is called after each AI request with token usage info
-	TokenUsageCallback func(usage TokenUsage)
+	// TokenUsageCallback is called after each AI request with token usage info.
+	// runID: backtest run_id → GET /api/ai-usage?run_id=
+	// traderID: live/simulation trader_id → GET /api/ai-usage?trader_id=
+	// scope: e.g. "strategy_studio" → GET /api/ai-usage?context=strategy_studio
+	TokenUsageCallback func(usage TokenUsage, runID string, traderID string, scope string)
 )
 
 // TokenUsage represents token usage from AI API response
 type TokenUsage struct {
-	Provider         string
-	Model            string
-	PromptTokens     int
-	CompletionTokens int
-	TotalTokens      int
+	Provider                string
+	Model                   string
+	PromptTokens            int
+	CompletionTokens        int
+	TotalTokens             int
+	// Prompt caching (Anthropic Claude, OpenAI): when > 0 indicates cache was used or created
+	CacheReadInputTokens    int // Tokens read from cache (cache hit)
+	CacheCreationInputTokens int // Tokens used to create cache (cache miss, new entry)
 }
 
 // Client AI API configuration
@@ -51,8 +60,9 @@ type Client struct {
 	APIKey     string
 	BaseURL    string
 	Model      string
-	UseFullURL bool // Whether to use full URL (without appending /chat/completions)
-	MaxTokens  int  // Maximum tokens for AI response
+	UseFullURL bool   // Whether to use full URL (without appending /chat/completions)
+	MaxTokens  int    // Maximum tokens for AI response
+	UsageScope string // When set (e.g. "strategy_studio"), token usage is stored per-scope for GET /api/ai-usage?context=
 
 	httpClient *http.Client
 	logger     Logger // Logger (replaceable)
@@ -143,6 +153,12 @@ func (client *Client) SetAPIKey(apiKey, apiURL, customModel string) {
 
 func (client *Client) SetTimeout(timeout time.Duration) {
 	client.httpClient.Timeout = timeout
+}
+
+// SetUsageScope sets the scope for token usage recording (e.g. "strategy_studio").
+// When set, GET /api/ai-usage?context=<scope> returns usage for this scope only.
+func (client *Client) SetUsageScope(scope string) {
+	client.UsageScope = scope
 }
 
 // CallWithMessages template method - fixed retry flow (cannot be overridden)
@@ -238,7 +254,7 @@ func (client *Client) marshalRequestBody(requestBody map[string]any) ([]byte, er
 	return jsonData, nil
 }
 
-func (client *Client) parseMCPResponse(body []byte) (string, error) {
+func (client *Client) parseMCPResponse(body []byte) (string, *TokenUsage, error) {
 	var result struct {
 		Choices []struct {
 			Message struct {
@@ -253,25 +269,24 @@ func (client *Client) parseMCPResponse(body []byte) (string, error) {
 	}
 
 	if err := json.Unmarshal(body, &result); err != nil {
-		return "", fmt.Errorf("failed to parse response: %w", err)
+		return "", nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 
 	if len(result.Choices) == 0 {
-		return "", fmt.Errorf("API returned empty response")
+		return "", nil, fmt.Errorf("API returned empty response")
 	}
 
-	// Report token usage if callback is set
-	if TokenUsageCallback != nil && result.Usage.TotalTokens > 0 {
-		TokenUsageCallback(TokenUsage{
+	var usage *TokenUsage
+	if result.Usage.TotalTokens > 0 {
+		usage = &TokenUsage{
 			Provider:         client.Provider,
 			Model:            client.Model,
 			PromptTokens:     result.Usage.PromptTokens,
 			CompletionTokens: result.Usage.CompletionTokens,
 			TotalTokens:      result.Usage.TotalTokens,
-		})
+		}
 	}
-
-	return result.Choices[0].Message.Content, nil
+	return result.Choices[0].Message.Content, usage, nil
 }
 
 func (client *Client) buildUrl() string {
@@ -343,9 +358,12 @@ func (client *Client) call(systemPrompt, userPrompt string) (string, error) {
 	}
 
 	// Step 8: Parse response (via hooks for dynamic dispatch)
-	result, err := client.hooks.parseMCPResponse(body)
+	result, usage, err := client.hooks.parseMCPResponse(body)
 	if err != nil {
 		return "", fmt.Errorf("fail to parse AI server response: %w", err)
+	}
+	if usage != nil && TokenUsageCallback != nil {
+		TokenUsageCallback(*usage, "", "", client.UsageScope)
 	}
 
 	return result, nil
@@ -438,8 +456,8 @@ func (client *Client) callWithRequest(req *Request) (string, error) {
 	client.logger.Infof("📡 [%s] Request AI Server with Builder: BaseURL: %s", client.String(), client.BaseURL)
 	client.logger.Debugf("[%s] Messages count: %d", client.String(), len(req.Messages))
 
-	// Build request body (from Request object)
-	requestBody := client.buildRequestBodyFromRequest(req)
+	// Build request body (from Request object; Claude overrides for top-level system + cache_control)
+	requestBody := client.hooks.buildRequestBodyFromRequest(req)
 
 	// Serialize request body
 	jsonData, err := client.hooks.marshalRequestBody(requestBody)
@@ -464,21 +482,33 @@ func (client *Client) callWithRequest(req *Request) (string, error) {
 	}
 	defer resp.Body.Close()
 
-	// Read response body
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read response: %w", err)
-	}
-
-	// Check HTTP status code
 	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
 		return "", fmt.Errorf("API returned error (status %d): %s", resp.StatusCode, string(body))
 	}
 
-	// Parse response
-	result, err := client.hooks.parseMCPResponse(body)
-	if err != nil {
-		return "", fmt.Errorf("fail to parse AI server response: %w", err)
+	var result string
+	var usage *TokenUsage
+
+	if req.Stream {
+		// Stream mode: read SSE, accumulate content (avoids single-response length limit)
+		result, usage, err = parseStreamResponse(resp.Body, client.Provider, client.Model)
+		if err != nil {
+			return "", fmt.Errorf("stream response: %w", err)
+		}
+	} else {
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return "", fmt.Errorf("failed to read response: %w", err)
+		}
+		result, usage, err = client.hooks.parseMCPResponse(body)
+		if err != nil {
+			return "", fmt.Errorf("fail to parse AI server response: %w", err)
+		}
+	}
+
+	if usage != nil && TokenUsageCallback != nil {
+		TokenUsageCallback(*usage, req.RunID, req.TraderID, req.Scope)
 	}
 
 	return result, nil

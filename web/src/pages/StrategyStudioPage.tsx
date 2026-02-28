@@ -40,6 +40,7 @@ import { PublishSettingsEditor } from '../components/strategy/PublishSettingsEdi
 import { GridConfigEditor, defaultGridConfig } from '../components/strategy/GridConfigEditor'
 import { DeepVoidBackground } from '../components/DeepVoidBackground'
 import { GrainOverlay } from '../components/ui/GrainOverlay'
+import { AIUsageCard } from '../components/AIUsageCard'
 
 const API_BASE = import.meta.env.VITE_API_BASE || ''
 
@@ -1149,6 +1150,11 @@ export function StrategyStudioPage() {
                     </button>
                   </div>
                   <p className="text-[10px] text-nofx-text-muted">{t('testNote')}</p>
+
+                  {/* 最近 AI 用量 / Prompt Caching（仅显示本页策略 AI 测试的用量） */}
+                  <div className="mt-3">
+                    <AIUsageCard language={language} context="strategy_studio" />
+                  </div>
                 </div>
 
                 {/* Test Results */}
