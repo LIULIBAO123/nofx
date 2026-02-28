@@ -2260,6 +2260,15 @@ func (at *AutoTrader) GetPositions() ([]map[string]interface{}, error) {
 		sideNorm := strings.ToLower(side)
 		posKey := symbol + "_" + sideNorm
 
+		// 价格变动百分比（相对入场价，与分层止盈判断一致；当前盈亏%为保证金收益率）
+		priceChangePct := 0.0
+		if entryPrice > 0 && markPrice > 0 {
+			if sideNorm == "long" {
+				priceChangePct = (markPrice - entryPrice) / entryPrice * 100
+			} else {
+				priceChangePct = (entryPrice - markPrice) / entryPrice * 100
+			}
+		}
 		out := map[string]interface{}{
 			"symbol":             symbol,
 			"side":               sideNorm,
@@ -2269,6 +2278,7 @@ func (at *AutoTrader) GetPositions() ([]map[string]interface{}, error) {
 			"leverage":           leverage,
 			"unrealized_pnl":     unrealizedPnl,
 			"unrealized_pnl_pct": pnlPct,
+			"price_change_pct":   priceChangePct,
 			"liquidation_price":  liquidationPrice,
 			"margin_used":        marginUsed,
 		}

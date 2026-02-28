@@ -32,7 +32,7 @@ export function DynamicTakeProfitEditor({
       profitPercent: { zh: '盈利百分比', en: 'Profit %' },
       closePercent: { zh: '平仓百分比', en: 'Close %' },
       moveToBreakeven: { zh: '移动止损到盈亏平衡', en: 'Move Stop to Breakeven' },
-      profitPercentDesc: { zh: '当盈利达到此百分比时触发', en: 'Trigger when profit reaches this percentage' },
+      profitPercentDesc: { zh: '当盈利达到此百分比时触发（按价格相对入场价的变动，非保证金收益率；带杠杆时页面「当前盈亏」会高于价格变动）', en: 'Trigger when profit reaches this % (price move from entry, not margin return; with leverage, dashboard P/L % is higher than price %).' },
       closePercentDesc: { zh: '平仓该百分比的持仓', en: 'Close this percentage of position' },
       
       // ATR Take Profit

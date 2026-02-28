@@ -50,6 +50,8 @@ export interface Position {
   leverage: number
   unrealized_pnl: number
   unrealized_pnl_pct: number
+  /** 价格相对入场价的变动百分比，与分层止盈触发条件一致（非保证金收益率） */
+  price_change_pct?: number
   liquidation_price: number
   margin_used: number
   stop_loss?: number
