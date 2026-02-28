@@ -148,20 +148,23 @@ export class HttpClient {
       throw new Error(msg || 'API not found')
     }
 
-    // Handle 500+ Server Error - 轮询请求用温和提示并去重，避免同一接口短时多次弹窗
+    // Handle 500+ Server Error - 轮询请求用温和提示并去重；注册等接口透传后端返回的 error 便于用户排查
     if (status >= 500) {
+      const data = error.response?.data as { error?: string; message?: string } | undefined
+      const backendMsg = data?.error || data?.message
       const config = error.config
       const url = config?.url ? String(config.url) : ''
       const isGet = !config?.method || config.method?.toUpperCase() === 'GET'
       const toastId = `server-error-${url}`
-      toast.error(isGet ? 'Data temporarily unavailable' : 'Server Error', {
+      const displayMsg = isGet ? 'Data temporarily unavailable' : (backendMsg || 'Server Error')
+      toast.error(displayMsg, {
         description: isGet
           ? 'Retrying automatically. If it persists, try refreshing the page.'
-          : 'Please try again later or contact support',
+          : (backendMsg ? undefined : 'Please try again later or contact support'),
         id: toastId,
         duration: 5000,
       })
-      throw new Error('Server error')
+      throw new Error(backendMsg || 'Server error')
     }
 
     // 4xx errors (except 401/403/404) are business logic errors

@@ -3633,7 +3633,8 @@ func (s *Server) handleRegister(c *gin.Context) {
 
 	err = s.store.User().Create(user)
 	if err != nil {
-		SafeInternalError(c, "Failed to create user", err)
+		logger.Errorf("[Internal Error] Failed to create user: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Registration failed. Please try again or contact support. If the problem persists, check that the database is writable and migrations have run."})
 		return
 	}
 

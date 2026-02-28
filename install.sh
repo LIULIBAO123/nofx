@@ -67,8 +67,26 @@ setup_directory() {
     mkdir -p "$INSTALL_DIR"
     mkdir -p "$INSTALL_DIR/data"
     mkdir -p "$INSTALL_DIR/logs"
+    mkdir -p "$INSTALL_DIR/keys"
     cd "$INSTALL_DIR"
     echo -e "${GREEN}✓ Directory ready${NC}"
+}
+
+# Generate RSA key files for backend (required by docker-compose.prod.yml)
+ensure_rsa_keys() {
+    if [ -f "keys/private.pem" ] && [ -f "keys/public.pem" ]; then
+        echo -e "${GREEN}✓ RSA keys already exist in keys/${NC}"
+        return
+    fi
+    echo -e "${YELLOW}Generating RSA keys in keys/ ...${NC}"
+    if command -v openssl &> /dev/null; then
+        openssl genrsa -out keys/private.pem 2048 2>/dev/null
+        openssl rsa -in keys/private.pem -pubout -out keys/public.pem 2>/dev/null
+        chmod 600 keys/private.pem 2>/dev/null || true
+        echo -e "${GREEN}✓ RSA keys generated${NC}"
+    else
+        echo -e "${YELLOW}openssl not found; create keys/private.pem and keys/public.pem manually if backend requires them${NC}"
+    fi
 }
 
 # Download compose file
@@ -287,6 +305,7 @@ print_success() {
 main() {
     check_docker
     setup_directory
+    ensure_rsa_keys
     download_files
     generate_env
     pull_images
