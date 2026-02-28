@@ -2219,6 +2219,7 @@ func (at *AutoTrader) GetAccountInfo() (map[string]interface{}, error) {
 }
 
 // GetPositions gets position list (for API). Supports both exchange format and paper format (position_side, position_amt, entry_price, unrealized_pnl).
+// 实盘与实盘模拟共用此逻辑：同一套字段与计算（含 price_change_pct、trailing、scaled_tp 等），确保展示与策略判断一致。
 func (at *AutoTrader) GetPositions() ([]map[string]interface{}, error) {
 	positions, err := at.trader.GetPositions()
 	if err != nil {
@@ -3200,7 +3201,8 @@ func (at *AutoTrader) GetOpenOrders(symbol string) ([]OpenOrder, error) {
 	return at.trader.GetOpenOrders(symbol)
 }
 
-// checkDynamicStopLossTakeProfit checks all positions for dynamic stop loss and take profit triggers
+// checkDynamicStopLossTakeProfit checks all positions for dynamic stop loss and take profit triggers.
+// 实盘与实盘模拟共用：positions 来自 at.trader.GetPositions()（交易所或 PaperTrader），后续判断与执行逻辑一致。
 func (at *AutoTrader) checkDynamicStopLossTakeProfit() error {
 	// Check if dynamic stop loss/take profit is enabled
 	if at.strategyEngine == nil || at.strategyEngine.GetConfig() == nil {

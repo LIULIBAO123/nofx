@@ -2350,7 +2350,7 @@ func (s *Server) handleAccount(c *gin.Context) {
 	SafeNotFound(c, "Trader")
 }
 
-// handlePositions Position list (实盘或实盘模拟，模拟暂无持仓)
+// handlePositions Position list (实盘或实盘模拟)。交易员运行中时与实盘共用同一 GetPositions 逻辑，返回结构一致；仅模拟且交易员未运行时回退为空数组。
 func (s *Server) handlePositions(c *gin.Context) {
 	userID := c.GetString("user_id")
 	_, traderID, err := s.getTraderFromQuery(c)
