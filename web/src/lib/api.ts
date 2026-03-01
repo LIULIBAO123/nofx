@@ -421,13 +421,13 @@ export const api = {
     return result.data!
   },
 
-  // 获取收益率历史数据（支持trader_id）
+  // 获取收益率历史数据（支持trader_id，需登录）
   async getEquityHistory(traderId?: string): Promise<any[]> {
     const url = traderId
       ? `${API_BASE}/equity-history?trader_id=${traderId}`
       : `${API_BASE}/equity-history`
     const result = await httpClient.get<any[]>(url)
-    if (!result.success) throw new Error('获取历史数据失败')
+    if (!result.success) throw new Error(result.message || '获取历史数据失败')
     return result.data!
   },
 

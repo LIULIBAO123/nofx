@@ -476,6 +476,9 @@ func fetchMarketDataWithStrategy(ctx *Context, engine *StrategyEngine) error {
 	// 实际写入 Prompt 的候选数可能小于「写入 Prompt 的候选币数」：候选列表不足、拉取失败或 OI 过滤会导致更少
 	logger.Infof("📊 Market data: %d positions + %d candidate coins in prompt (max candidates=%d; total candidates=%d; skipped: fetch_fail=%d, OI_low=%d)",
 		len(positionSymbols), candidateCoinsAdded, maxCandidateCoinsForPrompt, len(ctx.CandidateCoins), skippedFetchFail, skippedOILow)
+	if len(ctx.CandidateCoins) < maxCandidateCoinsForPrompt && (skippedFetchFail == 0 && skippedOILow == 0) {
+		logger.Infof("📊 Candidate list has only %d coins (max_coins_in_prompt=%d); add more static coins or check signal source (AI500/OI) if you expect more", len(ctx.CandidateCoins), maxCandidateCoinsForPrompt)
+	}
 	return nil
 }
 
