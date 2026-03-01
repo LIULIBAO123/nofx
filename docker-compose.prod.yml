@@ -8,12 +8,16 @@ services:
       - ./data:/app/data
       - ./logs:/app/logs
       - ./keys:/app/keys
+    env_file:
+      - .env
     environment:
       - TZ=${TZ:-Asia/Shanghai}
       - JWT_SECRET=${JWT_SECRET}
       - DATA_ENCRYPTION_KEY=${DATA_ENCRYPTION_KEY}
       - RSA_PRIVATE_KEY_PATH=/app/keys/private.pem
       - RSA_PUBLIC_KEY_PATH=/app/keys/public.pem
+      - AI_MAX_TOKENS=${AI_MAX_TOKENS:-8000}
+      - AI_TIMEOUT_SECONDS=${AI_TIMEOUT_SECONDS:-300}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/api/health"]

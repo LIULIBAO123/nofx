@@ -129,7 +129,6 @@ func (s *Server) setupRoutes() {
 		api.GET("/traders", s.handlePublicTraderList)
 		api.GET("/competition", s.handlePublicCompetition)
 		api.GET("/top-traders", s.handleTopTraders)
-		api.GET("/equity-history", s.handleEquityHistory)
 		api.POST("/equity-history-batch", s.handleEquityHistoryBatch)
 		api.GET("/traders/:id/public-config", s.handleGetPublicTraderConfig)
 
@@ -157,6 +156,7 @@ func (s *Server) setupRoutes() {
 
 			// AI trader management
 			protected.GET("/my-traders", s.handleTraderList)
+			protected.GET("/equity-history", s.handleEquityHistory) // 需认证：校验 trader 归属，实盘/模拟仪表盘净值曲线
 			protected.GET("/traders/:id/config", s.handleGetTraderConfig)
 			protected.POST("/traders", s.handleCreateTrader)
 			protected.PUT("/traders/:id", s.handleUpdateTrader)
@@ -3409,8 +3409,8 @@ func (s *Server) handleCompetition(c *gin.Context) {
 	c.JSON(http.StatusOK, competition)
 }
 
-// handleEquityHistory Return rate historical data
-// Query directly from database, not dependent on trader in memory (so historical data can be retrieved after restart)
+// handleEquityHistory Return rate historical data (requires auth; used by dashboard equity curve).
+// Query directly from database, not dependent on trader in memory (so historical data can be retrieved after restart).
 func (s *Server) handleEquityHistory(c *gin.Context) {
 	userID := c.GetString("user_id")
 	_, traderID, err := s.getTraderFromQuery(c)
@@ -3889,7 +3889,7 @@ func (s *Server) Start() error {
 	logger.Infof("  • GET  /api/traders          - Public AI trader leaderboard top 50 (no auth required)")
 	logger.Infof("  • GET  /api/competition      - Public competition data (no auth required)")
 	logger.Infof("  • GET  /api/top-traders      - Top 5 trader data (no auth required, for performance comparison)")
-	logger.Infof("  • GET  /api/equity-history?trader_id=xxx - Public return rate historical data (no auth required, for competition)")
+	logger.Infof("  • GET  /api/equity-history?trader_id=xxx - Return rate history (auth required, for dashboard equity curve)")
 	logger.Infof("  • GET  /api/equity-history-batch?trader_ids=a,b,c - Batch get historical data (no auth required, performance comparison optimization)")
 	logger.Infof("  • GET  /api/traders/:id/public-config - Public trader config (no auth required, no sensitive info)")
 	logger.Infof("  • POST /api/traders          - Create new AI trader")
