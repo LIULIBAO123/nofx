@@ -2023,7 +2023,13 @@ func extractDecisions(response string) ([]Decision, error) {
 
 	jsonContent := strings.TrimSpace(reJSONArray.FindString(jsonPart))
 	if jsonContent == "" {
-		logger.Infof("⚠️  [SafeFallback] AI didn't output JSON decision, entering safe wait mode")
+		// 云上常见原因：响应被截断（max_tokens 不足）、超时、或网络导致未返回完整 JSON；可提高 AI_MAX_TOKENS、AI_TIMEOUT_SECONDS 并查看日志
+		logger.Infof("⚠️  [SafeFallback] AI didn't output JSON decision, entering safe wait mode (response len=%d)", len(response))
+		if len(jsonPart) > 0 && len(jsonPart) <= 600 {
+			logger.Infof("⚠️  [SafeFallback] jsonPart snippet: %s", jsonPart)
+		} else if len(jsonPart) > 600 {
+			logger.Infof("⚠️  [SafeFallback] jsonPart tail(500): ...%s", jsonPart[len(jsonPart)-500:])
+		}
 
 		cotSummary := jsonPart
 		if len(cotSummary) > 240 {
