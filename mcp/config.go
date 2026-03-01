@@ -41,8 +41,8 @@ func DefaultConfig() *Config {
 	timeoutSec := getEnvInt("AI_TIMEOUT_SECONDS", 300)
 	timeout := time.Duration(timeoutSec) * time.Second
 	return &Config{
-		// Default values
-		MaxTokens:       getEnvInt("AI_MAX_TOKENS", 2000),
+		// Default values；无 .env 时默认 8000，避免云上未配置时被 2000 截断导致 JSON 解析失败
+		MaxTokens:       getEnvInt("AI_MAX_TOKENS", 8000),
 		Temperature:     MCPClientTemperature,
 		MaxRetries:      MaxRetryTimes,
 		RetryWaitBase:   2 * time.Second,

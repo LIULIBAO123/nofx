@@ -24,6 +24,8 @@ var (
 	// Safe regex: precisely match ```json code blocks
 	reJSONFence      = regexp.MustCompile(`(?is)` + "```json\\s*(\\[\\s*\\{.*?\\}\\s*\\])\\s*```")
 	reJSONArray      = regexp.MustCompile(`(?is)\[\s*\{.*?\}\s*\]`)
+	// 无 "json" 的代码块（部分模型如 deepseek-reasoner 只输出 ``` ... ```）
+	reJSONFencePlain = regexp.MustCompile("(?is)```\\s*\\n?\\s*([\\s\\S]*?)\\s*```")
 	reArrayHead      = regexp.MustCompile(`^\[\s*\{`)
 	reArrayOpenSpace = regexp.MustCompile(`^\[\s+\{`)
 	reInvisibleRunes = regexp.MustCompile("[\u200B\u200C\u200D\uFEFF]")
@@ -2021,6 +2023,41 @@ func extractDecisions(response string) ([]Decision, error) {
 		return decisions, nil
 	}
 
+	// 兼容无 "json" 的代码块（如 deepseek-reasoner 只输出 ``` ... ```）
+	for _, sub := range reJSONFencePlain.FindAllStringSubmatch(jsonPart, -1) {
+		if len(sub) < 2 {
+			continue
+		}
+		block := strings.TrimSpace(sub[1])
+		if !reArrayHead.MatchString(block) {
+			continue
+		}
+		jsonContent := compactArrayOpen(block)
+		jsonContent = fixMissingQuotes(jsonContent)
+		if err := validateJSONFormat(jsonContent); err != nil {
+			continue
+		}
+		var decisions []Decision
+		if err := json.Unmarshal([]byte(jsonContent), &decisions); err != nil {
+			continue
+		}
+		logger.Infof("✓ Extracted JSON from plain ``` code block")
+		return decisions, nil
+	}
+
+	// 从全文末尾按括号匹配提取数组（模型先输出推理再输出 JSON 且无 tag 时）
+	if extracted := extractJSONArrayByBracketMatch(jsonPart); extracted != "" {
+		jsonContent := compactArrayOpen(extracted)
+		jsonContent = fixMissingQuotes(jsonContent)
+		if err := validateJSONFormat(jsonContent); err == nil {
+			var decisions []Decision
+			if err := json.Unmarshal([]byte(jsonContent), &decisions); err == nil {
+				logger.Infof("✓ Extracted JSON by bracket match from end of response")
+				return decisions, nil
+			}
+		}
+	}
+
 	jsonContent := strings.TrimSpace(reJSONArray.FindString(jsonPart))
 	if jsonContent == "" {
 		// 云上常见原因：响应被截断（max_tokens 不足）、超时、或网络导致未返回完整 JSON；可提高 AI_MAX_TOKENS、AI_TIMEOUT_SECONDS 并查看日志
@@ -2082,6 +2119,51 @@ func fixMissingQuotes(jsonStr string) string {
 	jsonStr = strings.ReplaceAll(jsonStr, "　", " ")
 
 	return jsonStr
+}
+
+// extractJSONArrayByBracketMatch 从文本中查找 [{ 并从该处括号匹配提取完整 JSON 数组（应对无 tag、先推理后 JSON 的输出）
+func extractJSONArrayByBracketMatch(s string) string {
+	idx := strings.LastIndex(s, "[{")
+	if idx < 0 {
+		return ""
+	}
+	depth := 0
+	inString := false
+	escape := false
+	var quote byte
+	for i := idx; i < len(s); i++ {
+		c := s[i]
+		if escape {
+			escape = false
+			continue
+		}
+		if inString {
+			if c == '\\' {
+				escape = true
+				continue
+			}
+			if c == quote {
+				inString = false
+			}
+			continue
+		}
+		if c == '"' || c == '\'' {
+			inString = true
+			quote = c
+			continue
+		}
+		if c == '[' || c == '{' {
+			depth++
+			continue
+		}
+		if c == ']' || c == '}' {
+			depth--
+			if depth == 0 {
+				return s[idx : i+1]
+			}
+		}
+	}
+	return ""
 }
 
 func validateJSONFormat(jsonStr string) error {

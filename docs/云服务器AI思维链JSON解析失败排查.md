@@ -2,8 +2,10 @@
 
 ## 现象
 
-- **云服务器**：AI 思维链周期中频繁出现 `Model didn't output structured JSON decision, entering safe wait`，决策退化为 wait。
-- **本地 Docker**：同一配置下很少或不会出现。
+- **云服务器**：AI 思维链周期中频繁出现 `Model didn't output structured JSON decision, entering safe wait`，且 Token 用量里 **out 经常卡在 2000**。
+- **本地**：同一策略、同一模型下 out 可以超过 2000（例如 2694）且能正常解析、显示成功。
+
+说明：2000 不是产品上限，而是**默认配置**。若云上未显式设置 `AI_MAX_TOKENS`，后端会用默认 2000，接口返回时就会在 2000 token 处截断，导致 JSON 不完整；本地若曾改过 .env 或使用更高默认值，就会出现「本地 >2000 正常、云上卡 2000 失败」的差异。
 
 ## 原因分析
 
@@ -58,6 +60,11 @@
 **处理建议：**
 
 - 查看后端日志中 `[SafeFallback]` 的 **jsonPart snippet / tail**，确认是否明显被截断或格式异常，再针对性调整策略或清洗逻辑。
+
+## 如何确认云上是否被 2000 限制
+
+- 看前端「Token 用量」：若云上**每次失败时 out 都是 2000**，而本地同模型可到 2694 等，基本就是云上 `AI_MAX_TOKENS` 仍为默认 2000，响应在 2000 token 处被截断。
+- 在云服务器上查看 nofx 所用 `.env`：`grep AI_MAX_TOKENS .env` 或 `cat .env`；若未配置或为 2000，在 `.env` 中增加或改为 `AI_MAX_TOKENS=8000`，重启 nofx 后再观察。
 
 ## 如何确认是否是「截断」
 
