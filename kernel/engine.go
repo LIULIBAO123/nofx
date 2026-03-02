@@ -1529,7 +1529,9 @@ func (e *StrategyEngine) formatStrategyDynamicSLTP() string {
 		} else {
 			sb.WriteString(fmt.Sprintf("- Take profit: min hold %.0f min", tp.MinHoldMinutes))
 		}
-		if tp.ScaledEnabled != nil && *tp.ScaledEnabled && len(tp.ScaledLevels) > 0 {
+		// 与执行逻辑一致：有档位即视为分层止盈启用（ScaledEnabled 为 nil 时也展示）
+		scaledEffective := len(tp.ScaledLevels) > 0 && (tp.ScaledEnabled == nil || *tp.ScaledEnabled)
+		if scaledEffective {
 			if zh {
 				sb.WriteString(" | 分层止盈: ")
 			} else {

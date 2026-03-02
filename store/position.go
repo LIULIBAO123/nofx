@@ -267,7 +267,11 @@ func (s *PositionStore) ReducePositionQuantity(id int64, reduceQty float64, exit
 	// Check if position should be fully closed (quantity reduced to ~0)
 	const QUANTITY_TOLERANCE = 0.0001
 	if newQty <= QUANTITY_TOLERANCE {
-		// Auto-close: set status to CLOSED
+		// Auto-close: set status to CLOSED. Preserve close_reason if already set (e.g. system:tp:scaled / system:sl:xxx by strategy before sync).
+		closeReason := "sync"
+		if pos.CloseReason != "" {
+			closeReason = pos.CloseReason
+		}
 		return s.db.Model(&TraderPosition{}).Where("id = ?", id).Updates(map[string]interface{}{
 			"quantity":     0,
 			"fee":          newFee,
@@ -275,7 +279,7 @@ func (s *PositionStore) ReducePositionQuantity(id int64, reduceQty float64, exit
 			"realized_pnl": newPnL,
 			"status":       "CLOSED",
 			"exit_time":    nowMs,
-			"close_reason": "sync",
+			"close_reason": closeReason,
 			"updated_at":   nowMs,
 		}).Error
 	}
@@ -359,10 +363,25 @@ func (s *PositionStore) SetPendingCloseReason(id int64, closeReason string) erro
 }
 
 // SetPendingCloseReasonBySymbol pre-sets close_reason on an OPEN position by symbol and side.
+// Uses same symbol fallback as GetOpenPositionBySymbol (try base without USDT if no row updated),
+// so that reason is written even when DB stores symbol as "VVV" and caller passes "VVVUSDT".
 func (s *PositionStore) SetPendingCloseReasonBySymbol(traderID, symbol, side, closeReason string) error {
-	return s.db.Model(&TraderPosition{}).
+	res := s.db.Model(&TraderPosition{}).
 		Where("trader_id = ? AND symbol = ? AND side = ? AND status = ?", traderID, symbol, side, "OPEN").
-		Update("close_reason", closeReason).Error
+		Update("close_reason", closeReason)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected > 0 {
+		return nil
+	}
+	if strings.HasSuffix(symbol, "USDT") {
+		baseSymbol := strings.TrimSuffix(symbol, "USDT")
+		return s.db.Model(&TraderPosition{}).
+			Where("trader_id = ? AND symbol = ? AND side = ? AND status = ?", traderID, baseSymbol, side, "OPEN").
+			Update("close_reason", closeReason).Error
+	}
+	return nil
 }
 
 // DeleteAllOpenPositions deletes all OPEN positions for a trader

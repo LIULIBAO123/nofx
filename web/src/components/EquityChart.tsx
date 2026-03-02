@@ -22,6 +22,7 @@ import {
   TrendingUp as ArrowUp,
   TrendingDown as ArrowDown,
 } from 'lucide-react'
+import { CHART_COLORS_HEX } from '../constants/chartColors'
 
 interface EquityPoint {
   timestamp: string
@@ -248,20 +249,9 @@ export function EquityChart({ traderId, embedded = false, isSimulation = false }
               </span>
             </span>
             <div className="flex items-center gap-2 flex-wrap">
-              <span
-                className="text-sm sm:text-lg font-bold mono px-2 sm:px-3 py-1 rounded flex items-center gap-1"
-                style={{
-                  color: isProfit ? '#0ECB81' : '#F6465D',
-                  background: isProfit
-                    ? 'rgba(14, 203, 129, 0.1)'
-                    : 'rgba(246, 70, 93, 0.1)',
-                  border: `1px solid ${
-                    isProfit
-                      ? 'rgba(14, 203, 129, 0.2)'
-                      : 'rgba(246, 70, 93, 0.2)'
-                  }`,
-                }}
-              >
+                <span
+                  className={`text-sm sm:text-lg font-bold mono px-2 sm:px-3 py-1 rounded flex items-center gap-1 ${isProfit ? 'text-fin-gain bg-fin-gain/10 border border-fin-gain/20' : 'text-fin-loss bg-fin-loss/10 border border-fin-loss/20'}`}
+                >
                 {isProfit ? (
                   <ArrowUp className="w-4 h-4" />
                 ) : (
@@ -351,25 +341,25 @@ export function EquityChart({ traderId, embedded = false, isSimulation = false }
           >
             <defs>
               <linearGradient id="colorGradient" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#F0B90B" stopOpacity={0.8} />
-                <stop offset="95%" stopColor="#FCD535" stopOpacity={0.2} />
+                <stop offset="5%" stopColor={CHART_COLORS_HEX.teal} stopOpacity={0.9} />
+                <stop offset="95%" stopColor={CHART_COLORS_HEX.teal} stopOpacity={0.2} />
               </linearGradient>
             </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="#2B3139" />
+            <CartesianGrid strokeDasharray="3 3" stroke={CHART_COLORS_HEX.grid} />
             <XAxis
               dataKey="time"
-              stroke="#5E6673"
-              tick={{ fill: '#848E9C', fontSize: 11 }}
-              tickLine={{ stroke: '#2B3139' }}
+              stroke={CHART_COLORS_HEX.tick}
+              tick={{ fill: CHART_COLORS_HEX.tick, fontSize: 11 }}
+              tickLine={{ stroke: CHART_COLORS_HEX.grid }}
               interval={Math.floor(chartData.length / 10)}
               angle={-15}
               textAnchor="end"
               height={60}
             />
             <YAxis
-              stroke="#5E6673"
-              tick={{ fill: '#848E9C', fontSize: 12 }}
-              tickLine={{ stroke: '#2B3139' }}
+              stroke={CHART_COLORS_HEX.tick}
+              tick={{ fill: CHART_COLORS_HEX.tick, fontSize: 12 }}
+              tickLine={{ stroke: CHART_COLORS_HEX.grid }}
               domain={calculateYDomain()}
               tickFormatter={(value) =>
                 displayMode === 'dollar' ? `$${value.toFixed(0)}` : `${value}%`
@@ -378,7 +368,7 @@ export function EquityChart({ traderId, embedded = false, isSimulation = false }
             <Tooltip content={<CustomTooltip />} />
             <ReferenceLine
               y={displayMode === 'dollar' ? initialBalance : 0}
-              stroke="#474D57"
+              stroke={CHART_COLORS_HEX.grid}
               strokeDasharray="3 3"
               label={{
                 value:
@@ -394,11 +384,11 @@ export function EquityChart({ traderId, embedded = false, isSimulation = false }
               dataKey="value"
               stroke="url(#colorGradient)"
               strokeWidth={3}
-              dot={chartData.length > 50 ? false : { fill: '#F0B90B', r: 3 }}
+              dot={chartData.length > 50 ? false : { fill: CHART_COLORS_HEX.teal, r: 3 }}
               activeDot={{
                 r: 6,
-                fill: '#FCD535',
-                stroke: '#F0B90B',
+                fill: CHART_COLORS_HEX.teal,
+                stroke: CHART_COLORS_HEX.teal,
                 strokeWidth: 2,
               }}
               connectNulls={true}

@@ -3,6 +3,7 @@ package store
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -254,6 +255,81 @@ func (s *DecisionStore) GetAllLatestRecords(n int) ([]*DecisionRecord, error) {
 	}
 
 	return records, nil
+}
+
+// GetRecordsInTimeRange returns decision records for trader in [fromMs, toMs] (Unix milliseconds UTC).
+func (s *DecisionStore) GetRecordsInTimeRange(traderID string, fromMs, toMs int64) ([]*DecisionRecord, error) {
+	from := time.UnixMilli(fromMs).UTC()
+	to := time.UnixMilli(toMs).UTC()
+	var dbRecords []*DecisionRecordDB
+	err := s.db.Where("trader_id = ? AND timestamp >= ? AND timestamp <= ?", traderID, from, to).
+		Order("timestamp ASC").
+		Find(&dbRecords).Error
+	if err != nil {
+		return nil, err
+	}
+	records := make([]*DecisionRecord, len(dbRecords))
+	for i, db := range dbRecords {
+		records[i] = db.toRecord()
+	}
+	return records, nil
+}
+
+// GetInferredCloseReason finds a close_long/close_short decision near exitTimeMs for the same symbol/side
+// and returns a short label and the decision Reasoning. Used when position close_reason is empty/sync/unknown.
+// Symbol matching is normalized (VVV vs VVVUSDT both match).
+func (s *DecisionStore) GetInferredCloseReason(traderID, symbol, side string, exitTimeMs int64) (reasonLabel string, reasoning string, ok bool) {
+	const windowBeforeMs = 5 * 60 * 1000  // 5 min before
+	const windowAfterMs = 2 * 60 * 1000   // 2 min after
+	fromMs := exitTimeMs - windowBeforeMs
+	toMs := exitTimeMs + windowAfterMs
+	records, err := s.GetRecordsInTimeRange(traderID, fromMs, toMs)
+	if err != nil || len(records) == 0 {
+		return "", "", false
+	}
+	normSymbol := strings.ToUpper(symbol)
+	if !strings.HasSuffix(normSymbol, "USDT") {
+		normSymbol = normSymbol + "USDT"
+	}
+	expectAction := "close_long"
+	if strings.ToUpper(side) == "SHORT" {
+		expectAction = "close_short"
+	}
+	for _, rec := range records {
+		for _, d := range rec.Decisions {
+			if d.Action != expectAction {
+				continue
+			}
+			ds := strings.ToUpper(strings.TrimSpace(d.Symbol))
+			if ds == "" {
+				continue
+			}
+			if !strings.HasSuffix(ds, "USDT") {
+				ds = ds + "USDT"
+			}
+			if ds != normSymbol {
+				continue
+			}
+			reasoning = strings.TrimSpace(d.Reasoning)
+			if reasoning == "" {
+				reasoning = d.Action
+			}
+			reasonLabel = inferCloseReasonLabel(reasoning)
+			return reasonLabel, reasoning, true
+		}
+	}
+	return "", "", false
+}
+
+func inferCloseReasonLabel(reasoning string) string {
+	r := strings.ToLower(reasoning)
+	if strings.Contains(r, "take profit") || strings.Contains(r, "止盈") {
+		return "系统止盈"
+	}
+	if strings.Contains(r, "stop loss") || strings.Contains(r, "止损") {
+		return "系统止损"
+	}
+	return "系统平仓"
 }
 
 // GetRecordsByDate gets all records for a specified trader on a specified date

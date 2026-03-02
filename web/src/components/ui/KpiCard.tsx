@@ -24,14 +24,14 @@ export function KpiCard({
   className = '',
 }: KpiCardProps) {
   const trendColor = {
-    up: 'text-emerald-400',
-    down: 'text-rose-400',
+    up: 'text-fin-gain',
+    down: 'text-fin-loss',
     neutral: 'text-slate-400',
   }[trend];
 
   const trendBg = {
-    up: 'bg-emerald-500/10',
-    down: 'bg-rose-500/10',
+    up: 'bg-fin-gain/10',
+    down: 'bg-fin-loss/10',
     neutral: 'bg-slate-500/10',
   }[trend];
 
@@ -52,21 +52,21 @@ export function KpiCard({
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
-      className={`modern-card p-6 group ${className}`}
+      className={`modern-card rounded-2xl p-4 lg:p-5 group ${className}`}
     >
       <div className="flex items-start justify-between mb-4">
-        <div className="text-sm font-medium text-slate-400 uppercase tracking-wider">
+        <div className="text-sm font-bold font-display text-slate-400 uppercase tracking-[0.08em]">
           {label}
         </div>
         {Icon && (
-          <div className="p-2 rounded-lg bg-teal-500/10 text-teal-400 group-hover:bg-teal-500/20 transition-colors">
+          <div className="p-2.5 rounded-xl bg-primary/10 text-primary group-hover:bg-primary/20 transition-colors duration-200">
             <Icon className="w-4 h-4" />
           </div>
         )}
       </div>
 
       <div className="space-y-2">
-        <div className="text-3xl font-bold font-mono text-slate-50">
+        <div className="text-2xl lg:text-3xl font-bold font-mono text-slate-50 tracking-tighter">
           {value}
         </div>
 

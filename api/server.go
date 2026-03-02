@@ -45,7 +45,6 @@ type Server struct {
 	store           *store.Store
 	cryptoHandler   *CryptoHandler
 	backtestManager *backtest.Manager
-	debateHandler   *DebateHandler
 	httpServer      *http.Server
 	port            int
 }
@@ -63,21 +62,12 @@ func NewServer(traderManager *manager.TraderManager, st *store.Store, cryptoServ
 	// Create crypto handler
 	cryptoHandler := NewCryptoHandler(cryptoService)
 
-	// Create debate store and handler
-	debateStore := store.NewDebateStore(st.GormDB())
-	if err := debateStore.InitSchema(); err != nil {
-		logger.Errorf("Failed to initialize debate schema: %v", err)
-	}
-	debateHandler := NewDebateHandler(debateStore, st.Strategy(), st.AIModel())
-	debateHandler.SetTraderManager(traderManager)
-
 	s := &Server{
 		router:          router,
 		traderManager:   traderManager,
 		store:           st,
 		cryptoHandler:   cryptoHandler,
 		backtestManager: backtestManager,
-		debateHandler:   debateHandler,
 		port:            port,
 	}
 
@@ -194,19 +184,6 @@ func (s *Server) setupRoutes() {
 			protected.DELETE("/strategies/:id", s.handleDeleteStrategy)
 			protected.POST("/strategies/:id/activate", s.handleActivateStrategy)
 			protected.POST("/strategies/:id/duplicate", s.handleDuplicateStrategy)
-
-			// Debate Arena
-			protected.GET("/debates", s.debateHandler.HandleListDebates)
-			protected.GET("/debates/personalities", s.debateHandler.HandleGetPersonalities)
-			protected.GET("/debates/:id", s.debateHandler.HandleGetDebate)
-			protected.POST("/debates", s.debateHandler.HandleCreateDebate)
-			protected.POST("/debates/:id/start", s.debateHandler.HandleStartDebate)
-			protected.POST("/debates/:id/cancel", s.debateHandler.HandleCancelDebate)
-			protected.POST("/debates/:id/execute", s.debateHandler.HandleExecuteDebate)
-			protected.DELETE("/debates/:id", s.debateHandler.HandleDeleteDebate)
-			protected.GET("/debates/:id/messages", s.debateHandler.HandleGetMessages)
-			protected.GET("/debates/:id/votes", s.debateHandler.HandleGetVotes)
-			protected.GET("/debates/:id/stream", s.debateHandler.HandleDebateStream)
 
 			// Data for specified trader (using query parameter ?trader_id=xxx)
 			protected.GET("/status", s.handleStatus)
@@ -2418,6 +2395,29 @@ func (s *Server) handlePositionHistory(c *gin.Context) {
 		return
 	}
 
+	// When close_reason is empty/sync/unknown, try to infer from decision records (same symbol/side near exit_time)
+	var positionsResp []map[string]interface{}
+	if data, err := json.Marshal(positions); err == nil && json.Unmarshal(data, &positionsResp) == nil {
+		for i, pos := range positions {
+			if (pos.CloseReason == "" || pos.CloseReason == "sync" || pos.CloseReason == "unknown") && pos.ExitTime > 0 {
+				if label, detail, ok := store.Decision().GetInferredCloseReason(trader.GetID(), pos.Symbol, pos.Side, pos.ExitTime); ok {
+					positionsResp[i]["inferred_close_reason"] = label
+					positionsResp[i]["inferred_close_reason_detail"] = detail
+				}
+			}
+		}
+	}
+	if positionsResp == nil {
+		positionsResp = make([]map[string]interface{}, len(positions))
+		for i, p := range positions {
+			if b, _ := json.Marshal(p); len(b) > 0 {
+				var m map[string]interface{}
+				_ = json.Unmarshal(b, &m)
+				positionsResp[i] = m
+			}
+		}
+	}
+
 	// Get statistics
 	stats, _ := store.Position().GetFullStats(trader.GetID())
 
@@ -2428,7 +2428,7 @@ func (s *Server) handlePositionHistory(c *gin.Context) {
 	directionStats, _ := store.Position().GetDirectionStats(trader.GetID())
 
 	c.JSON(http.StatusOK, gin.H{
-		"positions":       positions,
+		"positions":       positionsResp,
 		"stats":           stats,
 		"symbol_stats":    symbolStats,
 		"direction_stats": directionStats,

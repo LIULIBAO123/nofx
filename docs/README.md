@@ -104,6 +104,17 @@ Welcome to the NOFX documentation! This page helps you find the right documentat
 
 ---
 
+## 📝 系统修改记录与归档 / Change Log & Archive
+
+**约定：** 系统功能/配置/部署等变更，统一记录在 **一个文件** 内，不再在项目根目录新增零散说明。
+
+| Document | Description | 描述 |
+|----------|-------------|------|
+| [**更新记录**](更新记录.md) | **所有修改的唯一条目**，按时间记录 | 系统修改记录（唯一记录处） |
+| [历史文档归档](archive/README.md) | 已过时或一次性说明/报告 | 旧版说明、一次性报告 |
+
+---
+
 ## 📄 Legal & Policies / 法律与政策
 
 | Document | Description | 描述 |

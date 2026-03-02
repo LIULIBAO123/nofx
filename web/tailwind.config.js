@@ -64,6 +64,30 @@ export default {
         'nofx-accent': 'oklch(0.55 0.18 180)',
         'nofx-success': 'oklch(0.65 0.18 145)',
         'nofx-danger': 'oklch(0.60 0.22 12)',
+        // 模板语义色 (Meridian / 子午线)
+        primary: {
+          DEFAULT: 'oklch(0.55 0.18 180)',
+          foreground: 'oklch(0.98 0.002 260)',
+        },
+        accent: 'oklch(0.60 0.18 240)',
+        'surface-card': 'oklch(0.13 0.008 260 / 0.6)',
+        'muted-foreground': 'oklch(0.62 0.010 260)',
+        'fin-gain': 'oklch(0.76 0.16 162)',
+        'fin-loss': 'oklch(0.62 0.22 18)',
+        'chart-3': 'oklch(0.76 0.14 75)',
+        // 与现有组件兼容的 nofx 文本/背景
+        'nofx-text-main': 'oklch(0.98 0.002 260)',
+        'nofx-text-muted': 'oklch(0.62 0.010 260)',
+        'nofx-bg': 'oklch(0.11 0.008 260)',
+        'nofx-bg-lighter': 'oklch(0.15 0.008 260)',
+        'nofx-green': 'oklch(0.65 0.18 145)',
+        'nofx-red': 'oklch(0.60 0.22 12)',
+      },
+      borderRadius: {
+        '2xl': '16px',
+        xl: '12px',
+        lg: '8px',
+        md: '6px',
       },
       fontFamily: {
         sans: ['DM Sans', 'Inter', 'ui-sans-serif', 'system-ui'],

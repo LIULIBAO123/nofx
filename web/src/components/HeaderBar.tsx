@@ -13,10 +13,6 @@ type Page =
   | 'simulation'
   | 'backtest'
   | 'strategy'
-  | 'strategy-market'
-  | 'data'
-  | 'debate'
-  | 'faq'
   | 'login'
   | 'register'
 
@@ -87,7 +83,7 @@ export default function HeaderBar({
           className="flex items-center gap-2 hover:opacity-80 transition-opacity cursor-pointer"
         >
           <img src="/icons/nofx.svg" alt="NOFX Logo" className="w-7 h-7" />
-          <span className="text-lg font-bold text-nofx-gold">
+          <span className="text-base font-extrabold font-display tracking-tight text-primary">
             NOFX
           </span>
         </div>
@@ -100,16 +96,12 @@ export default function HeaderBar({
             {(() => {
               // Define all navigation tabs
               const navTabs: { page: Page; path: string; label: string; requiresAuth: boolean }[] = [
-                { page: 'data', path: '/data', label: language === 'zh' ? '数据' : 'Data', requiresAuth: false },
-                { page: 'strategy-market', path: '/strategy-market', label: language === 'zh' ? '策略市场' : 'Market', requiresAuth: true },
                 { page: 'traders', path: '/traders', label: t('configNav', language), requiresAuth: true },
                 { page: 'trader', path: '/dashboard', label: t('dashboardNav', language), requiresAuth: true },
                 { page: 'simulation', path: '/simulation', label: language === 'zh' ? '实盘模拟' : 'Paper', requiresAuth: true },
                 { page: 'strategy', path: '/strategy', label: t('strategyNav', language), requiresAuth: true },
                 { page: 'competition', path: '/competition', label: t('realtimeNav', language), requiresAuth: true },
-                { page: 'debate', path: '/debate', label: t('debateNav', language), requiresAuth: true },
                 { page: 'backtest', path: '/backtest', label: 'Backtest', requiresAuth: true },
-                { page: 'faq', path: '/faq', label: t('faqNav', language), requiresAuth: false },
               ]
 
               const handleNavClick = (tab: typeof navTabs[0]) => {
@@ -129,14 +121,11 @@ export default function HeaderBar({
                 <button
                   key={tab.page}
                   onClick={() => handleNavClick(tab)}
-                  className={`text-sm font-bold transition-all duration-300 relative focus:outline-2 focus:outline-yellow-500 px-3 py-2 rounded-lg
-                    ${currentPage === tab.page ? 'text-nofx-gold' : 'text-nofx-text-muted hover:text-nofx-gold'}`}
+                  className={`text-[13px] font-semibold transition-all duration-200 relative focus:outline-2 focus:outline-teal-500 px-4 py-2.5 rounded-xl
+                    ${currentPage === tab.page
+                    ? 'text-primary-foreground bg-primary'
+                    : 'text-nofx-text-muted hover:text-primary hover:bg-primary/10'}`}
                 >
-                  {currentPage === tab.page && (
-                    <span
-                      className="absolute inset-0 rounded-lg bg-nofx-gold/15 -z-10"
-                    />
-                  )}
                   {tab.label}
                 </button>
               ))
@@ -152,7 +141,7 @@ export default function HeaderBar({
                 href={OFFICIAL_LINKS.github}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="p-2 rounded-lg transition-all hover:scale-110 text-nofx-text-muted hover:text-white hover:bg-white/5"
+                className="p-2.5 rounded-xl transition-all duration-200 text-nofx-text-muted hover:text-white hover:bg-accent/50"
                 title="GitHub"
               >
                 <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor">
@@ -164,7 +153,7 @@ export default function HeaderBar({
                 href={OFFICIAL_LINKS.twitter}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="p-2 rounded-lg transition-all hover:scale-110 text-nofx-text-muted hover:text-[#1DA1F2] hover:bg-[#1DA1F2]/10"
+                className="p-2.5 rounded-xl transition-all duration-200 text-nofx-text-muted hover:text-[#1DA1F2] hover:bg-accent/50"
                 title="Twitter"
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
@@ -176,7 +165,7 @@ export default function HeaderBar({
                 href={OFFICIAL_LINKS.telegram}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="p-2 rounded-lg transition-all hover:scale-110 text-nofx-text-muted hover:text-[#0088cc] hover:bg-[#0088cc]/10"
+                className="p-2.5 rounded-xl transition-all duration-200 text-nofx-text-muted hover:text-[#0088cc] hover:bg-accent/50"
                 title="Telegram"
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
@@ -195,7 +184,7 @@ export default function HeaderBar({
                 <div className="relative" ref={userDropdownRef}>
                   <button
                     onClick={() => setUserDropdownOpen(!userDropdownOpen)}
-                    className="flex items-center gap-2 px-3 py-2 rounded transition-colors bg-nofx-bg-lighter border border-nofx-gold/20 hover:bg-white/5"
+                    className="flex items-center gap-2 px-3 py-2 rounded-xl transition-all duration-200 bg-surface-card border border-white/10 hover:bg-accent/50"
                   >
                     <div className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold bg-nofx-gold text-black">
                       {user.email[0].toUpperCase()}
@@ -222,7 +211,7 @@ export default function HeaderBar({
                             onLogout()
                             setUserDropdownOpen(false)
                           }}
-                          className="w-full px-3 py-2 text-sm font-semibold transition-colors hover:opacity-80 text-center bg-nofx-danger/20 text-nofx-danger"
+                          className="w-full px-3 py-2 text-sm font-semibold transition-all duration-200 text-center text-fin-loss/70 hover:text-fin-loss hover:bg-fin-loss/5 rounded-xl"
                         >
                           {t('exitLogin', language)}
                         </button>
@@ -245,7 +234,7 @@ export default function HeaderBar({
                   {registrationEnabled && (
                     <a
                       href="/register"
-                      className="px-4 py-2 rounded font-semibold text-sm transition-colors hover:opacity-90 bg-nofx-gold text-black"
+                      className="px-3.5 py-2 rounded-xl text-xs font-bold transition-all duration-200 text-primary-foreground bg-primary hover:bg-primary/90"
                     >
                       {t('signUp', language)}
                     </a>
@@ -258,7 +247,7 @@ export default function HeaderBar({
             <div className="relative" ref={dropdownRef}>
               <button
                 onClick={() => setLanguageDropdownOpen(!languageDropdownOpen)}
-                className="flex items-center gap-2 px-3 py-2 rounded transition-colors text-nofx-text-muted hover:bg-white/5"
+                className="flex items-center gap-2 px-3 py-2 rounded-xl transition-all duration-200 text-nofx-text-muted hover:bg-accent/50"
               >
                 <span className="text-lg">
                   {language === 'zh' ? '🇨🇳' : '🇺🇸'}
@@ -331,15 +320,12 @@ export default function HeaderBar({
               <div className="flex flex-col gap-6 mb-12">
                 {(() => {
                   const navTabs: { page: Page; path: string; label: string; requiresAuth: boolean }[] = [
-                    { page: 'data', path: '/data', label: language === 'zh' ? '数据' : 'Data', requiresAuth: false },
-                    { page: 'strategy-market', path: '/strategy-market', label: language === 'zh' ? '策略市场' : 'Market', requiresAuth: true },
                     { page: 'traders', path: '/traders', label: t('configNav', language), requiresAuth: true },
                     { page: 'trader', path: '/dashboard', label: t('dashboardNav', language), requiresAuth: true },
+                    { page: 'simulation', path: '/simulation', label: language === 'zh' ? '实盘模拟' : 'Paper', requiresAuth: true },
                     { page: 'strategy', path: '/strategy', label: t('strategyNav', language), requiresAuth: true },
                     { page: 'competition', path: '/competition', label: t('realtimeNav', language), requiresAuth: true },
-                    { page: 'debate', path: '/debate', label: t('debateNav', language), requiresAuth: true },
                     { page: 'backtest', path: '/backtest', label: 'Backtest', requiresAuth: true },
-                    { page: 'faq', path: '/faq', label: t('faqNav', language), requiresAuth: false },
                   ]
 
                   const handleMobileNavClick = (tab: typeof navTabs[0]) => {

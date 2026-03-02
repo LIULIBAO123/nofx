@@ -110,10 +110,30 @@ function parseCloseReason(
       type: zh ? `触发动态止盈：${t.zh}` : `Dynamic TP: ${t.en}`,
     }
   }
-  // sync, manual, or legacy
+  // 交易所同步：平仓由 OrderSync 从交易所拉取，多数交易所不返回「止损/止盈/手动」等具体原因，故显示为同步
+  if (closeReason === 'sync') {
+    return {
+      method: zh ? '交易所同步' : 'Exchange sync',
+      type: zh ? '由交易所同步获得（可能为系统止损/止盈或外部平仓）' : 'Closed position synced from exchange (may be SL/TP or external)',
+    }
+  }
+  if (closeReason === 'unknown') {
+    return {
+      method: zh ? '交易所同步' : 'Exchange sync',
+      type: zh ? '由交易所同步获得（交易所未返回具体平仓原因）' : 'Synced from exchange (reason not provided by exchange)',
+    }
+  }
+  // 仅当明确为 manual 时显示为手动（如用户在别处点平仓）
+  if (closeReason === 'manual') {
+    return {
+      method: zh ? '手动' : 'Manual',
+      type: zh ? '手动平仓' : 'Manual close',
+    }
+  }
+  // 其他或历史空值：不显示为「手动」，避免与同步混淆
   return {
-    method: zh ? '手动' : 'Manual',
-    type: zh ? '交易所/同步或手动平仓' : 'Exchange sync or manual close',
+    method: zh ? '交易所同步' : 'Exchange sync',
+    type: zh ? '由交易所同步获得' : 'Synced from exchange',
   }
 }
 
@@ -905,16 +925,26 @@ export function PositionHistory({ traderId }: PositionHistoryProps) {
                           <span style={{ color: '#848E9C' }}>{(position.atr_period != null && position.atr_period > 0) ? String(position.atr_period) : '—'}</span>
                         </div>
                         {(() => {
+                          const needInfer = !position.close_reason || position.close_reason === 'sync' || position.close_reason === 'unknown'
+                          const inferred = needInfer && position.inferred_close_reason
                           const { method, type } = parseCloseReason(position.close_reason, language)
+                          const displayMethod = inferred
+                            ? (language === 'zh' ? `推断：${position.inferred_close_reason}` : `Inferred: ${position.inferred_close_reason}`)
+                            : method
+                          const displayType = inferred && position.inferred_close_reason_detail
+                            ? position.inferred_close_reason_detail
+                            : inferred
+                              ? (language === 'zh' ? '根据同期决策记录推断' : 'Inferred from decision record')
+                              : type
                           return (
                             <>
                               <div className="flex items-center gap-1">
                                 <span style={{ color: '#848E9C' }}>{language === 'zh' ? '平仓方式' : 'Close by'}</span>
-                                <span style={{ color: '#B7BDC6' }}>{method}</span>
+                                <span style={{ color: inferred ? '#94a3b8' : '#B7BDC6' }}>{displayMethod}</span>
                               </div>
                               <div className="flex items-center gap-1">
                                 <span style={{ color: '#848E9C' }}>{language === 'zh' ? '平仓类型' : 'Close type'}</span>
-                                <span style={{ color: '#B7BDC6' }}>{type}</span>
+                                <span style={{ color: inferred ? '#94a3b8' : '#B7BDC6' }} title={position.inferred_close_reason_detail}>{displayType}</span>
                               </div>
                             </>
                           )

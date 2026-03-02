@@ -1325,7 +1325,7 @@ func (at *AutoTrader) executeDecisionWithRecord(decision *kernel.Decision, actio
 	}
 }
 
-// ExecuteDecision executes a trading decision from external sources (e.g., debate consensus)
+// ExecuteDecision executes a trading decision from external sources
 // This is a public method that can be called by other modules
 func (at *AutoTrader) ExecuteDecision(d *kernel.Decision) error {
 	logger.Infof("[%s] Executing external decision: %s %s", at.name, d.Action, d.Symbol)
@@ -3237,9 +3237,10 @@ func (at *AutoTrader) checkDynamicStopLossTakeProfit() error {
 	}
 	if takeProfitConfig != nil && takeProfitConfig.Enabled {
 		takeProfitChecker = kernel.NewTakeProfitChecker(takeProfitConfig)
-		scaledOn := takeProfitConfig.ScaledEnabled != nil && *takeProfitConfig.ScaledEnabled
+		scaledOn := (takeProfitConfig.ScaledEnabled != nil && *takeProfitConfig.ScaledEnabled) || (len(takeProfitConfig.ScaledLevels) > 0 && (takeProfitConfig.ScaledEnabled == nil || *takeProfitConfig.ScaledEnabled))
 		levelCount := len(takeProfitConfig.ScaledLevels)
-		logger.Infof("📋 Take profit checker created: enabled=true, scaled_enabled=%v, scaled_levels=%d", scaledOn, levelCount)
+		scaledEnabledFromConfig := takeProfitConfig.ScaledEnabled != nil && *takeProfitConfig.ScaledEnabled
+		logger.Infof("📋 Take profit checker created: enabled=true, scaled_effective=%v (config scaled_enabled=%v, scaled_levels=%d) — 分层止盈: %v", scaledOn, scaledEnabledFromConfig, levelCount, map[bool]string{true: "已启用", false: "未启用"}[scaledOn && levelCount > 0])
 	}
 
 	currentPositionKeys := make(map[string]bool) // for cleaning slConfirmCount when position is closed
@@ -3600,9 +3601,9 @@ func (at *AutoTrader) executeTakeProfit(position *kernel.PositionInfo, signal *k
 	closeReason := "system:tp:" + signal.Type
 	at.setPendingCloseReason(closeReason)
 
-	// Pre-set closeReason on the OPEN position so OrderSync can pick it up (for full close only)
-	// Partial closes don't change status to CLOSED, so this only matters for full close
-	if at.store != nil && signal.PartialPercent >= 100 {
+	// Pre-set closeReason on the OPEN position so OrderSync can pick it up when the position is fully closed.
+	// Must set on every TP execution (including partial/layered), so the last close that brings quantity to 0 still has a reason.
+	if at.store != nil {
 		normalizedSymbol := market.Normalize(position.Symbol)
 		side := strings.ToUpper(position.Side)
 		if err := at.store.Position().SetPendingCloseReasonBySymbol(at.id, normalizedSymbol, side, closeReason); err != nil {

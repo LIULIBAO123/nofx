@@ -41,16 +41,17 @@ func (c *TakeProfitChecker) CheckTakeProfit(
 
 	signals := make([]*TakeProfitSignal, 0)
 
-	// 1. Check fixed take profit levels
-	if c.config.FixedEnabled != nil && *c.config.FixedEnabled && c.config.FixedPercent != nil {
-		if signal := c.checkFixedTakeProfit(position, currentPrice); signal.Triggered {
+	// 1. Check scaled take profit first so partial closes can trigger before fixed (when both would fire at same level)
+	scaledEnabled := (c.config.ScaledEnabled != nil && *c.config.ScaledEnabled) || (len(c.config.ScaledLevels) > 0 && (c.config.ScaledEnabled == nil || *c.config.ScaledEnabled))
+	if scaledEnabled {
+		if signal := c.checkScaledTakeProfit(position, currentPrice); signal.Triggered {
 			signals = append(signals, signal)
 		}
 	}
 
-	// 2. Check scaled take profit levels
-	if c.config.ScaledEnabled != nil && *c.config.ScaledEnabled {
-		if signal := c.checkScaledTakeProfit(position, currentPrice); signal.Triggered {
+	// 2. Check fixed take profit levels
+	if c.config.FixedEnabled != nil && *c.config.FixedEnabled && c.config.FixedPercent != nil {
+		if signal := c.checkFixedTakeProfit(position, currentPrice); signal.Triggered {
 			signals = append(signals, signal)
 		}
 	}

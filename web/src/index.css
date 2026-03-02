@@ -1039,6 +1039,15 @@ button:disabled {
   border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
+.nofx-glass {
+  background: var(--panel-bg);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--panel-border);
+  border-radius: 16px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
 /* Premium Input Styles */
 /* Premium Input Styles */
 input,
@@ -1352,7 +1361,8 @@ tr:last-child {
 }
 
 tr:hover {
-  background: rgba(240, 185, 11, 0.03);
+  background: oklch(0.60 0.18 240 / 0.2);
+  transition: background 0.2s ease;
 }
 
 /* Badge/Chip styles */
@@ -1609,12 +1619,13 @@ tr:hover {
 .modern-card:hover {
   background: oklch(0.15 0.008 260 / 0.7);
   border-color: oklch(0.55 0.18 180 / 0.3);
-  box-shadow: 
+  box-shadow:
     0 20px 25px -5px rgba(0, 0, 0, 0.2),
     0 10px 10px -5px rgba(0, 0, 0, 0.1),
     0 0 0 1px oklch(0.55 0.18 180 / 0.1),
     inset 0 1px 0 0 oklch(0.98 0.002 260 / 0.1);
-  transform: translateY(-4px) scale(1.01);
+  transform: translateY(-2px) scale(1.01);
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s, background 0.3s, border-color 0.3s;
 }
 
 .modern-card:hover::before {

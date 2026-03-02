@@ -357,10 +357,10 @@ export function TraderDashboardPage({
     return (
         <DeepVoidBackground className="min-h-screen pb-12" disableAnimation>
             <GrainOverlay />
-            <div className="w-full px-4 md:px-8 relative z-10 pt-6">
+            <div className="w-full px-5 lg:px-10 xl:px-14 py-6 lg:py-8 relative z-10 flex flex-col gap-5">
                 {/* Trader Header */}
-                <div
-                    className="mb-6 rounded-lg p-6 animate-scale-in modern-card group"
+                        <div
+                            className="rounded-2xl p-5 lg:p-6 animate-scale-in modern-card group"
                     style={{
                         background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.6) 0%, rgba(15, 23, 42, 0.4) 100%)',
                     }}
@@ -560,8 +560,8 @@ export function TraderDashboardPage({
                     </div>
                 )}
 
-                {/* Account Overview */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+                {/* Account Overview - 模板: KPI 卡片行 gap-3 lg:gap-4 */}
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
                     <StatCard
                         title={t('totalEquity', language)}
                         value={`${account?.total_equity?.toFixed(2) || '0.00'}`}
@@ -606,14 +606,14 @@ export function TraderDashboardPage({
                     </div>
                 )}
 
-                {/* Main Content Area */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                {/* Main Content Area - 模板: 区块间距 gap-5 */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
                     {/* Left Column: Charts + Positions */}
                     <div className="space-y-6">
                         {/* Chart Tabs (Equity / K-line) */}
                         <div
                             ref={chartSectionRef}
-                            className="chart-container animate-slide-in scroll-mt-32 backdrop-blur-sm"
+                            className="chart-container rounded-2xl p-5 lg:p-6 animate-slide-in scroll-mt-32 backdrop-blur-sm"
                             style={{ animationDelay: '0.1s' }}
                         >
                             <ChartTabs
@@ -630,7 +630,7 @@ export function TraderDashboardPage({
 
                         {/* Current Positions */}
                         <div
-                            className="nofx-glass p-6 animate-slide-in relative overflow-hidden group"
+                            className="nofx-glass rounded-2xl p-5 lg:p-6 animate-slide-in relative overflow-hidden group"
                             style={{ animationDelay: '0.15s' }}
                         >
                             <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity">
@@ -662,23 +662,23 @@ export function TraderDashboardPage({
                                         <table className="w-full text-xs">
                                             <thead className="text-left border-b border-white/5">
                                                 <tr>
-                                                    <th className="px-1 pb-3 font-semibold text-nofx-text-muted whitespace-nowrap text-left">{t('symbol', language)}</th>
-                                                    <th className="px-1 pb-3 font-semibold text-nofx-text-muted whitespace-nowrap text-center">{t('side', language)}</th>
-                                                    <th className="px-1 pb-3 font-semibold text-nofx-text-muted whitespace-nowrap text-center">{language === 'zh' ? '操作' : 'Action'}</th>
-                                                    <th className="px-1 pb-3 font-semibold text-nofx-text-muted whitespace-nowrap text-right hidden md:table-cell" title={t('entryPrice', language)}>{language === 'zh' ? '入场价' : 'Entry'}</th>
-                                                    <th className="px-1 pb-3 font-semibold text-nofx-text-muted whitespace-nowrap text-right hidden md:table-cell" title={t('markPrice', language)}>{language === 'zh' ? '标记价' : 'Mark'}</th>
-                                                    <th className="px-1 pb-3 font-semibold text-nofx-text-muted whitespace-nowrap text-right" title={t('quantity', language)}>{language === 'zh' ? '数量' : 'Qty'}</th>
-                                                    <th className="px-1 pb-3 font-semibold text-nofx-text-muted whitespace-nowrap text-right hidden md:table-cell" title={t('positionValue', language)}>{language === 'zh' ? '价值' : 'Value'}</th>
-                                                    <th className="px-1 pb-3 font-semibold text-nofx-text-muted whitespace-nowrap text-center hidden md:table-cell" title={t('leverage', language)}>{language === 'zh' ? '杠杆' : 'Lev.'}</th>
-                                                    <th className="px-1 pb-3 font-semibold text-nofx-text-muted whitespace-nowrap text-right" title={t('unrealizedPnL', language)}>{language === 'zh' ? '未实现盈亏' : 'uPnL'}</th>
-                                                    <th className="px-1 pb-3 font-semibold text-nofx-text-muted whitespace-nowrap text-right hidden md:table-cell" title={t('liqPrice', language)}>{language === 'zh' ? '强平价' : 'Liq.'}</th>
+                                                    <th className="p-4 text-[11px] font-semibold text-nofx-text-muted whitespace-nowrap text-left uppercase tracking-[0.08em]">{t('symbol', language)}</th>
+                                                    <th className="p-4 text-[11px] font-semibold text-nofx-text-muted whitespace-nowrap text-center uppercase tracking-[0.08em]">{t('side', language)}</th>
+                                                    <th className="p-4 text-[11px] font-semibold text-nofx-text-muted whitespace-nowrap text-center uppercase tracking-[0.08em]">{language === 'zh' ? '操作' : 'Action'}</th>
+                                                    <th className="p-4 text-[11px] font-semibold text-nofx-text-muted whitespace-nowrap text-right hidden md:table-cell uppercase tracking-[0.08em]" title={t('entryPrice', language)}>{language === 'zh' ? '入场价' : 'Entry'}</th>
+                                                    <th className="p-4 text-[11px] font-semibold text-nofx-text-muted whitespace-nowrap text-right hidden md:table-cell uppercase tracking-[0.08em]" title={t('markPrice', language)}>{language === 'zh' ? '标记价' : 'Mark'}</th>
+                                                    <th className="p-4 text-[11px] font-semibold text-nofx-text-muted whitespace-nowrap text-right uppercase tracking-[0.08em]" title={t('quantity', language)}>{language === 'zh' ? '数量' : 'Qty'}</th>
+                                                    <th className="p-4 text-[11px] font-semibold text-nofx-text-muted whitespace-nowrap text-right hidden md:table-cell uppercase tracking-[0.08em]" title={t('positionValue', language)}>{language === 'zh' ? '价值' : 'Value'}</th>
+                                                    <th className="p-4 text-[11px] font-semibold text-nofx-text-muted whitespace-nowrap text-center hidden md:table-cell uppercase tracking-[0.08em]" title={t('leverage', language)}>{language === 'zh' ? '杠杆' : 'Lev.'}</th>
+                                                    <th className="p-4 text-[11px] font-semibold text-nofx-text-muted whitespace-nowrap text-right uppercase tracking-[0.08em]" title={t('unrealizedPnL', language)}>{language === 'zh' ? '未实现盈亏' : 'uPnL'}</th>
+                                                    <th className="p-4 text-[11px] font-semibold text-nofx-text-muted whitespace-nowrap text-right hidden md:table-cell uppercase tracking-[0.08em]" title={t('liqPrice', language)}>{language === 'zh' ? '强平价' : 'Liq.'}</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
                                                 {paginatedPositions.map((pos, i) => (
                                                     <React.Fragment key={i}>
                                                     <tr
-                                                        className="border-b border-white/5 last:border-0 transition-all hover:bg-white/5 cursor-pointer group/row"
+                                                        className="border-b border-white/5 last:border-0 transition-all duration-200 hover:bg-accent/20 cursor-pointer group/row"
                                                         onClick={() => {
                                                             setSelectedChartSymbol(pos.symbol)
                                                             setChartUpdateKey(Date.now())
@@ -690,17 +690,17 @@ export function TraderDashboardPage({
                                                             }
                                                         }}
                                                     >
-                                                        <td className="px-1 py-3 font-mono font-semibold whitespace-nowrap text-left text-nofx-text-main group-hover/row:text-white transition-colors">
+                                                        <td className="p-4 font-mono font-semibold whitespace-nowrap text-left text-nofx-text-main group-hover/row:text-white transition-colors">
                                                             {pos.symbol}
                                                         </td>
-                                                        <td className="px-1 py-3 whitespace-nowrap text-center">
+                                                        <td className="p-4 whitespace-nowrap text-center">
                                                             <span
-                                                                className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${pos.side === 'long' ? 'bg-nofx-green/10 text-nofx-green shadow-[0_0_8px_rgba(14,203,129,0.2)]' : 'bg-nofx-red/10 text-nofx-red shadow-[0_0_8px_rgba(246,70,93,0.2)]'}`}
+                                                                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold uppercase tracking-[0.08em] ${pos.side === 'long' ? 'bg-fin-gain/10 text-fin-gain' : 'bg-fin-loss/10 text-fin-loss'}`}
                                                             >
                                                                 {t(pos.side === 'long' ? 'long' : 'short', language)}
                                                             </span>
                                                         </td>
-                                                        <td className="px-1 py-3 whitespace-nowrap text-center">
+                                                        <td className="p-4 whitespace-nowrap text-center">
                                                             <button
                                                                 type="button"
                                                                 onClick={(e) => {
@@ -708,7 +708,7 @@ export function TraderDashboardPage({
                                                                     handleClosePosition(pos.symbol, pos.side.toUpperCase())
                                                                 }}
                                                                 disabled={closingPosition === pos.symbol}
-                                                                className="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed mx-auto bg-nofx-red/10 text-nofx-red border border-nofx-red/30 hover:bg-nofx-red/20"
+                                                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-[11px] font-semibold transition-all duration-200 hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed mx-auto bg-fin-loss/10 text-fin-loss hover:bg-fin-loss/20"
                                                                 title={language === 'zh' ? '平仓' : 'Close Position'}
                                                             >
                                                                 {closingPosition === pos.symbol ? (
@@ -719,21 +719,20 @@ export function TraderDashboardPage({
                                                                 {language === 'zh' ? '平仓' : 'Close'}
                                                             </button>
                                                         </td>
-                                                        <td className="px-1 py-3 font-mono whitespace-nowrap text-right text-nofx-text-main hidden md:table-cell">{formatPrice(pos.entry_price)}</td>
-                                                        <td className="px-1 py-3 font-mono whitespace-nowrap text-right text-nofx-text-main hidden md:table-cell">{formatPrice(pos.mark_price)}</td>
-                                                        <td className="px-1 py-3 font-mono whitespace-nowrap text-right text-nofx-text-main">{formatQuantity(pos.quantity)}</td>
-                                                        <td className="px-1 py-3 font-mono font-bold whitespace-nowrap text-right text-nofx-text-main hidden md:table-cell">{(pos.quantity * pos.mark_price).toFixed(2)}</td>
-                                                        <td className="px-1 py-3 font-mono whitespace-nowrap text-center text-nofx-gold hidden md:table-cell">{pos.leverage}x</td>
-                                                        <td className="px-1 py-3 font-mono whitespace-nowrap text-right">
+                                                        <td className="p-4 font-mono whitespace-nowrap text-right text-nofx-text-main hidden md:table-cell">{formatPrice(pos.entry_price)}</td>
+                                                        <td className="p-4 font-mono whitespace-nowrap text-right text-nofx-text-main hidden md:table-cell">{formatPrice(pos.mark_price)}</td>
+                                                        <td className="p-4 font-mono whitespace-nowrap text-right text-nofx-text-main">{formatQuantity(pos.quantity)}</td>
+                                                        <td className="p-4 font-mono font-bold whitespace-nowrap text-right text-nofx-text-main hidden md:table-cell">{(pos.quantity * pos.mark_price).toFixed(2)}</td>
+                                                        <td className="p-4 font-mono whitespace-nowrap text-center text-primary hidden md:table-cell">{pos.leverage}x</td>
+                                                        <td className="p-4 font-mono whitespace-nowrap text-right">
                                                             <span
-                                                                className={`font-bold ${pos.unrealized_pnl >= 0 ? 'text-nofx-green shadow-nofx-green' : 'text-nofx-red shadow-nofx-red'}`}
-                                                                style={{ textShadow: pos.unrealized_pnl >= 0 ? '0 0 10px rgba(14,203,129,0.3)' : '0 0 10px rgba(246,70,93,0.3)' }}
+                                                                className={`font-bold ${pos.unrealized_pnl >= 0 ? 'text-fin-gain' : 'text-fin-loss'}`}
                                                             >
                                                                 {pos.unrealized_pnl >= 0 ? '+' : ''}
                                                                 {pos.unrealized_pnl.toFixed(2)}
                                                             </span>
                                                         </td>
-                                                        <td className="px-1 py-3 font-mono whitespace-nowrap text-right text-nofx-text-muted hidden md:table-cell">{formatPrice(pos.liquidation_price)}</td>
+                                                        <td className="p-4 font-mono whitespace-nowrap text-right text-nofx-text-muted hidden md:table-cell">{formatPrice(pos.liquidation_price)}</td>
                                                     </tr>
                                                     {(() => {
                                                         const hasLive = pos.distance_to_sl_pct != null || pos.distance_to_tp_pct != null || pos.trailing_enabled || pos.scaled_tp_enabled || pos.support_resistance_enabled || pos.resistance_enabled
@@ -938,7 +937,7 @@ export function TraderDashboardPage({
     )
 }
 
-// Stat Card Component - Deep Void Style
+// Stat Card - 模板: KPI 卡片 rounded-2xl, p-4 lg:p-5, 区块标题 text-sm font-bold font-display, 数值 tracking-tighter, fin-gain/fin-loss
 function StatCard({
     title,
     value,
@@ -957,15 +956,15 @@ function StatCard({
     icon?: string
 }) {
     return (
-        <div className="group nofx-glass p-5 rounded-lg transition-all duration-300 hover:bg-white/5 hover:translate-y-[-2px] border border-white/5 hover:border-nofx-gold/20 relative overflow-hidden">
+        <div className="group nofx-glass rounded-2xl p-4 lg:p-5 transition-all duration-300 hover:border-primary/30 relative overflow-hidden">
             <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity text-4xl grayscale group-hover:grayscale-0">
                 {icon}
             </div>
-            <div className="text-xs mb-2 font-mono uppercase tracking-wider text-nofx-text-muted flex items-center gap-2">
+            <div className="text-sm mb-2 font-bold font-display text-nofx-text-muted flex items-center gap-2">
                 {title}
             </div>
             <div className="flex items-baseline gap-1 mb-1">
-                <div className="text-2xl font-bold font-mono text-nofx-text-main tracking-tight group-hover:text-white transition-colors">
+                <div className="text-2xl lg:text-3xl font-bold font-mono text-nofx-text-main tracking-tighter group-hover:text-white transition-colors">
                     {value}
                 </div>
                 {unit && <span className="text-xs font-mono text-nofx-text-muted opacity-60">{unit}</span>}
@@ -974,7 +973,7 @@ function StatCard({
             {change !== undefined && (
                 <div className="flex items-center gap-1">
                     <div
-                        className={`text-sm mono font-bold flex items-center gap-1 ${positive ? 'text-nofx-green' : 'text-nofx-red'}`}
+                        className={`text-xs font-bold font-mono flex items-center gap-1 ${positive ? 'text-fin-gain' : 'text-fin-loss'}`}
                     >
                         <span>{positive ? '▲' : '▼'}</span>
                         <span>{positive ? '+' : ''}{change.toFixed(2)}%</span>
@@ -982,7 +981,7 @@ function StatCard({
                 </div>
             )}
             {subtitle && (
-                <div className="text-xs mt-2 mono text-nofx-text-muted opacity-80">
+                <div className="text-[11px] mt-2 font-sans text-nofx-text-muted opacity-80">
                     {subtitle}
                 </div>
             )}

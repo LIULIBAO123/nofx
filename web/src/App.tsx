@@ -10,11 +10,7 @@ import { RegisterPage } from './components/RegisterPage'
 import { ResetPasswordPage } from './components/ResetPasswordPage'
 import { CompetitionPage } from './components/CompetitionPage'
 import { LandingPage } from './pages/LandingPage'
-import { FAQPage } from './pages/FAQPage'
 import { StrategyStudioPage } from './pages/StrategyStudioPage'
-import { DebateArenaPage } from './pages/DebateArenaPage'
-import { StrategyMarketPage } from './pages/StrategyMarketPage'
-import { DataPage } from './pages/DataPage'
 import { LoginRequiredOverlay } from './components/LoginRequiredOverlay'
 import HeaderBar from './components/HeaderBar'
 import { LanguageProvider, useLanguage } from './contexts/LanguageContext'
@@ -42,10 +38,6 @@ type Page =
   | 'simulation'
   | 'backtest'
   | 'strategy'
-  | 'strategy-market'
-  | 'data'
-  | 'debate'
-  | 'faq'
   | 'login'
   | 'register'
 
@@ -71,9 +63,6 @@ function App() {
     if (path === '/simulation' || hash === 'simulation') return 'simulation'
     if (path === '/backtest' || hash === 'backtest') return 'backtest'
     if (path === '/strategy' || hash === 'strategy') return 'strategy'
-    if (path === '/strategy-market' || hash === 'strategy-market') return 'strategy-market'
-    if (path === '/data' || hash === 'data') return 'data'
-    if (path === '/debate' || hash === 'debate') return 'debate'
     if (path === '/dashboard' || hash === 'trader' || hash === 'details')
       return 'trader'
     return 'competition' // 默认为竞赛页面
@@ -92,15 +81,11 @@ function App() {
   const navigateToPage = (page: Page) => {
     const pathMap: Record<Page, string> = {
       'competition': '/competition',
-      'strategy-market': '/strategy-market',
-      'data': '/data',
       'traders': '/traders',
       'trader': '/dashboard',
       'simulation': '/simulation',
       'backtest': '/backtest',
       'strategy': '/strategy',
-      'debate': '/debate',
-      'faq': '/faq',
       'login': '/login',
       'register': '/register',
     }
@@ -160,12 +145,6 @@ function App() {
         setCurrentPage('backtest')
       } else if (path === '/strategy' || hash === 'strategy') {
         setCurrentPage('strategy')
-      } else if (path === '/strategy-market' || hash === 'strategy-market') {
-        setCurrentPage('strategy-market')
-      } else if (path === '/data' || hash === 'data') {
-        setCurrentPage('data')
-      } else if (path === '/debate' || hash === 'debate') {
-        setCurrentPage('debate')
       } else if (
         path === '/dashboard' ||
         hash === 'trader' ||
@@ -358,6 +337,12 @@ function App() {
     )
   }
 
+  // 已移除板块：访问旧路径时重定向到首页
+  if (route === '/data' || route === '/strategy-market' || route === '/debate' || route === '/faq') {
+    window.location.replace('/')
+    return null
+  }
+
   // Handle specific routes regardless of authentication
   if (route === '/login') {
     return <LoginPage />
@@ -365,78 +350,8 @@ function App() {
   if (route === '/register') {
     return <RegisterPage />
   }
-  if (route === '/faq') {
-    return (
-      <div
-        className="min-h-screen"
-        style={{ background: '#0B0E11', color: '#EAECEF' }}
-      >
-        <HeaderBar
-          isLoggedIn={!!user}
-          currentPage="faq"
-          language={language}
-          onLanguageChange={setLanguage}
-          user={user}
-          onLogout={logout}
-          onLoginRequired={handleLoginRequired}
-          onPageChange={navigateToPage}
-        />
-        <FAQPage />
-        <LoginRequiredOverlay
-          isOpen={loginOverlayOpen}
-          onClose={() => setLoginOverlayOpen(false)}
-          featureName={loginOverlayFeature}
-        />
-      </div>
-    )
-  }
   if (route === '/reset-password') {
     return <ResetPasswordPage />
-  }
-  // Data page - publicly accessible with embedded dashboard
-  if (route === '/data') {
-    const dataPageNavigate = (page: Page) => {
-      const pathMap: Record<string, string> = {
-        'data': '/data',
-        'competition': '/competition',
-        'strategy-market': '/strategy-market',
-        'traders': '/traders',
-        'trader': '/dashboard',
-        'backtest': '/backtest',
-        'strategy': '/strategy',
-        'debate': '/debate',
-        'faq': '/faq',
-      }
-      const path = pathMap[page]
-      if (path) {
-        window.location.href = path
-      }
-    }
-    return (
-      <div
-        className="min-h-screen"
-        style={{ background: '#0B0E11', color: '#EAECEF' }}
-      >
-        <HeaderBar
-          isLoggedIn={!!user}
-          currentPage="data"
-          language={language}
-          onLanguageChange={setLanguage}
-          user={user}
-          onLogout={logout}
-          onLoginRequired={handleLoginRequired}
-          onPageChange={dataPageNavigate}
-        />
-        <main className="pt-16">
-          <DataPage />
-        </main>
-        <LoginRequiredOverlay
-          isOpen={loginOverlayOpen}
-          onClose={() => setLoginOverlayOpen(false)}
-          featureName={loginOverlayFeature}
-        />
-      </div>
-    )
   }
   // Show landing page for root route
   if (route === '/' || route === '') {
@@ -476,10 +391,6 @@ function App() {
           >
             {currentPage === 'competition' ? (
               <CompetitionPage />
-            ) : currentPage === 'data' ? (
-              <DataPage />
-            ) : currentPage === 'strategy-market' ? (
-              <StrategyMarketPage />
             ) : currentPage === 'traders' ? (
               <AITradersPage
                 onTraderSelect={(traderId) => {
@@ -548,8 +459,6 @@ function App() {
               <BacktestPage />
             ) : currentPage === 'strategy' ? (
               <StrategyStudioPage />
-            ) : currentPage === 'debate' ? (
-              <DebateArenaPage />
             ) : (
               <TraderDashboardPage
                 selectedTrader={selectedTrader}
@@ -588,8 +497,8 @@ function App() {
         </AnimatePresence>
       </main>
 
-      {/* Footer - Hidden on debate page */}
-      {currentPage !== 'debate' && (
+      {/* Footer */}
+      {(
         <footer
           className="mt-16"
           style={{ borderTop: '1px solid #2B3139', background: '#181A20' }}
