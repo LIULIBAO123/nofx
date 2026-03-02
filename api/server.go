@@ -1487,13 +1487,6 @@ func (s *Server) handleClosePosition(c *gin.Context) {
 
 // recordClosePositionOrder Record close position order to database (Lighter version - direct FILLED status)
 func (s *Server) recordClosePositionOrder(traderID, exchangeID, exchangeType, symbol, side string, quantity, exitPrice float64, result map[string]interface{}) {
-	// Skip for exchanges with OrderSync - let the background sync handle it to avoid duplicates
-	switch exchangeType {
-	case "binance", "lighter", "hyperliquid", "bybit", "okx", "bitget", "aster", "gate":
-		logger.Infof("  📝 Close order will be synced by OrderSync, skipping immediate record")
-		return
-	}
-
 	// Check if order was placed (skip if NO_POSITION)
 	status, _ := result["status"].(string)
 	if status == "NO_POSITION" {

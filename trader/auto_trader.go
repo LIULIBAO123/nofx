@@ -2851,11 +2851,15 @@ func (at *AutoTrader) recordAndConfirmOrder(orderResult map[string]interface{}, 
 		return
 	}
 
-	// Exchanges with OrderSync: Skip immediate order recording, let OrderSync handle it
-	// This ensures accurate data from GetTrades API and avoids duplicate records
+	// Exchanges with OrderSync: still write order immediately so it shows in UI; OrderSync will skip if exists
 	switch at.exchange {
 	case "binance", "lighter", "hyperliquid", "bybit", "okx", "bitget", "aster", "kucoin", "gate":
-		logger.Infof("  📝 Order submitted (id: %s), will be synced by OrderSync", orderID)
+		orderRecord := at.createOrderRecord(orderID, symbol, action, positionSide, quantity, price, leverage)
+		if err := at.store.Order().CreateOrder(orderRecord); err != nil {
+			logger.Infof("  ⚠️ Failed to record order (OrderSync will sync): %v", err)
+		} else {
+			logger.Infof("  📝 Order recorded (id: %s), OrderSync may fill details later", orderID)
+		}
 		return
 	}
 
