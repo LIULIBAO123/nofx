@@ -737,10 +737,24 @@ export interface DynamicStopLossConfig {
 
   // 连续确认再止损：减少单K线假跌破
   confirm_cycles?: number;               // 连续 N 周期满足条件才执行止损，1=立即，2+=延迟确认
+  confirm_minutes?: number;              // >0 时按真实时间确认：条件需持续满足此分钟数；0=用 confirm_cycles
 
   // 高波动宽容：ATR 高时更宽容
   atr_tolerance_enabled?: boolean;      // 高波动时多要求 1 个确认周期 / 放宽 ATR 止损
   atr_high_multiplier?: number;         // 当前 ATR > 长期 ATR * 此倍数视为高波动，默认 1.2
+
+  // 止损用 K 线周期（ATR、支撑阻力、逆势早退等）"15m" | "1h"，默认 15m
+  klines_timeframe?: string;
+  // 支撑/阻力用 EMA20 作为结构位（多=支撑，空=阻力）
+  support_resistance_use_ema20?: boolean;
+
+  // 从未浮盈+反向过大早退：从未出现过浮盈且价格反向移动≥此倍数×ATR 时提前止损（0=关闭）
+  adverse_exit_when_never_profit_atr?: number;
+  // 山寨币单独倍数（非 BTC/ETH 使用）
+  adverse_exit_when_never_profit_atr_altcoin?: number;
+  // 逆势早退需 ATR 骤升（当前 ATR ≥ 长期 ATR×阈值）才触发，避免温和震荡早退
+  adverse_exit_require_atr_spike?: boolean;
+  adverse_exit_atr_spike_threshold?: number;  // 默认 1.2
 }
 
 // 追踪止损层级
@@ -755,7 +769,9 @@ export interface DynamicTakeProfitConfig {
   
   // 最小持仓时间（分钟），未满不触发动态止盈，避免开仓即止盈。0=不限制
   min_hold_minutes?: number;
-  
+  // 止盈侧最低盈利过滤（价格%）。当前浮盈低于此值时不触发任何止盈；0=不限制
+  min_profit_percent_to_allow_tp?: number;
+
   // 固定止盈
   fixed_enabled?: boolean;         // 是否启用固定止盈
   fixed_percent?: number;          // 固定止盈百分比 (例如: 8 = 8%)
@@ -768,13 +784,25 @@ export interface DynamicTakeProfitConfig {
   atr_enabled?: boolean;           // 是否启用 ATR 止盈
   atr_multiplier_min?: number;     // ATR 倍数最小值 (AI 可选范围下限)
   atr_multiplier_max?: number;     // ATR 倍数最大值 (AI 可选范围上限)
+  atr_use_max_in_high_volatility?: boolean;  // 高波动时用 Max 倍数
+  atr_high_volatility_threshold?: number;   // 默认 1.2
   atr_period_btc_eth?: number;     // BTC/ETH 的 ATR 周期
   atr_period_altcoin?: number;     // 山寨币的 ATR 周期
-  
+
   // 阻力位止盈
   resistance_enabled?: boolean;    // 是否启用阻力位止盈
   resistance_buffer?: number;      // 阻力位缓冲百分比 (例如: 0.5 = 0.5%)
   
+  // 回撤止盈：有盈利后从峰值回撤一定幅度即止盈，用 ATR/确认防震荡
+  trailing_tp_enabled?: boolean;
+  trailing_tp_activate_profit_pct?: number;  // 至少达到此盈利%才考虑回撤止盈 (如 2)
+  trailing_tp_retrace_pct?: number;         // 从峰值回撤超过此%即满足 (如 1.5)
+  trailing_tp_retrace_atr_mult?: number;     // 回撤需≥此倍数×ATR/价格，取 max(固定%, ATR%) 防震荡 (如 0.5)
+  trailing_tp_confirm_minutes?: number;      // 0=不确认；>0=条件持续 N 分钟再触发
+  trailing_tp_close_percent?: number;       // 触发时平仓比例 (50 或 100)
+  trailing_tp_activate_profit_pct_altcoin?: number; // 山寨币激活阈值%（非 BTC/ETH）
+  trailing_tp_retrace_pct_altcoin?: number;         // 山寨币回撤%（非 BTC/ETH）
+
   // 通用设置
   lock_profit_percent?: number;    // 锁定利润百分比 (达到后移动止损到盈亏平衡点)
 }

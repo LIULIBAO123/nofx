@@ -1477,8 +1477,10 @@ func (e *StrategyEngine) formatStrategyDynamicSLTP() string {
 	var sb strings.Builder
 	if zh {
 		sb.WriteString("## 策略动态止损/止盈配置（无固定初始止损；请在 reasoning 中写出止损价、止盈价、ATR倍数与周期，并说明追踪止损与分层止盈由策略执行）\n")
+		sb.WriteString("- 执行顺序：先止损检查再止盈；止盈内为 分层→回撤→固定→ATR→阻力。\n")
 	} else {
 		sb.WriteString("## Strategy dynamic SL/TP config (no fixed initial stop; in reasoning state stop price, take profit, ATR multiplier & period; state that trailing stop and scaled take profit are executed by strategy)\n")
+		sb.WriteString("- Execution order: SL check first, then TP; within TP: scaled → trailing_tp → fixed → atr → resistance.\n")
 	}
 	if sl != nil && sl.Enabled {
 		if zh {
@@ -1521,6 +1523,48 @@ func (e *StrategyEngine) formatStrategyDynamicSLTP() string {
 				}
 			}
 		}
+		if sl.AdverseExitWhenNeverProfitATR != nil && *sl.AdverseExitWhenNeverProfitATR > 0 {
+			if zh {
+				sb.WriteString(fmt.Sprintf(" | 从未浮盈+反向≥%.1f×ATR早退: 开", *sl.AdverseExitWhenNeverProfitATR))
+			} else {
+				sb.WriteString(fmt.Sprintf(" | Adverse exit when never profit + reverse ≥%.1f×ATR: on", *sl.AdverseExitWhenNeverProfitATR))
+			}
+			if sl.AdverseExitWhenNeverProfitATRAltcoin != nil && *sl.AdverseExitWhenNeverProfitATRAltcoin > 0 {
+				if zh {
+					sb.WriteString(fmt.Sprintf("(山寨%.1f×)", *sl.AdverseExitWhenNeverProfitATRAltcoin))
+				} else {
+					sb.WriteString(fmt.Sprintf("(altcoin %.1f×)", *sl.AdverseExitWhenNeverProfitATRAltcoin))
+				}
+			}
+			if sl.AdverseExitRequireATRSpike != nil && *sl.AdverseExitRequireATRSpike {
+				if zh {
+					sb.WriteString(" | 逆势早退需ATR骤升")
+				} else {
+					sb.WriteString(" | adverse exit requires ATR spike")
+				}
+			}
+		}
+		if sl.KlinesTimeframe != "" && sl.KlinesTimeframe != "15m" {
+			if zh {
+				sb.WriteString(fmt.Sprintf(" | 止损K线周期: %s", sl.KlinesTimeframe))
+			} else {
+				sb.WriteString(fmt.Sprintf(" | SL klines: %s", sl.KlinesTimeframe))
+			}
+		}
+		if sl.SupportResistanceUseEMA20 != nil && *sl.SupportResistanceUseEMA20 {
+			if zh {
+				sb.WriteString(" | 支撑/阻力用EMA20")
+			} else {
+				sb.WriteString(" | S/R use EMA20")
+			}
+		}
+		if sl.ConfirmMinutes > 0 {
+			if zh {
+				sb.WriteString(fmt.Sprintf(" | 确认时长: %.0f分钟", sl.ConfirmMinutes))
+			} else {
+				sb.WriteString(fmt.Sprintf(" | Confirm: %.0f min", sl.ConfirmMinutes))
+			}
+		}
 		sb.WriteString("\n")
 	}
 	if tp != nil && tp.Enabled {
@@ -1528,6 +1572,13 @@ func (e *StrategyEngine) formatStrategyDynamicSLTP() string {
 			sb.WriteString(fmt.Sprintf("- 止盈: 最小持仓 %.0f 分钟", tp.MinHoldMinutes))
 		} else {
 			sb.WriteString(fmt.Sprintf("- Take profit: min hold %.0f min", tp.MinHoldMinutes))
+		}
+		if tp.MinProfitPercentToAllowTP != nil && *tp.MinProfitPercentToAllowTP > 0 {
+			if zh {
+				sb.WriteString(fmt.Sprintf(" | 最低盈利%.1f%%才止盈", *tp.MinProfitPercentToAllowTP))
+			} else {
+				sb.WriteString(fmt.Sprintf(" | min profit %.1f%% to allow TP", *tp.MinProfitPercentToAllowTP))
+			}
 		}
 		// 与执行逻辑一致：有档位即视为分层止盈启用（ScaledEnabled 为 nil 时也展示）
 		scaledEffective := len(tp.ScaledLevels) > 0 && (tp.ScaledEnabled == nil || *tp.ScaledEnabled)
@@ -1557,6 +1608,17 @@ func (e *StrategyEngine) formatStrategyDynamicSLTP() string {
 			} else {
 				sb.WriteString(fmt.Sprintf(" | ATR TP multiplier: %.1f–%.1f", min, max))
 			}
+			if tp.ATRUseMaxInHighVolatility != nil && *tp.ATRUseMaxInHighVolatility {
+				th := 1.2
+				if tp.ATRHighVolatilityThreshold != nil {
+					th = *tp.ATRHighVolatilityThreshold
+				}
+				if zh {
+					sb.WriteString(fmt.Sprintf(" (高波动用Max,阈值%.1f)", th))
+				} else {
+					sb.WriteString(fmt.Sprintf(" (high vol use max, th %.1f)", th))
+				}
+			}
 		}
 		if tp.ResistanceEnabled != nil && *tp.ResistanceEnabled {
 			if zh {
@@ -1572,14 +1634,41 @@ func (e *StrategyEngine) formatStrategyDynamicSLTP() string {
 				}
 			}
 		}
+		if tp.TrailingTPEnabled != nil && *tp.TrailingTPEnabled {
+			act := 2.0
+			if tp.TrailingTPActivateProfitPct != nil {
+				act = *tp.TrailingTPActivateProfitPct
+			}
+			ret := 1.5
+			if tp.TrailingTPRetracePct != nil {
+				ret = *tp.TrailingTPRetracePct
+			}
+			if zh {
+				sb.WriteString(fmt.Sprintf(" | 回撤止盈: 激活≥%.1f%% 回撤≥%.1f%%", act, ret))
+			} else {
+				sb.WriteString(fmt.Sprintf(" | Trailing TP: activate ≥%.1f%%, retrace ≥%.1f%%", act, ret))
+			}
+			if (tp.TrailingTPActivateProfitPctAltcoin != nil && *tp.TrailingTPActivateProfitPctAltcoin > 0) || (tp.TrailingTPRetracePctAltcoin != nil && *tp.TrailingTPRetracePctAltcoin > 0) {
+				if zh {
+					sb.WriteString("(山寨另设)")
+				} else {
+					sb.WriteString("(altcoin separate)")
+				}
+			}
+		}
 		if tp.LockProfitPercent != nil && *tp.LockProfitPercent > 0 {
 			if zh {
-				sb.WriteString(fmt.Sprintf(" | 锁定利润: 达%.1f%%后移动止损到盈亏平衡", *tp.LockProfitPercent))
+				sb.WriteString(fmt.Sprintf(" | 锁定利润: 达%.1f%%(保证金%%)后移动止损到盈亏平衡", *tp.LockProfitPercent))
 			} else {
-				sb.WriteString(fmt.Sprintf(" | Lock profit: move stop to breakeven after %.1f%%", *tp.LockProfitPercent))
+				sb.WriteString(fmt.Sprintf(" | Lock profit: move stop to breakeven after %.1f%% (margin%%)", *tp.LockProfitPercent))
 			}
 		}
 		sb.WriteString("\n")
+	}
+	if zh {
+		sb.WriteString("- 口径说明：止盈档位与回撤止盈均为价格%；锁定利润阈值为保证金收益率%。\n")
+	} else {
+		sb.WriteString("- Note: TP levels and trailing TP use price%%; lock profit threshold uses margin%%.\n")
 	}
 	return sb.String()
 }

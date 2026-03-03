@@ -1334,6 +1334,26 @@ func (r *Runner) checkAndExecuteDynamicStopTakeProfit(ts int64, marketData map[s
 				atr = kernel.CalculateATR(klines, 14)
 			}
 		}
+		// Running extreme since entry (for trailing TP/SL, align with live)
+		if len(klines) > 0 {
+			if pos.Side == "long" {
+				runHigh := pos.EntryPrice
+				for _, k := range klines {
+					if k.OpenTime >= pos.OpenTime && k.High > runHigh {
+						runHigh = k.High
+					}
+				}
+				highestForTrailing = runHigh
+			} else {
+				runLow := pos.EntryPrice
+				for _, k := range klines {
+					if k.OpenTime >= pos.OpenTime && k.Low < runLow {
+						runLow = k.Low
+					}
+				}
+				highestForTrailing = runLow
+			}
+		}
 		// Long: SL uses support; short: SL uses resistance (same as live)
 		slLevel := supportLevel
 		if pos.Side == "short" {
@@ -1376,7 +1396,7 @@ func (r *Runner) checkAndExecuteDynamicStopTakeProfit(ts int64, marketData map[s
 			}
 		}
 		if !triggered && takeProfitChecker != nil {
-			sig := takeProfitChecker.CheckTakeProfit(posInfo, priceForTP, atr, resistanceLevel)
+			sig := takeProfitChecker.CheckTakeProfit(posInfo, priceForTP, highestForTrailing, atr, atrLong, resistanceLevel)
 			if sig != nil && sig.Triggered {
 				triggered = true
 				closeReason = sig.Type

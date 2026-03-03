@@ -1,4 +1,4 @@
-import { TrendingDown, Activity, BarChart3, AlertCircle, Plus, Trash2 } from 'lucide-react'
+import { TrendingDown, Activity, BarChart3, AlertCircle, Plus, Trash2, CornerDownRight } from 'lucide-react'
 import type { DynamicStopLossConfig, TrailingStopLevel } from '../../types'
 
 interface DynamicStopLossEditorProps {
@@ -57,20 +57,38 @@ export function DynamicStopLossEditor({
 
       confirmCycles: { zh: '连续确认周期数', en: 'Confirm cycles' },
       confirmCyclesDesc: { zh: '止损条件连续满足 N 个周期后才执行，减少单 K 线假跌破。1=立即执行', en: 'Execute stop only after condition holds N consecutive cycles; 1=immediate' },
+      confirmMinutes: { zh: '确认时长（分钟）', en: 'Confirm duration (min)' },
+      confirmMinutesDesc: { zh: '>0 时按真实时间：条件需持续满足此分钟数才执行；0=使用上方周期数', en: 'When >0: require condition to hold this many minutes; 0=use cycles above' },
+      klinesTimeframe: { zh: '止损K线周期', en: 'SL klines timeframe' },
+      klinesTimeframeDesc: { zh: 'ATR、支撑阻力、逆势早退等使用的K线周期；1h 可减少 15m 毛刺', en: 'Timeframe for ATR, S/R, adverse exit; 1h reduces 15m noise' },
+      srUseEma20: { zh: '支撑/阻力用 EMA20', en: 'S/R use EMA20' },
+      srUseEma20Desc: { zh: '用同周期 EMA20 作为多单支撑/空单阻力结构位', en: 'Use EMA20 as support (long) / resistance (short)' },
+      adverseAltcoin: { zh: '山寨币反向 ATR 倍数', en: 'Altcoin reverse ATR multiple' },
+      adverseAltcoinDesc: { zh: '非 BTC/ETH 使用此倍数（留空则与主倍数一致）', en: 'For non-BTC/ETH (empty = same as main)' },
+      adverseRequireSpike: { zh: '逆势早退需 ATR 骤升', en: 'Adverse exit requires ATR spike' },
+      adverseRequireSpikeDesc: { zh: '仅当当前 ATR ≥ 长期ATR×阈值时触发，避免温和震荡早退', en: 'Only trigger when current ATR ≥ long ATR×threshold' },
+      adverseSpikeThreshold: { zh: 'ATR 骤升阈值', en: 'ATR spike threshold' },
       atrTolerance: { zh: '高波动宽容', en: 'ATR volatility tolerance' },
       enableAtrTolerance: { zh: '启用高波动宽容', en: 'Enable high-vol tolerance' },
       atrToleranceDesc: { zh: '高波动时多要求 1 个确认周期且 ATR 止损放宽', en: 'In high vol: +1 confirm cycle and wider ATR stop' },
       atrHighMult: { zh: '高波动阈值倍数', en: 'High vol threshold' },
       atrHighMultDesc: { zh: '当前 ATR > 长期 ATR × 此值视为高波动', en: 'Current ATR > long-term ATR × this = high volatility' },
+
+      adverseExit: { zh: '从未浮盈+反向过大早退', en: 'Adverse exit (never profit + reverse)' },
+      enableAdverseExit: { zh: '启用逆势早退', en: 'Enable adverse early exit' },
+      adverseExitDesc: { zh: '当持仓从未浮盈且价格反向移动≥设定倍数×ATR 时提前止损，减小逆势单亏损；不收紧正常 ATR 止损', en: 'When never in profit and price moves against by ≥ this × ATR, exit early to reduce loss; does not tighten normal ATR stop' },
+      adverseExitAtrMult: { zh: '反向 ATR 倍数', en: 'Reverse ATR multiple' },
+      adverseExitAtrMultDesc: { zh: '反向距离 ≥ 此倍数×ATR 时触发（建议 1.0–1.2，过小易被震荡洗出）', en: 'Trigger when reverse move ≥ this × ATR (recommend 1.0–1.2; too small may get stopped by chop)' },
     }
     return translations[key]?.[language] || key
   }
 
+  // 默认值：与后端逻辑一致，兼顾「震荡市拿住仓」与「逆势可控」
   const defaultConfig: DynamicStopLossConfig = {
     enabled: true,
     trigger_logic: 'any',
-    min_hold_minutes: 5,
-    initial_stop_percent: 0, // 0=removed fixed initial stop, only dynamic/ATR/trailing
+    min_hold_minutes: 10,          // 与后端预设、止盈一致，主周期 15m 下更稳
+    initial_stop_percent: 0,       // 0=仅用动态/ATR/追踪，不设固定百分比
     trailing_enabled: false,
     trailing_levels: [
       { profit_threshold: 2, trailing_percent: 1.5 },
@@ -78,15 +96,21 @@ export function DynamicStopLossEditor({
       { profit_threshold: 10, trailing_percent: 4 },
     ],
     atr_enabled: false,
-    atr_multiplier_min: 1.5,
+    atr_multiplier_min: 1.5,       // 与 kernel getFloat64Value 默认一致
     atr_multiplier_max: 3.5,
     atr_period_btc_eth: 20,
     atr_period_altcoin: 14,
     support_resistance_enabled: false,
     support_resistance_buffer: 0.5,
-    confirm_cycles: 2,
+    confirm_cycles: 2,            // 连续 2 周期确认，减少单 K 线假跌破
+    confirm_minutes: 0,           // 0=按周期数确认；>0 则按真实分钟数
     atr_tolerance_enabled: true,
-    atr_high_multiplier: 1.2,
+    atr_high_multiplier: 1.2,     // 当前 ATR > 长期×1.2 视为高波动
+    klines_timeframe: '15m',      // 15m 响应快；1h 可减毛刺
+    support_resistance_use_ema20: false, // 默认用局部极值，可选 EMA20
+    adverse_exit_when_never_profit_atr: 0,  // 0=关闭；建议 1.0–1.2 时手动开启
+    adverse_exit_require_atr_spike: false,  // 默认不要求 ATR 骤升，避免漏触发
+    adverse_exit_atr_spike_threshold: 1.2,  // 开启骤升过滤时默认 1.2
   }
 
   const currentConfig = config || defaultConfig
@@ -215,7 +239,7 @@ export function DynamicStopLossEditor({
                   min={0}
                   max={120}
                   step={1}
-                  value={currentConfig.min_hold_minutes ?? 5}
+                  value={currentConfig.min_hold_minutes ?? 10}
                   onChange={(e) => updateField('min_hold_minutes', parseFloat(e.target.value) || 0)}
                   disabled={disabled}
                   className="w-16 rounded px-2 py-1 text-sm"
@@ -246,6 +270,35 @@ export function DynamicStopLossEditor({
                   style={{ background: '#1E2329', border: '1px solid #2B3139', color: '#EAECEF' }}
                 />
                 <span className="text-[10px] ml-2" style={{ color: '#5E6673' }}>{t('confirmCyclesDesc')}</span>
+              </div>
+              <div>
+                <label className="text-xs block mb-1" style={{ color: '#848E9C' }}>{t('confirmMinutes')}</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={60}
+                  step={1}
+                  value={currentConfig.confirm_minutes ?? 0}
+                  onChange={(e) => updateField('confirm_minutes', Math.max(0, parseFloat(e.target.value) || 0))}
+                  disabled={disabled}
+                  className="w-16 rounded px-2 py-1 text-sm"
+                  style={{ background: '#1E2329', border: '1px solid #2B3139', color: '#EAECEF' }}
+                />
+                <span className="text-[10px] ml-2" style={{ color: '#5E6673' }}>{t('confirmMinutesDesc')}</span>
+              </div>
+              <div>
+                <label className="text-xs block mb-1" style={{ color: '#848E9C' }}>{t('klinesTimeframe')}</label>
+                <select
+                  value={currentConfig.klines_timeframe || '15m'}
+                  onChange={(e) => updateField('klines_timeframe', e.target.value)}
+                  disabled={disabled}
+                  className="rounded px-2 py-1 text-sm"
+                  style={{ background: '#1E2329', border: '1px solid #2B3139', color: '#EAECEF' }}
+                >
+                  <option value="15m">15m</option>
+                  <option value="1h">1h</option>
+                </select>
+                <span className="text-[10px] ml-2" style={{ color: '#5E6673' }}>{t('klinesTimeframeDesc')}</span>
               </div>
               <label className="flex items-center gap-3 cursor-pointer">
                 <input
@@ -521,7 +574,18 @@ export function DynamicStopLossEditor({
             </label>
 
             {currentConfig.support_resistance_enabled && (
-              <div className="pl-2">
+              <div className="pl-2 space-y-3">
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={currentConfig.support_resistance_use_ema20 ?? false}
+                    onChange={(e) => updateField('support_resistance_use_ema20', e.target.checked)}
+                    disabled={disabled}
+                    className="w-5 h-5 accent-red-500 rounded"
+                  />
+                  <span className="text-sm" style={{ color: '#EAECEF' }}>{t('srUseEma20')}</span>
+                </label>
+                <p className="text-[10px]" style={{ color: '#848E9C' }}>{t('srUseEma20Desc')}</p>
                 <label className="block text-xs mb-1.5 font-medium" style={{ color: '#EAECEF' }}>
                   {t('srBuffer')}
                 </label>
@@ -543,6 +607,98 @@ export function DynamicStopLossEditor({
                     {currentConfig.support_resistance_buffer || 0.5}%
                   </span>
                 </div>
+              </div>
+            )}
+          </div>
+
+          {/* 从未浮盈+反向过大早退 */}
+          <div className="p-4 rounded-xl shadow-lg" style={{ background: 'linear-gradient(135deg, #1a1d24 0%, #0f1115 100%)', border: (currentConfig.adverse_exit_when_never_profit_atr ?? 0) > 0 ? '2px solid #F6465D' : '1px solid #2B3139' }}>
+            <label className="flex items-center gap-3 cursor-pointer mb-4">
+              <input
+                type="checkbox"
+                checked={(currentConfig.adverse_exit_when_never_profit_atr ?? 0) > 0}
+                onChange={(e) => updateField('adverse_exit_when_never_profit_atr', e.target.checked ? (currentConfig.adverse_exit_when_never_profit_atr && currentConfig.adverse_exit_when_never_profit_atr > 0 ? currentConfig.adverse_exit_when_never_profit_atr : 1.2) : 0)}
+                disabled={disabled}
+                className="w-5 h-5 accent-red-500 rounded"
+              />
+              <div className="p-2 rounded-lg" style={{ background: (currentConfig.adverse_exit_when_never_profit_atr ?? 0) > 0 ? 'rgba(246, 70, 93, 0.1)' : 'rgba(132, 142, 156, 0.1)' }}>
+                <CornerDownRight className="w-5 h-5" style={{ color: (currentConfig.adverse_exit_when_never_profit_atr ?? 0) > 0 ? '#F6465D' : '#848E9C' }} />
+              </div>
+              <span className="text-base font-semibold" style={{ color: (currentConfig.adverse_exit_when_never_profit_atr ?? 0) > 0 ? '#EAECEF' : '#848E9C' }}>
+                {t('adverseExit')}
+              </span>
+            </label>
+            <p className="text-[10px] mb-3 leading-relaxed" style={{ color: '#848E9C' }}>
+              {t('adverseExitDesc')}
+            </p>
+            {(currentConfig.adverse_exit_when_never_profit_atr ?? 0) > 0 && (
+              <div className="pl-2 space-y-3">
+                <div>
+                  <label className="block text-xs mb-1.5 font-medium" style={{ color: '#EAECEF' }}>
+                    {t('adverseExitAtrMult')}
+                  </label>
+                  <p className="text-[10px] mb-2 leading-relaxed" style={{ color: '#848E9C' }}>
+                    {t('adverseExitAtrMultDesc')}
+                  </p>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="range"
+                      min={0.5}
+                      max={2.5}
+                      step={0.1}
+                      value={currentConfig.adverse_exit_when_never_profit_atr || 1.2}
+                      onChange={(e) => updateField('adverse_exit_when_never_profit_atr', parseFloat(e.target.value) || 1.2)}
+                      disabled={disabled}
+                      className="flex-1 h-1.5 accent-red-500"
+                    />
+                    <span className="w-14 text-center font-mono text-xs font-bold px-2 py-1 rounded" style={{ color: '#F6465D', background: 'rgba(246, 70, 93, 0.1)' }}>
+                      {(currentConfig.adverse_exit_when_never_profit_atr || 1.2).toFixed(1)}×
+                    </span>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs mb-1" style={{ color: '#848E9C' }}>{t('adverseAltcoin')}</label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={2.5}
+                    step={0.1}
+                    placeholder={language === 'zh' ? '同主倍数' : 'Same as main'}
+                    value={currentConfig.adverse_exit_when_never_profit_atr_altcoin != null && currentConfig.adverse_exit_when_never_profit_atr_altcoin > 0 ? currentConfig.adverse_exit_when_never_profit_atr_altcoin : ''}
+                    onChange={(e) => updateField('adverse_exit_when_never_profit_atr_altcoin', e.target.value === '' ? undefined : parseFloat(e.target.value) || 0)}
+                    disabled={disabled}
+                    className="w-20 rounded px-2 py-1 text-sm"
+                    style={{ background: '#1E2329', border: '1px solid #2B3139', color: '#EAECEF' }}
+                  />
+                  <span className="text-[10px] ml-2" style={{ color: '#5E6673' }}>{t('adverseAltcoinDesc')}</span>
+                </div>
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={currentConfig.adverse_exit_require_atr_spike ?? false}
+                    onChange={(e) => updateField('adverse_exit_require_atr_spike', e.target.checked)}
+                    disabled={disabled}
+                    className="w-5 h-5 accent-red-500 rounded"
+                  />
+                  <span className="text-sm" style={{ color: '#EAECEF' }}>{t('adverseRequireSpike')}</span>
+                </label>
+                <p className="text-[10px]" style={{ color: '#848E9C' }}>{t('adverseRequireSpikeDesc')}</p>
+                {currentConfig.adverse_exit_require_atr_spike && (
+                  <div>
+                    <label className="block text-xs mb-1" style={{ color: '#848E9C' }}>{t('adverseSpikeThreshold')}</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={2}
+                      step={0.1}
+                      value={currentConfig.adverse_exit_atr_spike_threshold ?? 1.2}
+                      onChange={(e) => updateField('adverse_exit_atr_spike_threshold', parseFloat(e.target.value) || 1.2)}
+                      disabled={disabled}
+                      className="w-16 rounded px-2 py-1 text-sm"
+                      style={{ background: '#1E2329', border: '1px solid #2B3139', color: '#EAECEF' }}
+                    />
+                  </div>
+                )}
               </div>
             )}
           </div>

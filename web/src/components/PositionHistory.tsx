@@ -89,6 +89,7 @@ function parseCloseReason(
       support_resistance: { zh: '支撑/阻力止损', en: 'Support/Resistance stop' },
       breakeven: { zh: '盈亏平衡止损（锁定利润后回撤）', en: 'Breakeven stop (after lock profit)' },
       combined: { zh: '组合条件止损', en: 'Combined stop' },
+      adverse_never_profit: { zh: '从未浮盈+反向过大早退', en: 'Adverse exit (never profit + reverse move)' },
     }
     const t = slTypes[sub] || { zh: sub, en: sub }
     return {
@@ -101,6 +102,7 @@ function parseCloseReason(
     const tpTypes: Record<string, { zh: string; en: string }> = {
       fixed: { zh: '固定止盈', en: 'Fixed take profit' },
       scaled: { zh: '分层止盈', en: 'Scaled take profit' },
+      trailing_tp: { zh: '回撤止盈', en: 'Trailing / pullback TP' },
       atr: { zh: 'ATR 动态止盈', en: 'ATR dynamic TP' },
       resistance: { zh: '阻力位止盈', en: 'Resistance take profit' },
     }

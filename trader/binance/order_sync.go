@@ -342,7 +342,17 @@ func (t *FuturesTrader) determineOrderAction(side, positionSide string, realized
 		}
 	}
 
-	// Default fallback
+	// positionSide == "BOTH" (one-way mode): must use isClose to avoid treating closes as opens (no 平仓记录)
+	if positionSide == "BOTH" {
+		if isClose {
+			if side == "BUY" {
+				return "close_short"
+			}
+			return "close_long"
+		}
+	}
+
+	// Default fallback (unknown positionSide)
 	if side == "BUY" {
 		return "open_long"
 	}

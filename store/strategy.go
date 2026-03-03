@@ -272,10 +272,26 @@ type DynamicStopLossConfig struct {
 
 	// Confirm before execute: require N consecutive cycles with SL condition met (reduces premature stop on one-candle dip)
 	ConfirmCycles int `json:"confirm_cycles,omitempty"` // 1=immediate; 2+ = delay execute until condition holds N cycles
+	// ConfirmMinutes: when > 0, require SL condition to hold for this many minutes (real time) instead of ConfirmCycles; 0 = use ConfirmCycles
+	ConfirmMinutes float64 `json:"confirm_minutes,omitempty"`
 
 	// ATR tolerance: in high volatility use wider stop / extra confirm cycle so we don't stop on noise
 	ATRToleranceEnabled *bool    `json:"atr_tolerance_enabled,omitempty"` // when true, high vol => more tolerant
 	ATRHighMultiplier   *float64 `json:"atr_high_multiplier,omitempty"`   // current ATR > long-term ATR * this = high vol (default 1.2)
+
+	// KlinesTimeframe: timeframe for klines used in SL (ATR, S/R, trailing extremes, adverse exit). "15m" (default) or "1h". 1h reduces 15m noise.
+	KlinesTimeframe string `json:"klines_timeframe,omitempty"` // "15m", "1h"
+
+	// SupportResistanceUseEMA20: when true, use EMA20 from same klines as support (long) / resistance (short) instead of local extrema only
+	SupportResistanceUseEMA20 *bool `json:"support_resistance_use_ema20,omitempty"`
+
+	// Adverse exit when never in profit: if position has never been in profit and price moved against by >= this many ATRs, trigger stop (0 or nil = off). Reduces loss when trend is opposite without tightening normal ATR stop.
+	AdverseExitWhenNeverProfitATR *float64 `json:"adverse_exit_when_never_profit_atr,omitempty"`
+	// AdverseExitWhenNeverProfitATRAltcoin: when set, use this multiplier for non-BTC/ETH symbols instead of AdverseExitWhenNeverProfitATR (allows different sensitivity per group)
+	AdverseExitWhenNeverProfitATRAltcoin *float64 `json:"adverse_exit_when_never_profit_atr_altcoin,omitempty"`
+	// AdverseExitRequireATRSpike: when true, only trigger adverse exit when current ATR >= long ATR * threshold (avoid exit in mild chop)
+	AdverseExitRequireATRSpike    *bool    `json:"adverse_exit_require_atr_spike,omitempty"`
+	AdverseExitATRSpikeThreshold  *float64 `json:"adverse_exit_atr_spike_threshold,omitempty"` // default 1.2
 }
 
 // TrailingStopLevel trailing stop level configuration
@@ -291,6 +307,9 @@ type DynamicTakeProfitConfig struct {
 	// MinHoldMinutes: 最小持仓分钟数，未满不触发动态止盈，避免开仓即止盈（策略过紧）。0=不限制
 	MinHoldMinutes float64 `json:"min_hold_minutes,omitempty"`
 
+	// MinProfitPercentToAllowTP: 止盈侧最低盈利过滤（价格%）。当前浮盈（价格相对入场）低于此值时不触发任何止盈；0=不限制
+	MinProfitPercentToAllowTP *float64 `json:"min_profit_percent_to_allow_tp,omitempty"`
+
 	// Fixed Take Profit
 	FixedEnabled *bool    `json:"fixed_enabled,omitempty"` // enable fixed take profit
 	FixedPercent *float64 `json:"fixed_percent,omitempty"` // fixed take profit %
@@ -300,16 +319,27 @@ type DynamicTakeProfitConfig struct {
 	ScaledLevels  []ScaledTakeProfitLevel `json:"scaled_levels,omitempty"`
 
 	// ATR Take Profit - Dynamic Range Mode
-	ATREnabled        *bool    `json:"atr_enabled,omitempty"`          // enable ATR take profit
-	ATRMultiplierMin  *float64 `json:"atr_multiplier_min,omitempty"`   // ATR multiplier min (AI range)
-	ATRMultiplierMax  *float64 `json:"atr_multiplier_max,omitempty"`   // ATR multiplier max (AI range)
-	ATRPeriodBTCETH   *int     `json:"atr_period_btc_eth,omitempty"`   // ATR period for BTC/ETH
-	ATRPeriodAltcoin  *int     `json:"atr_period_altcoin,omitempty"`   // ATR period for altcoins
+	ATREnabled                 *bool    `json:"atr_enabled,omitempty"`                   // enable ATR take profit
+	ATRMultiplierMin           *float64 `json:"atr_multiplier_min,omitempty"`           // ATR multiplier min (AI range)
+	ATRMultiplierMax           *float64 `json:"atr_multiplier_max,omitempty"`           // ATR multiplier max (AI range)
+	ATRUseMaxInHighVolatility  *bool    `json:"atr_use_max_in_high_volatility,omitempty"` // when true, use max multiplier when atr > atrLong*threshold (e.g. 1.2)
+	ATRHighVolatilityThreshold *float64 `json:"atr_high_volatility_threshold,omitempty"`  // atr/atrLong >= this => high vol (default 1.2)
+	ATRPeriodBTCETH            *int     `json:"atr_period_btc_eth,omitempty"`           // ATR period for BTC/ETH
+	ATRPeriodAltcoin           *int     `json:"atr_period_altcoin,omitempty"`            // ATR period for altcoins
 
 	// Resistance Take Profit
 	ResistanceEnabled *bool    `json:"resistance_enabled,omitempty"` // enable resistance take profit
 	ResistanceBuffer  *float64 `json:"resistance_buffer,omitempty"`  // buffer %
 
+	// Trailing / Pullback Take Profit: lock profit before retrace; resist oscillation via ATR or confirm
+	TrailingTPEnabled          *bool    `json:"trailing_tp_enabled,omitempty"`           // enable take profit on pullback from peak
+	TrailingTPActivateProfitPct *float64 `json:"trailing_tp_activate_profit_pct,omitempty"` // min profit % (price) to activate (e.g. 2)
+	TrailingTPRetracePct        *float64 `json:"trailing_tp_retrace_pct,omitempty"`       // retrace % from peak to trigger (e.g. 1.5)
+	TrailingTPRetraceATRMult    *float64 `json:"trailing_tp_retrace_atr_mult,omitempty"`   // retrace >= this * ATR/price (e.g. 0.5); use max(fixed%, ATR%) to resist chop
+	TrailingTPConfirmMinutes    float64  `json:"trailing_tp_confirm_minutes,omitempty"`    // 0 = no confirm; >0 = condition must hold this many minutes
+	TrailingTPClosePercent      *float64 `json:"trailing_tp_close_percent,omitempty"`      // % of position to close (e.g. 50 or 100)
+	TrailingTPActivateProfitPctAltcoin *float64 `json:"trailing_tp_activate_profit_pct_altcoin,omitempty"` // for non-BTC/ETH, use this activate % if set
+	TrailingTPRetracePctAltcoin *float64 `json:"trailing_tp_retrace_pct_altcoin,omitempty"` // for non-BTC/ETH, use this retrace % if set
 	// Common Settings
 	LockProfitPercent *float64 `json:"lock_profit_percent,omitempty"` // move stop to breakeven after this profit
 }
@@ -424,24 +454,30 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 				ATRPeriodBTCETH:    intPtr(20),
 				ATRPeriodAltcoin:   intPtr(14),
 				ConfirmCycles:      2,                    // 连续2周期满足才执行，减少单K线假跌破
+				ConfirmMinutes:     0,                    // 0=按周期数确认；>0 按真实分钟数
 				ATRToleranceEnabled: boolPtr(true),      // 高波动时更宽容
 				ATRHighMultiplier:   float64Ptr(1.2),   // 当前ATR>长期ATR*1.2 视为高波动
+				KlinesTimeframe:    "15m",               // 止损用K线周期，1h 可减毛刺
 			},
 			DynamicTakeProfit: &DynamicTakeProfitConfig{
-				Enabled:         true,
-				MinHoldMinutes:  10,                 // 与止损一致，主周期 15m 下更稳
-				ScaledEnabled:   boolPtr(true),
+				Enabled:                    true,
+				MinHoldMinutes:             10,                 // 与止损一致，主周期 15m 下更稳
+				MinProfitPercentToAllowTP: nil,                // 0=不限制；设 >0 可避免极低盈利即止盈
+				ScaledEnabled:              boolPtr(true),
 				ScaledLevels: []ScaledTakeProfitLevel{
-					{ProfitPercent: 4.0, ClosePercent: 33, MoveStopToBreakeven: boolPtr(true)},
-					{ProfitPercent: 7.0, ClosePercent: 50, MoveStopToBreakeven: boolPtr(false)},
-					{ProfitPercent: 10.0, ClosePercent: 100, MoveStopToBreakeven: boolPtr(false)},
+					{ProfitPercent: 5.0, ClosePercent: 25, MoveStopToBreakeven: boolPtr(false)},
+					{ProfitPercent: 8.0, ClosePercent: 25, MoveStopToBreakeven: boolPtr(true)},
+					{ProfitPercent: 12.0, ClosePercent: 100, MoveStopToBreakeven: boolPtr(false)},
 				},
-				ATREnabled:       boolPtr(true),
-				ATRMultiplierMin: float64Ptr(2.5),
-				ATRMultiplierMax: float64Ptr(4.0),
-				ATRPeriodBTCETH:  intPtr(20),
-				ATRPeriodAltcoin: intPtr(14),
-				LockProfitPercent: float64Ptr(2.5),   // 2.5%：略提高，锁本更稳
+				ATREnabled:                 boolPtr(true),
+				ATRMultiplierMin:            float64Ptr(2.5),
+				ATRMultiplierMax:            float64Ptr(4.0),
+				ATRUseMaxInHighVolatility:   boolPtr(true),   // 高波动时用 Max 倍数，与止损宽容一致
+				ATRHighVolatilityThreshold:  float64Ptr(1.2), // atr ≥ atrLong*1.2 视为高波动
+				ATRPeriodBTCETH:             intPtr(20),
+				ATRPeriodAltcoin:            intPtr(14),
+				LockProfitPercent:           float64Ptr(2.5), // 2.5%：略提高，锁本更稳
+				// TrailingTP* 与 Altcoin 未设则用 kernel 内默认或主参数
 			},
 		},
 	}
@@ -847,30 +883,32 @@ func GetOptimizedStrategyConfig(lang string) StrategyConfig {
 				SupportResistanceEnabled:  boolPtr(true),
 				SupportResistanceBuffer:   float64Ptr(0.8),   // 0.5→0.8%，略放宽减少假突破
 				ConfirmCycles:             2,
+				ConfirmMinutes:            0,
 				ATRToleranceEnabled:       boolPtr(true),
 				ATRHighMultiplier:         float64Ptr(1.2),
+				KlinesTimeframe:           "15m",
 			},
 			// Dynamic Take Profit Configuration（与回测一致，按建议微调）
 			DynamicTakeProfit: &DynamicTakeProfitConfig{
-				Enabled:         true,
-				MinHoldMinutes:  10,                // 与止损一致
-				ScaledEnabled:   boolPtr(true),
+				Enabled:                    true,
+				MinHoldMinutes:             10,                // 与止损一致
+				MinProfitPercentToAllowTP:  nil,               // 0 = no filter
+				ScaledEnabled:              boolPtr(true),
 				ScaledLevels: []ScaledTakeProfitLevel{
-					{ProfitPercent: 4.0, ClosePercent: 33, MoveStopToBreakeven: boolPtr(true)},
-					{ProfitPercent: 7.0, ClosePercent: 50, MoveStopToBreakeven: boolPtr(false)},
-					{ProfitPercent: 10.0, ClosePercent: 100, MoveStopToBreakeven: boolPtr(false)},
+					{ProfitPercent: 5.0, ClosePercent: 25, MoveStopToBreakeven: boolPtr(false)},
+					{ProfitPercent: 8.0, ClosePercent: 25, MoveStopToBreakeven: boolPtr(true)},
+					{ProfitPercent: 12.0, ClosePercent: 100, MoveStopToBreakeven: boolPtr(false)},
 				},
-				// ATR Take Profit - Dynamic Range (AI Adaptive)
-				ATREnabled:       boolPtr(true),
-				ATRMultiplierMin: float64Ptr(2.5), // Min 2.5x for weak trends
-				ATRMultiplierMax: float64Ptr(4.0), // Max 4.0x for strong trends
-				ATRPeriodBTCETH:  intPtr(20),      // BTC/ETH use longer period
-				ATRPeriodAltcoin: intPtr(14),      // Altcoins use shorter period
-				// Resistance Take Profit
-				ResistanceEnabled: boolPtr(true),
-				ResistanceBuffer:  float64Ptr(0.5),   // 0.3→0.5%，略放宽
-				// Lock profit after 2.5% gain
-				LockProfitPercent: float64Ptr(2.5),
+				ATREnabled:                 boolPtr(true),
+				ATRMultiplierMin:           float64Ptr(2.5),
+				ATRMultiplierMax:           float64Ptr(4.0),
+				ATRUseMaxInHighVolatility:  boolPtr(true),
+				ATRHighVolatilityThreshold: float64Ptr(1.2),
+				ATRPeriodBTCETH:            intPtr(20),
+				ATRPeriodAltcoin:           intPtr(14),
+				ResistanceEnabled:          boolPtr(true),
+				ResistanceBuffer:           float64Ptr(0.5),
+				LockProfitPercent:          float64Ptr(2.5),
 			},
 		},
 	}

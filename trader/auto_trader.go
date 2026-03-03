@@ -154,8 +154,12 @@ type AutoTrader struct {
 	monitorWg             sync.WaitGroup     // Used to wait for monitoring goroutine to finish
 	peakPnLCache          map[string]float64   // Peak profit cache (symbol_side -> peak P&L %)
 	peakPnLCacheMutex     sync.RWMutex        // Cache read-write lock
-	slConfirmCount        map[string]int      // Consecutive cycles SL condition met (posKey -> count); execute only when >= ConfirmCycles
-	slConfirmCountMu      sync.Mutex          // Protects slConfirmCount
+	slConfirmCount        map[string]int    // Consecutive cycles SL condition met (posKey -> count); execute only when >= ConfirmCycles
+	slConfirmCountMu      sync.Mutex      // Protects slConfirmCount
+	slFirstTriggeredAt   map[string]int64 // When ConfirmMinutes > 0, first time (ms) SL condition triggered per posKey
+	slFirstTriggeredAtMu sync.Mutex      // Protects slFirstTriggeredAt
+	tpTrailingFirstTriggeredAt   map[string]int64 // When TrailingTPConfirmMinutes > 0, first time trailing TP condition met
+	tpTrailingFirstTriggeredAtMu sync.Mutex
 	aiCloseConfirmCount   map[string]int      // Consecutive cycles AI requested close for a position (symbol_side -> count)
 	aiCloseConfirmMu      sync.Mutex          // Protects aiCloseConfirmCount
 	scaledLevelsTaken     map[string][]float64 // Scaled TP levels already taken (posKey -> profit percents)
@@ -404,6 +408,8 @@ func NewAutoTrader(config AutoTraderConfig, st *store.Store, userID string) (*Au
 		peakPnLCache:          make(map[string]float64),
 		peakPnLCacheMutex:     sync.RWMutex{},
 		slConfirmCount:        make(map[string]int),
+		slFirstTriggeredAt:         make(map[string]int64),
+		tpTrailingFirstTriggeredAt: make(map[string]int64),
 		aiCloseConfirmCount:   make(map[string]int),
 		scaledLevelsTaken:     make(map[string][]float64),
 		scaledLevelsTakenMu:   sync.RWMutex{},
@@ -3370,8 +3376,15 @@ func (at *AutoTrader) checkDynamicStopLossTakeProfit() error {
 			ScaledLevelsTaken: scaledTaken,
 		}
 
-		// Get market data for ATR and support/resistance calculations
-		klines, err := at.marketClient.GetKlines(symbol, "15m", 50)
+		// Get market data for ATR and support/resistance calculations (timeframe from config, default 15m)
+		tf := "15m"
+		if stopLossConfig != nil && stopLossConfig.KlinesTimeframe != "" {
+			tf = stopLossConfig.KlinesTimeframe
+			if tf != "15m" && tf != "1h" {
+				tf = "15m"
+			}
+		}
+		klines, err := at.marketClient.GetKlines(symbol, tf, 50)
 		if err != nil {
 			logger.Infof("⚠️  Failed to get klines for %s: %v", symbol, err)
 			continue
@@ -3402,11 +3415,20 @@ func (at *AutoTrader) checkDynamicStopLossTakeProfit() error {
 			}
 		}
 
-		// Find support/resistance levels
-		// Long: needs support (for SL) and resistance (for TP)
-		// Short: needs resistance (for SL) and support (for TP)
+		// Find support/resistance levels (optionally use EMA20 as structure level)
 		supportLevel := kernel.FindSupportLevel(klines, markPrice, 30)
 		resistanceLevel := kernel.FindResistanceLevel(klines, markPrice, 30)
+		if stopLossConfig != nil && stopLossConfig.SupportResistanceUseEMA20 != nil && *stopLossConfig.SupportResistanceUseEMA20 {
+			ema20 := kernel.CalculateEMA(klines, 20)
+			if ema20 > 0 {
+				// Long: support = EMA20 (break below = stop); Short: resistance = EMA20 (break above = stop)
+				if side == "long" {
+					supportLevel = ema20
+				} else {
+					resistanceLevel = ema20
+				}
+			}
+		}
 
 		// 锁定利润阈值：达到此盈利后移动止损到盈亏平衡点（策略中 LockProfitPercent）
 		breakevenLocked := takeProfitConfig != nil && takeProfitConfig.LockProfitPercent != nil &&
@@ -3450,7 +3472,34 @@ func (at *AutoTrader) checkDynamicStopLossTakeProfit() error {
 				}
 			}
 			if signal.Triggered {
-				// Confirm cycles: execute only after N consecutive cycles with SL condition met
+				confirmMinutes := 0.0
+				if stopLossConfig.ConfirmMinutes > 0 {
+					confirmMinutes = stopLossConfig.ConfirmMinutes
+				}
+				if confirmMinutes > 0 {
+					// Confirm by real time: require condition to hold for ConfirmMinutes
+					nowMs := time.Now().UTC().UnixMilli()
+					at.slFirstTriggeredAtMu.Lock()
+					firstMs := at.slFirstTriggeredAt[posKey]
+					if firstMs == 0 {
+						at.slFirstTriggeredAt[posKey] = nowMs
+						firstMs = nowMs
+					}
+					elapsedMin := float64(nowMs-firstMs) / 60000.0
+					at.slFirstTriggeredAtMu.Unlock()
+					if elapsedMin >= confirmMinutes {
+						kernel.LogStopLossCheck(symbol, signal)
+						if err := at.executeStopLoss(&positionInfo, signal); err != nil {
+							logger.Infof("❌ Failed to execute stop loss for %s: %v", symbol, err)
+						}
+						at.slFirstTriggeredAtMu.Lock()
+						delete(at.slFirstTriggeredAt, posKey)
+						at.slFirstTriggeredAtMu.Unlock()
+						continue
+					}
+					continue
+				}
+				// Confirm by cycles: execute only after N consecutive cycles with SL condition met
 				requiredCycles := 1
 				if stopLossConfig.ConfirmCycles > 0 {
 					requiredCycles = stopLossConfig.ConfirmCycles
@@ -3478,13 +3527,15 @@ func (at *AutoTrader) checkDynamicStopLossTakeProfit() error {
 					at.slConfirmCountMu.Unlock()
 					continue
 				}
-				// Not yet enough consecutive confirms; skip execute and take-profit check this cycle
 				continue
 			}
-			// Condition not triggered: reset consecutive count so we require a fresh run of N cycles
+			// Condition not triggered: reset consecutive count and first-trigger time
 			at.slConfirmCountMu.Lock()
 			delete(at.slConfirmCount, posKey)
 			at.slConfirmCountMu.Unlock()
+			at.slFirstTriggeredAtMu.Lock()
+			delete(at.slFirstTriggeredAt, posKey)
+			at.slFirstTriggeredAtMu.Unlock()
 		}
 
 		// Check take profit
@@ -3499,8 +3550,32 @@ func (at *AutoTrader) checkDynamicStopLossTakeProfit() error {
 			scaledTaken := at.getScaledLevelsTaken(posKey)
 			logger.Infof("📋 TP check %s %s: pnl=%.2f%%, entry=%.4f mark=%.4f, scaled_levels_taken=%d",
 				symbol, side, pnlPct, entryPrice, markPrice, len(scaledTaken))
-			signal := takeProfitChecker.CheckTakeProfit(&positionInfo, markPrice, atr, tpLevel)
-			if signal.Triggered {
+			signal := takeProfitChecker.CheckTakeProfit(&positionInfo, markPrice, highestPrice, atr, atrLong, tpLevel)
+			if !signal.Triggered {
+				// Reset confirm timer when trailing TP condition is not met (so confirm requires continuous hold)
+				at.tpTrailingFirstTriggeredAtMu.Lock()
+				delete(at.tpTrailingFirstTriggeredAt, posKey)
+				at.tpTrailingFirstTriggeredAtMu.Unlock()
+			} else {
+				// Optional confirm for trailing TP: require condition to hold for N minutes
+				if signal.Type == "trailing_tp" && takeProfitConfig.TrailingTPConfirmMinutes > 0 {
+					at.tpTrailingFirstTriggeredAtMu.Lock()
+					firstAt, ok := at.tpTrailingFirstTriggeredAt[posKey]
+					if !ok {
+						at.tpTrailingFirstTriggeredAt[posKey] = time.Now().UTC().UnixMilli()
+						at.tpTrailingFirstTriggeredAtMu.Unlock()
+						continue
+					}
+					elapsedMs := time.Now().UTC().UnixMilli() - firstAt
+					requiredMs := int64(takeProfitConfig.TrailingTPConfirmMinutes * 60 * 1000)
+					at.tpTrailingFirstTriggeredAtMu.Unlock()
+					if elapsedMs < requiredMs {
+						continue
+					}
+					at.tpTrailingFirstTriggeredAtMu.Lock()
+					delete(at.tpTrailingFirstTriggeredAt, posKey)
+					at.tpTrailingFirstTriggeredAtMu.Unlock()
+				}
 				kernel.LogTakeProfitCheck(symbol, signal)
 				// Execute take profit
 				if err := at.executeTakeProfit(&positionInfo, signal); err != nil {
@@ -3510,7 +3585,7 @@ func (at *AutoTrader) checkDynamicStopLossTakeProfit() error {
 		}
 	}
 
-	// Clean up slConfirmCount for positions that no longer exist
+	// Clean up slConfirmCount and slFirstTriggeredAt for positions that no longer exist
 	at.slConfirmCountMu.Lock()
 	for k := range at.slConfirmCount {
 		if !currentPositionKeys[k] {
@@ -3518,6 +3593,20 @@ func (at *AutoTrader) checkDynamicStopLossTakeProfit() error {
 		}
 	}
 	at.slConfirmCountMu.Unlock()
+	at.slFirstTriggeredAtMu.Lock()
+	for k := range at.slFirstTriggeredAt {
+		if !currentPositionKeys[k] {
+			delete(at.slFirstTriggeredAt, k)
+		}
+	}
+	at.slFirstTriggeredAtMu.Unlock()
+	at.tpTrailingFirstTriggeredAtMu.Lock()
+	for k := range at.tpTrailingFirstTriggeredAt {
+		if !currentPositionKeys[k] {
+			delete(at.tpTrailingFirstTriggeredAt, k)
+		}
+	}
+	at.tpTrailingFirstTriggeredAtMu.Unlock()
 
 	return nil
 }

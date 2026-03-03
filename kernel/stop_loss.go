@@ -3,6 +3,8 @@ package kernel
 import (
 	"fmt"
 	"math"
+	"strings"
+
 	"nofx/logger"
 	"nofx/market"
 	"nofx/store"
@@ -74,6 +76,13 @@ func (c *StopLossChecker) CheckStopLoss(
 	// 4. Check support/resistance stop (if enabled)
 	if c.config.SupportResistanceEnabled != nil && *c.config.SupportResistanceEnabled && supportLevel > 0 {
 		if signal := c.checkSupportResistanceStop(position, currentPrice, supportLevel); signal.Triggered {
+			signals = append(signals, signal)
+		}
+	}
+
+	// 5. Adverse exit when never in profit: if never had浮盈 and price moved against by >= X×ATR, treat as wrong direction and exit early (does not tighten normal ATR stop)
+	if atr > 0 {
+		if signal := c.checkAdverseExitWhenNeverProfit(position, currentPrice, highestPrice, atr, atrLong); signal.Triggered {
 			signals = append(signals, signal)
 		}
 	}
@@ -280,6 +289,53 @@ func (c *StopLossChecker) checkSupportResistanceStop(position *PositionInfo, cur
 	return &StopLossSignal{Triggered: false}
 }
 
+// checkAdverseExitWhenNeverProfit triggers when position has never been in profit and price moved against by >= config ATR multiple (reduces loss on wrong-direction opens without tightening normal stop).
+// When AdverseExitRequireATRSpike is true, also requires atr >= atrLong*threshold so we only exit on strong moves, not mild chop.
+func (c *StopLossChecker) checkAdverseExitWhenNeverProfit(position *PositionInfo, currentPrice, highestPrice, atr, atrLong float64) *StopLossSignal {
+	mult := c.getAdverseExitMultiplier(position.Symbol)
+	if mult <= 0 {
+		return &StopLossSignal{Triggered: false}
+	}
+	if c.config.AdverseExitRequireATRSpike != nil && *c.config.AdverseExitRequireATRSpike && atrLong > 0 {
+		th := getFloat64Value(c.config.AdverseExitATRSpikeThreshold, 1.2)
+		if atr < atrLong*th {
+			return &StopLossSignal{Triggered: false} // mild volatility, skip adverse exit
+		}
+	}
+	entryPrice := position.EntryPrice
+	var neverInProfit bool
+	var adverseDist float64
+	if position.Side == "long" {
+		neverInProfit = highestPrice <= entryPrice
+		adverseDist = entryPrice - currentPrice
+	} else {
+		neverInProfit = highestPrice >= entryPrice
+		adverseDist = currentPrice - entryPrice
+	}
+	if !neverInProfit || adverseDist <= 0 {
+		return &StopLossSignal{Triggered: false}
+	}
+	threshold := atr * mult
+	if adverseDist >= threshold {
+		return &StopLossSignal{
+			Triggered: true,
+			Reason:    fmt.Sprintf("Adverse exit (never in profit, reverse move %.2fx ATR >= %.2f)", adverseDist/atr, mult),
+			Price:     currentPrice,
+			Type:      "adverse_never_profit",
+		}
+	}
+	return &StopLossSignal{Triggered: false}
+}
+
+func (c *StopLossChecker) getAdverseExitMultiplier(symbol string) float64 {
+	sym := strings.ToUpper(symbol)
+	isBtcEth := strings.Contains(sym, "BTC") || strings.Contains(sym, "ETH")
+	if !isBtcEth && c.config.AdverseExitWhenNeverProfitATRAltcoin != nil && *c.config.AdverseExitWhenNeverProfitATRAltcoin > 0 {
+		return *c.config.AdverseExitWhenNeverProfitATRAltcoin
+	}
+	return getFloat64Value(c.config.AdverseExitWhenNeverProfitATR, 0)
+}
+
 // countEnabledConditions counts how many stop loss conditions are enabled
 func (c *StopLossChecker) countEnabledConditions() int {
 	count := 0
@@ -295,7 +351,9 @@ func (c *StopLossChecker) countEnabledConditions() int {
 	if c.config.SupportResistanceEnabled != nil && *c.config.SupportResistanceEnabled {
 		count++
 	}
-	
+	if getFloat64Value(c.config.AdverseExitWhenNeverProfitATR, 0) > 0 {
+		count++
+	}
 	return count
 }
 
@@ -333,6 +391,19 @@ func CalculateATR(klines []market.Kline, period int) float64 {
 	}
 
 	return atr
+}
+
+// CalculateEMA returns the latest EMA(period) value from klines (closes). Returns 0 if not enough bars.
+func CalculateEMA(klines []market.Kline, period int) float64 {
+	if len(klines) < period || period <= 0 {
+		return 0
+	}
+	alpha := 2.0 / float64(period+1)
+	ema := float64(klines[0].Close)
+	for i := 1; i < len(klines); i++ {
+		ema = alpha*float64(klines[i].Close) + (1-alpha)*ema
+	}
+	return ema
 }
 
 // FindSupportLevel finds the nearest support level from recent price action

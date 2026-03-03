@@ -730,7 +730,7 @@ export const api = {
     const result = await httpClient.get<PositionHistoryResponse>(
       `${API_BASE}/positions/history?trader_id=${traderId}&limit=${limit}`
     )
-    if (!result.success) throw new Error('获取历史仓位失败')
+    if (!result.success) throw new Error(result.message || '获取历史仓位失败')
     return result.data!
   },
 }
