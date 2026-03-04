@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
+
+	"nofx/logger"
 )
 
 // StrategyStore strategy storage
@@ -362,8 +365,51 @@ func (s *StrategyStore) initTables() error {
 }
 
 func (s *StrategyStore) initDefaultData() error {
-	// No longer pre-populate strategies - create on demand when user configures
-	return nil
+	// 确保存在系统默认策略，且每次启动时用当前代码预设刷新其 config，便于云服务器重新部署后策略自动更新
+	lang := "zh"
+	var existing Strategy
+	err := s.db.Where("is_default = ?", true).First(&existing).Error
+	if err == nil {
+		// 已存在默认策略：用当前预设刷新 config/name/description
+		cfg := GetDefaultStrategyConfig(lang)
+		configJSON, jerr := json.Marshal(cfg)
+		if jerr != nil {
+			return fmt.Errorf("marshal default strategy config: %w", jerr)
+		}
+		existing.Config = string(configJSON)
+		existing.Name = "默认策略"
+		existing.Description = "系统预设（2.5%/6%/10% 分批止盈、AI 仅开仓、15m 主周期），每次部署时自动更新为当前预设"
+		if uerr := s.db.Model(&Strategy{}).Where("id = ? AND is_default = ?", existing.ID, true).
+			Updates(map[string]interface{}{
+				"config":      existing.Config,
+				"name":        existing.Name,
+				"description": existing.Description,
+				"updated_at":  time.Now().UTC(),
+			}).Error; uerr != nil {
+			return fmt.Errorf("update default strategy: %w", uerr)
+		}
+		logger.Infof("✅ 系统默认策略已刷新为当前预设（2.5%%/6%%/10%% 分批止盈、AI 仅开仓、15m 主周期）")
+		return nil
+	}
+	if err != gorm.ErrRecordNotFound {
+		return err
+	}
+	// 不存在则创建系统默认策略
+	cfg := GetDefaultStrategyConfig(lang)
+	configJSON, jerr := json.Marshal(cfg)
+	if jerr != nil {
+		return fmt.Errorf("marshal default strategy config: %w", jerr)
+	}
+	st := &Strategy{
+		ID:          uuid.New().String(),
+		UserID:      "",
+		Name:        "默认策略",
+		Description: "系统预设（2.5%/6%/10% 分批止盈、AI 仅开仓、15m 主周期），每次部署时自动更新为当前预设",
+		IsActive:    false,
+		IsDefault:   true,
+		Config:      string(configJSON),
+	}
+	return s.db.Create(st).Error
 }
 
 // GetDefaultStrategyConfig returns the default strategy configuration (preset v3.0) for the given language
