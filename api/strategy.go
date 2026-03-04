@@ -405,14 +405,14 @@ func (s *Server) handleCreateOptimizedStrategy(c *gin.Context) {
 		return
 	}
 
-	// Create strategy name and description based on language
+	// Create strategy name and description based on language (preset v3.0 = 2.5%/6%/10% scaled TP, AI-only entry, 15m primary)
 	var name, description string
 	if lang == "zh" {
-		name = "优化策略 v2.0"
-		description = "预配置的优化策略，包含动态止损止盈、仓位管理、回撤控制、多周期分析等高级功能"
+		name = "预设策略 v3.0"
+		description = "一键预设：分批止盈 2.5%/6%/10%、AI 仅开仓+持仓 trend_view、15m 主周期、动态止损止盈"
 	} else {
-		name = "Optimized Strategy v2.0"
-		description = "Pre-configured optimized strategy with dynamic stop-loss/take-profit, position management, drawdown control, and multi-timeframe analysis"
+		name = "Preset Strategy v3.0"
+		description = "One-click preset: 2.5%/6%/10% scaled TP, AI-only entry + trend_view, 15m primary, dynamic SL/TP"
 	}
 
 	strategy := &store.Strategy{

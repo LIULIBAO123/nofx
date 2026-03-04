@@ -256,17 +256,17 @@ export function StrategyStudioPage() {
       )
       if (!response.ok) throw new Error('Failed to create optimized strategy')
       const result = await response.json()
-      notify.success(language === 'zh' ? '优化策略已创建' : 'Optimized strategy created')
+      notify.success(language === 'zh' ? '预设策略已创建' : 'Preset strategy created')
       await fetchStrategies()
       // Auto-select the newly created strategy
       if (result.id && result.config) {
         const now = new Date().toISOString()
         const newStrategy = {
           id: result.id,
-          name: language === 'zh' ? '优化策略 v2.0' : 'Optimized Strategy v2.0',
-          description: language === 'zh' 
-            ? '预配置的优化策略，包含动态止损止盈、仓位管理、回撤控制、多周期分析等高级功能'
-            : 'Pre-configured optimized strategy with dynamic stop-loss/take-profit, position management, drawdown control, and multi-timeframe analysis',
+          name: language === 'zh' ? '预设策略 v3.0' : 'Preset Strategy v3.0',
+          description: language === 'zh'
+            ? '一键预设：分批止盈 2.5%/6%/10%、AI 仅开仓+持仓 trend_view、15m 主周期、动态止损止盈'
+            : 'One-click preset: 2.5%/6%/10% scaled TP, AI-only entry + trend_view, 15m primary, dynamic SL/TP',
           is_active: false,
           is_default: false,
           is_public: false,
@@ -764,7 +764,7 @@ export function StrategyStudioPage() {
                 <button
                   onClick={handleCreateOptimizedStrategy}
                   className="p-1.5 rounded-md transition-all bg-gradient-to-br from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white shadow-sm hover:shadow-md hover:scale-105 active:scale-95"
-                  title={language === 'zh' ? '创建优化策略 v2.1 (25U小资金专用)' : 'Create Optimized Strategy v2.1 (For 25U)'}
+                  title={language === 'zh' ? '一键生成预设策略（2.5%/6%/10% 分批止盈、AI 仅开仓、15m 主周期）' : 'One-click preset strategy (2.5%/6%/10% scaled TP, AI-only entry, 15m primary)'}
                 >
                   <Sparkles className="w-3.5 h-3.5" />
                 </button>

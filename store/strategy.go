@@ -817,12 +817,13 @@ func GetOptimizedStrategyConfig(lang string) StrategyConfig {
 		},
 		Indicators: IndicatorConfig{
 			Klines: KlineConfig{
-				PrimaryTimeframe:     "15m", // Changed from 5m to 15m for better signal quality
-				PrimaryCount:         100,   // Increased for more historical data
+				PrimaryTimeframe:     "15m", // 与默认预设一致
+				PrimaryCount:         100,
 				LongerTimeframe:      "4h",
 				LongerCount:          100,
 				EnableMultiTimeframe: true,
-				SelectedTimeframes:   []string{"15m", "1h", "4h"}, // Multi-timeframe resonance
+				SelectedTimeframes:   []string{"15m", "1h", "4h"},
+				MaxCoinsInPrompt:     8, // 与默认预设一致，候选写入 prompt 上限
 			},
 			EnableRawKlines:   true, // Required - raw OHLCV data for AI analysis
 			EnableEMA:         true, // Enable EMA for trend analysis
@@ -864,9 +865,10 @@ func GetOptimizedStrategyConfig(lang string) StrategyConfig {
 			AltcoinMaxPositionValueRatio:    1.0,  // Altcoin: max position = 1x equity (CODE ENFORCED)
 			MaxMarginUsage:                  0.9,  // Max 90% margin usage (CODE ENFORCED)
 			MinPositionSize:                 12,   // Min 12 USDT per position (CODE ENFORCED)
-			MinRiskRewardRatio:              3.0,  // Min 3:1 profit/loss ratio (AI guided)
-			MinConfidence:                   60,   // Reduced from 75 to 60 for more opportunities
-			// Dynamic Stop Loss Configuration（按 SL_TP_PARAMETER_ANALYSIS 建议微调）
+			MinRiskRewardRatio:              3.0,  // Min 3:1 profit/loss ratio (execution enforced)
+			MinConfidence:                   70,   // 与默认预设一致，平衡机会与质量
+			AIOnlyEntry:                     true, // 与默认预设一致：平仓由策略 SL/TP 执行，AI 仅开仓 + trend_view
+			// Dynamic Stop Loss Configuration（与默认预设对齐）
 			DynamicStopLoss: &DynamicStopLossConfig{
 				Enabled:                   true,
 				TriggerLogic:              "any",
@@ -882,8 +884,8 @@ func GetOptimizedStrategyConfig(lang string) StrategyConfig {
 				ATRMultiplierMax:          float64Ptr(2.5),
 				ATRPeriodBTCETH:           intPtr(20),
 				ATRPeriodAltcoin:          intPtr(14),
-				SupportResistanceEnabled:  boolPtr(true),
-				SupportResistanceBuffer:   float64Ptr(0.8),   // 0.5→0.8%，略放宽减少假突破
+				SupportResistanceEnabled:  boolPtr(false),   // 与默认预设一致，减少假突破干扰
+				SupportResistanceBuffer:   float64Ptr(0.8),
 				ConfirmCycles:             2,
 				ConfirmMinutes:            0,
 				ATRToleranceEnabled:       boolPtr(true),
