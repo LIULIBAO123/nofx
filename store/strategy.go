@@ -388,18 +388,19 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 		},
 		Indicators: IndicatorConfig{
 			Klines: KlineConfig{
-				PrimaryTimeframe:     "5m",
+				PrimaryTimeframe:     "15m",                      // 与「先 4h/1h 定方向再 15m 找入场」一致；建议扫描间隔 5m 或 15m
 				PrimaryCount:         30,
 				LongerTimeframe:      "4h",
 				LongerCount:          10,
 				EnableMultiTimeframe: true,
-				SelectedTimeframes:   []string{"5m", "15m", "1h", "4h"},
+				SelectedTimeframes:   []string{"15m", "1h", "4h"},
+				MaxCoinsInPrompt:     8, // 候选写入 prompt 上限，0 时 kernel 用 8
 			},
 			EnableRawKlines:   true, // Required - raw OHLCV data for AI analysis
-			EnableEMA:         false,
-			EnableMACD:        false,
-			EnableRSI:         false,
-			EnableATR:         false,
+			EnableEMA:         true, // 趋势/结构（EMA20）供 4h/1h 方向与入场判断
+			EnableMACD:        true,
+			EnableRSI:         true,
+			EnableATR:         true,
 			EnableBOLL:        false,
 			EnableVolume:      true,
 			EnableOI:          true,
@@ -435,14 +436,15 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 			AltcoinMaxPositionValueRatio:    1.0, // Altcoin: max position = 1x equity (CODE ENFORCED)
 			MaxMarginUsage:                  0.9, // Max 90% margin usage (CODE ENFORCED)
 			MinPositionSize:                 12,  // Min 12 USDT per position (CODE ENFORCED)
-			MinRiskRewardRatio:              3.0, // Min 3:1 profit/loss ratio (AI guided)
-			MinConfidence:                   75,  // Min 75% confidence (AI guided)
+			MinRiskRewardRatio:              3.0, // Min 3:1 profit/loss ratio (execution enforced)
+			MinConfidence:                   70,  // Min 70% confidence (AI guided)，平衡机会与质量
+			AIOnlyEntry:                     true, // 平仓由策略 SL/TP 执行；AI 仅开仓 + 持仓 trend_view 区分
 			// 预设：动态止损/止盈（略放宽），最小持仓时间，与回测一致
 			DynamicStopLoss: &DynamicStopLossConfig{
 				Enabled:              true,
 				TriggerLogic:         "any",
 				MinHoldMinutes:       10,                 // 10min：主周期 15m 下更稳，减少开仓即触发
-				InitialStopPercent:   8,                  // 8% 兜底：极端行情硬止损，日常仍以动态/ATR/追踪为主
+				InitialStopPercent:   0,                  // 0=无固定初始止损，与前端「已移除固定初始止损」一致；仅用动态/ATR/追踪
 				TrailingEnabled:      boolPtr(true),
 				TrailingLevels: []TrailingStopLevel{
 					{ProfitThreshold: 2.5, TrailingPercent: 1.5},
@@ -465,9 +467,9 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 				MinProfitPercentToAllowTP: nil,                // 0=不限制；设 >0 可避免极低盈利即止盈
 				ScaledEnabled:              boolPtr(true),
 				ScaledLevels: []ScaledTakeProfitLevel{
-					{ProfitPercent: 5.0, ClosePercent: 25, MoveStopToBreakeven: boolPtr(false)},
-					{ProfitPercent: 8.0, ClosePercent: 25, MoveStopToBreakeven: boolPtr(true)},
-					{ProfitPercent: 12.0, ClosePercent: 100, MoveStopToBreakeven: boolPtr(false)},
+					{ProfitPercent: 2.5, ClosePercent: 25, MoveStopToBreakeven: boolPtr(false)}, // 2.5% 第一档：进一步降低，更多单先触发分层再被追踪
+					{ProfitPercent: 6.0, ClosePercent: 25, MoveStopToBreakeven: boolPtr(true)},
+					{ProfitPercent: 10.0, ClosePercent: 100, MoveStopToBreakeven: boolPtr(false)},
 				},
 				ATREnabled:                 boolPtr(true),
 				ATRMultiplierMin:            float64Ptr(2.5),
@@ -497,7 +499,7 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 - 优秀交易员：每天2-4笔 ≈ 每小时0.1-0.2笔
 - 每小时超过2笔 = 过度交易
 - 单笔持仓时间 ≥ 30-60分钟（系统会自动管理）
-- 系统已启用分批止盈：4%/7%/10%自动平仓
+- 系统已启用分批止盈：2.5%/6%/10% 自动部分/全部平仓
 - 系统已启用追踪止损：保护利润`,
 			EntryStandards: `# 🎯 入场标准（严格 - 多周期共振）
 
@@ -508,7 +510,7 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
    - 做空：OI增加 + 价格下跌（新空单开仓）
 3. **资金流确认**：机构资金流向与方向一致
 4. **技术指标共振**：EMA、MACD、RSI多个指标确认
-5. **信心度 ≥ 60**，盈亏比 ≥ 1:3
+5. **信心度 ≥ 70**，盈亏比 ≥ 1:3
 
 **推理中必须按顺序写出（避免趋势误判与逆势开仓）**：
 - ① 4h 趋势（上升/下降/横盘）及依据（价格vs EMA20、MACD正负）
@@ -645,8 +647,8 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 
 ## 系统自动功能（无需AI判断）
 
-1. **分批止盈**：盈利4%/7%/10%自动平仓33%/50%/100%
-2. **追踪止损**：盈利2.5%后启动，距离1.5%
+1. **分批止盈**：盈利 2.5%/6%/10% 自动平仓 25%/25%/100%
+2. **追踪止损**：盈利 2.5% 后启动，回撤 1.5%
 3. **ATR动态止损**：根据波动率自动调整
 4. **连续确认再止损**：止损条件连续 N 周期满足后才执行，减少单K线假跌破
 5. **高波动宽容**：高波动时自动放宽ATR止损并多要求1个确认周期
@@ -672,7 +674,7 @@ Your task is to make trading decisions based on the provided market data. You ar
 - Excellent trader: 2-4 trades per day ≈ 0.1-0.2 trades per hour
 - >2 trades per hour = overtrading
 - Single position holding time ≥ 30-60 minutes (system managed)
-- System has scaled take-profit: 4%/7%/10% auto-close
+- System has scaled take-profit: 2.5%/6%/10% auto partial/full close
 - System has trailing stop-loss: protect profits`,
 			EntryStandards: `# 🎯 Entry Standards (Strict - Multi-timeframe Resonance)
 
@@ -683,7 +685,7 @@ Your task is to make trading decisions based on the provided market data. You ar
    - Short: OI increase + price fall (new short positions)
 3. **Money flow confirmation**: Institutional flow aligns with direction
 4. **Technical indicator resonance**: EMA, MACD, RSI multiple confirmations
-5. **Confidence ≥ 60**, Risk-reward ratio ≥ 1:3
+5. **Confidence ≥ 70**, Risk-reward ratio ≥ 1:3
 
 **In reasoning you must write in order**: ① 4h trend (up/down/sideways) + basis; ② 1h trend + basis; ③ Only open when 4h and 1h align (long when not down, short when not up); ④ Entry timing: long at support/pullback, short at resistance/bounce; avoid chase. **Forbidden**: Long when 4h down; short when 4h up; OI decrease+price up as breakout long; blind entry without S/R.
 
@@ -771,8 +773,8 @@ Your task is to make trading decisions based on the provided market data. You ar
 
 ## System Auto Features (No AI judgment needed)
 
-1. **Scaled take-profit**: Auto-close 33%/50%/100% at 4%/7%/10% profit
-2. **Trailing stop-loss**: Activates after 2.5% profit, 1.5% distance
+1. **Scaled take-profit**: Auto-close 25%/25%/100% at 2.5%/6%/10% profit
+2. **Trailing stop-loss**: Activates after 2.5% profit, 1.5% retrace
 3. **ATR dynamic stop-loss**: Auto-adjusts based on volatility
 4. **Position time management**: Min 30 minutes, max 4 hours
 5. **Drawdown control**: Auto-response at 10%/15%/20% drawdown
@@ -869,7 +871,7 @@ func GetOptimizedStrategyConfig(lang string) StrategyConfig {
 				Enabled:                   true,
 				TriggerLogic:              "any",
 				MinHoldMinutes:            10,                // 主周期 15m 下更稳
-				InitialStopPercent:        8,                 // 8% 兜底，极端行情硬止损
+				InitialStopPercent:        0,                // 0=no fixed initial stop, align with frontend; use dynamic/ATR/trailing only
 				TrailingEnabled:           boolPtr(true),
 				TrailingLevels: []TrailingStopLevel{
 					{ProfitThreshold: 2.5, TrailingPercent: 1.5},
@@ -895,9 +897,9 @@ func GetOptimizedStrategyConfig(lang string) StrategyConfig {
 				MinProfitPercentToAllowTP:  nil,               // 0 = no filter
 				ScaledEnabled:              boolPtr(true),
 				ScaledLevels: []ScaledTakeProfitLevel{
-					{ProfitPercent: 5.0, ClosePercent: 25, MoveStopToBreakeven: boolPtr(false)},
-					{ProfitPercent: 8.0, ClosePercent: 25, MoveStopToBreakeven: boolPtr(true)},
-					{ProfitPercent: 12.0, ClosePercent: 100, MoveStopToBreakeven: boolPtr(false)},
+					{ProfitPercent: 2.5, ClosePercent: 25, MoveStopToBreakeven: boolPtr(false)}, // 2.5% 第一档：进一步降低，更多单先触发分层再被追踪
+					{ProfitPercent: 6.0, ClosePercent: 25, MoveStopToBreakeven: boolPtr(true)},
+					{ProfitPercent: 10.0, ClosePercent: 100, MoveStopToBreakeven: boolPtr(false)},
 				},
 				ATREnabled:                 boolPtr(true),
 				ATRMultiplierMin:           float64Ptr(2.5),
@@ -927,7 +929,7 @@ func GetOptimizedStrategyConfig(lang string) StrategyConfig {
 - 优秀交易员：每天2-4笔 ≈ 每小时0.1-0.2笔
 - 每小时超过2笔 = 过度交易
 - 单笔持仓时间 ≥ 30-60分钟（系统会自动管理）
-- 系统已启用分批止盈：4%/7%/10%自动平仓
+- 系统已启用分批止盈：2.5%/6%/10% 自动部分/全部平仓
 - 系统已启用追踪止损：保护利润`,
 			EntryStandards: `# 🎯 入场标准（严格 - 多周期共振）
 
@@ -966,7 +968,7 @@ func GetOptimizedStrategyConfig(lang string) StrategyConfig {
 1. **质量优于数量**：只做最确定的机会，信心度必须≥60
 2. **多周期共振**：4h定方向 + 1h确认 + 15m入场
 3. **严格止损**：系统自动管理，初始4%止损
-4. **分批止盈**：4%/7%/10%自动平仓，锁定利润
+4. **分批止盈**：2.5%/6%/10% 自动平仓，锁定利润
 5. **风险控制**：最大3个仓位，保证金使用率≤90%
 
 ## 📊 数据说明
@@ -1154,7 +1156,7 @@ func GetOptimizedStrategyConfig(lang string) StrategyConfig {
 
 ### 平仓条件（任一触发立即执行）
 1. ❌ 止损触发（系统自动管理）
-2. ✅ 止盈触发（4%/7%/10%系统自动平仓）
+2. ✅ 止盈触发（2.5%/6%/10% 系统自动平仓）
 3. ❌ 趋势反转信号（MACD死叉/金叉）
 4. ❌ 闪崩或暴跌（5分钟跌幅>5%）
 
@@ -1187,7 +1189,7 @@ Your task is to make trading decisions based on the provided market data. You ar
 - Excellent trader: 2-4 trades per day ≈ 0.1-0.2 trades per hour
 - >2 trades per hour = overtrading
 - Single position holding time ≥ 30-60 minutes (system managed)
-- System has scaled take-profit: 4%/7%/10% auto-close
+- System has scaled take-profit: 2.5%/6%/10% auto partial/full close
 - System has trailing stop-loss: protect profits`,
 			EntryStandards: `# 🎯 Entry Standards (Strict - Multi-timeframe Resonance)
 
@@ -1196,7 +1198,7 @@ Your task is to make trading decisions based on the provided market data. You ar
 2. ✅ OI change support (increase or significant decrease)
 3. ✅ Money flow confirmation: Institutional flow aligns with direction
 4. ✅ Technical indicator resonance: EMA, MACD, RSI multiple confirmations
-5. ✅ Confidence ≥ 60, Risk-reward ratio ≥ 1:3
+5. ✅ Confidence ≥ 70, Risk-reward ratio ≥ 1:3
 
 **In reasoning write in order**: ① 4h trend + basis ② 1h trend + basis ③ Only open when 4h and 1h align (long when not down, short when not up) ④ Entry timing: long at support/pullback, short at resistance/bounce; avoid chase. **Forbidden**: Long when 4h down; short when 4h up; OI decrease+price up as breakout long; blind entry without S/R.
 
@@ -1221,7 +1223,7 @@ Your task is to make trading decisions based on the provided market data. You ar
 1. **Quality over Quantity**: Only take the most certain opportunities, confidence ≥60
 2. **Multi-timeframe Resonance**: 4h direction + 1h confirmation + 15m entry
 3. **Strict Stop-Loss**: System auto-managed, initial 4% stop
-4. **Scaled Take-Profit**: 4%/7%/10% auto-close, lock profits
+4. **Scaled Take-Profit**: 2.5%/6%/10% auto-close, lock profits
 5. **Risk Control**: Max 3 positions, margin usage ≤90%
 
 ## 📊 Data Explanation
@@ -1429,7 +1431,7 @@ The system supports ATR-based dynamic stop-loss and take-profit. You need to cho
 ## ✅ Decision Requirements (Strict Execution)
 
 ### Entry Conditions (Must meet all)
-1. ✅ Confidence ≥ 60
+1. ✅ Confidence ≥ 70
 2. ✅ Three-timeframe trend resonance (4h+1h+15m)
 3. ✅ OI change supports direction (increase or significant decrease)
 4. ✅ Risk-reward ≥ 1:3
@@ -1438,7 +1440,7 @@ The system supports ATR-based dynamic stop-loss and take-profit. You need to cho
 
 ### Exit Conditions (Any trigger immediate execution)
 1. ❌ Stop-loss triggered (system auto-managed)
-2. ✅ Take-profit triggered (4%/7%/10% system auto-close)
+2. ✅ Take-profit triggered (2.5%/6%/10% system auto-close)
 3. ❌ Trend reversal signal (MACD death cross/golden cross)
 4. ❌ Flash crash or plunge (>5% drop in 5 minutes)
 

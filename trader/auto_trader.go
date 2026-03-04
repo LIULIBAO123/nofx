@@ -674,12 +674,7 @@ func (at *AutoTrader) runCycle(cycleStart time.Time) error {
 		logger.Info("📅 Daily P&L reset")
 	}
 
-	// 3. Check dynamic stop loss and take profit for existing positions
-	if err := at.checkDynamicStopLossTakeProfit(); err != nil {
-		logger.Infof("⚠️  Failed to check dynamic stop loss/take profit: %v", err)
-	}
-
-	// 4. Collect trading context
+	// 3. Collect trading context first (needed to decide whether we have candidates and to run SL/TP after AI when we do)
 	ctx, err := at.buildTradingContext()
 	if err != nil {
 		record.Success = false
@@ -692,8 +687,11 @@ func (at *AutoTrader) runCycle(cycleStart time.Time) error {
 	// NOTE: Must be called BEFORE candidate coins check to ensure equity is always recorded
 	at.saveEquitySnapshot(ctx)
 
-	// 如果没有候选币种，记录但不报错
+	// 如果没有候选币种：仍执行持仓的 SL/TP 检查（无 AI trend_view），然后记录并跳过本周期
 	if len(ctx.CandidateCoins) == 0 {
+		if err := at.checkDynamicStopLossTakeProfit(nil); err != nil {
+			logger.Infof("⚠️  Failed to check dynamic stop loss/take profit (no candidates): %v", err)
+		}
 		logger.Infof("ℹ️  No candidate coins available, skipping this cycle")
 		record.Success = true // 不是错误，只是没有候选币
 		record.ExecutionLog = append(record.ExecutionLog, "No candidate coins available, cycle skipped")
@@ -762,6 +760,25 @@ func (at *AutoTrader) runCycle(cycleStart time.Time) error {
 
 		at.saveDecision(record)
 		return fmt.Errorf("failed to get AI decision: %w", err)
+	}
+
+	// 5b. Build AI trend_view per position for SL/TP modulation (reversing→faster stop; trend_intact/choppy→one more confirm)
+	trendViewByPosKey := make(map[string]string)
+	for _, pos := range ctx.Positions {
+		posKey := market.Normalize(pos.Symbol) + "_" + strings.ToLower(pos.Side)
+		for _, d := range aiDecision.Decisions {
+			if d.Action != "hold" || market.Normalize(d.Symbol) != market.Normalize(pos.Symbol) {
+				continue
+			}
+			tv := strings.TrimSpace(strings.ToLower(d.TrendView))
+			if tv == "trend_intact" || tv == "choppy" || tv == "reversing" {
+				trendViewByPosKey[posKey] = tv
+			}
+			break
+		}
+	}
+	if err := at.checkDynamicStopLossTakeProfit(trendViewByPosKey); err != nil {
+		logger.Infof("⚠️  Failed to check dynamic stop loss/take profit: %v", err)
 	}
 
 	// // 5. Print system prompt
@@ -1455,40 +1472,37 @@ func (at *AutoTrader) executeOpenLongWithRecord(decision *kernel.Decision, actio
 	// Calculate quantity with adjusted position size
 	quantity := actualPositionSize / marketData.CurrentPrice
 	actionRecord.Quantity = quantity
-	actionRecord.Price = marketData.CurrentPrice
-
-	// Set margin mode
-	if err := at.trader.SetMarginMode(decision.Symbol, at.config.IsCrossMargin); err != nil {
-		logger.Infof("  ⚠️ Failed to set margin mode: %v", err)
-		// Continue execution, doesn't affect trading
-	}
-
-	// Open position (use effective leverage so display matches AI/strategy)
-	order, err := at.trader.OpenLong(decision.Symbol, quantity, leverage)
-	if err != nil {
-		return err
-	}
-
-	// Record order ID
-	if orderID, ok := order["orderId"].(int64); ok {
-		actionRecord.OrderID = orderID
-	}
-
-	logger.Infof("  ✓ Position opened successfully, order ID: %v, quantity: %.4f, leverage: %dx", order["orderId"], quantity, leverage)
-
-	// Record order to database and poll for confirmation
-	at.recordAndConfirmOrder(order, decision.Symbol, "open_long", quantity, marketData.CurrentPrice, leverage, 0)
-
-	// Record position opening time
-	posKey := decision.Symbol + "_long"
-	at.positionFirstSeenTime[posKey] = time.Now().UnixMilli()
-
-	// Adjust SL/TP based on actual entry price (preserve risk/reward ratio)
 	actualEntryPrice := marketData.CurrentPrice
-	aiAnalysisPrice := decision.Price // Price at time of AI analysis
+	actionRecord.Price = actualEntryPrice
+
+	// Adjust SL/TP based on actual entry price (preserve risk/reward ratio) — do before open so we can enforce min ratio
+	aiAnalysisPrice := decision.Price
+	if aiAnalysisPrice <= 0 {
+		aiAnalysisPrice = actualEntryPrice
+	}
 	adjustedSL, adjustedTP, priceDeviation := adjustStopLossTakeProfitForActualEntry(
 		aiAnalysisPrice, actualEntryPrice, decision.StopLoss, decision.TakeProfit, "long",
 	)
+
+	// [CODE ENFORCED] Min risk-reward ratio: reject open if ratio below strategy minimum
+	if decision.StopLoss > 0 && decision.TakeProfit > 0 {
+		slDist := actualEntryPrice - adjustedSL
+		tpDist := adjustedTP - actualEntryPrice
+		if slDist > 0 && tpDist > 0 {
+			ratio := tpDist / slDist
+			minRatio := 0.0
+			if at.strategyEngine != nil {
+				if cfg := at.strategyEngine.GetConfig(); cfg != nil && cfg.RiskControl.MinRiskRewardRatio > 0 {
+					minRatio = cfg.RiskControl.MinRiskRewardRatio
+				}
+			}
+			if minRatio > 0 && ratio < minRatio {
+				actionRecord.Error = fmt.Sprintf("盈亏比 %.2f:1 低于最小要求 %.1f:1，已拒绝开仓", ratio, minRatio)
+				logger.Infof("  ⛔ %s", actionRecord.Error)
+				return nil
+			}
+		}
+	}
 
 	// Log adjustment if significant deviation
 	if math.Abs(priceDeviation) > 0.1 {
@@ -1497,13 +1511,36 @@ func (at *AutoTrader) executeOpenLongWithRecord(decision *kernel.Decision, actio
 		logger.Infof("     SL: %.6f → %.6f, TP: %.6f → %.6f",
 			decision.StopLoss, adjustedSL, decision.TakeProfit, adjustedTP)
 	}
-
-	// Warn if price deviation is large (>2%)
 	if math.Abs(priceDeviation) > 2.0 {
 		logger.Infof("  ⚠️ Large price deviation (%.2f%%) - market moved significantly since AI analysis", priceDeviation)
 	}
 
-	// Set stop loss and take profit with adjusted values
+	// Set margin mode
+	if err := at.trader.SetMarginMode(decision.Symbol, at.config.IsCrossMargin); err != nil {
+		logger.Infof("  ⚠️ Failed to set margin mode: %v", err)
+	}
+
+	// Open position (use effective leverage so display matches AI/strategy)
+	order, err := at.trader.OpenLong(decision.Symbol, quantity, leverage)
+	if err != nil {
+		return err
+	}
+
+	if orderID, ok := order["orderId"].(int64); ok {
+		actionRecord.OrderID = orderID
+	}
+
+	logger.Infof("  ✓ Position opened successfully, order ID: %v, quantity: %.4f, leverage: %dx", order["orderId"], quantity, leverage)
+
+	at.recordAndConfirmOrder(order, decision.Symbol, "open_long", quantity, actualEntryPrice, leverage, 0)
+
+	posKey := decision.Symbol + "_long"
+	at.positionFirstSeenTime[posKey] = time.Now().UnixMilli()
+
+	// Persist adjusted SL/TP to decision record so UI shows same ratio we set on exchange
+	actionRecord.StopLoss = adjustedSL
+	actionRecord.TakeProfit = adjustedTP
+
 	if err := at.trader.SetStopLoss(decision.Symbol, "LONG", quantity, adjustedSL); err != nil {
 		logger.Infof("  ⚠ Failed to set stop loss: %v", err)
 	}
@@ -1511,7 +1548,6 @@ func (at *AutoTrader) executeOpenLongWithRecord(decision *kernel.Decision, actio
 		logger.Infof("  ⚠ Failed to set take profit: %v", err)
 	}
 
-	// Store fixed params for API/UI (same as backtest current-position display)
 	at.setPositionParams(posKey, adjustedSL, adjustedTP)
 
 	// Persist params to DB open position so 交易记录 shows them when closed (by us or by sync)
@@ -1608,54 +1644,71 @@ func (at *AutoTrader) executeOpenShortWithRecord(decision *kernel.Decision, acti
 	// Calculate quantity with adjusted position size
 	quantity := actualPositionSize / marketData.CurrentPrice
 	actionRecord.Quantity = quantity
-	actionRecord.Price = marketData.CurrentPrice
-
-	// Set margin mode
-	if err := at.trader.SetMarginMode(decision.Symbol, at.config.IsCrossMargin); err != nil {
-		logger.Infof("  ⚠️ Failed to set margin mode: %v", err)
-	}
-
-	// Open position (use effective leverage so display matches AI/strategy)
-	order, err := at.trader.OpenShort(decision.Symbol, quantity, leverage)
-	if err != nil {
-		return err
-	}
-
-	// Record order ID
-	if orderID, ok := order["orderId"].(int64); ok {
-		actionRecord.OrderID = orderID
-	}
-
-	logger.Infof("  ✓ Position opened successfully, order ID: %v, quantity: %.4f, leverage: %dx", order["orderId"], quantity, leverage)
-
-	// Record order to database and poll for confirmation
-	at.recordAndConfirmOrder(order, decision.Symbol, "open_short", quantity, marketData.CurrentPrice, leverage, 0)
-
-	// Record position opening time
-	posKey := decision.Symbol + "_short"
-	at.positionFirstSeenTime[posKey] = time.Now().UnixMilli()
-
-	// Adjust SL/TP based on actual entry price (preserve risk/reward ratio)
 	actualEntryPrice := marketData.CurrentPrice
-	aiAnalysisPrice := decision.Price // Price at time of AI analysis
+	actionRecord.Price = actualEntryPrice
+
+	// Adjust SL/TP based on actual entry price (preserve risk/reward ratio) — do before open so we can enforce min ratio
+	aiAnalysisPrice := decision.Price
+	if aiAnalysisPrice <= 0 {
+		aiAnalysisPrice = actualEntryPrice
+	}
 	adjustedSL, adjustedTP, priceDeviation := adjustStopLossTakeProfitForActualEntry(
 		aiAnalysisPrice, actualEntryPrice, decision.StopLoss, decision.TakeProfit, "short",
 	)
 
-	// Log adjustment if significant deviation
+	// [CODE ENFORCED] Min risk-reward ratio: reject open if ratio below strategy minimum (short: SL above entry, TP below)
+	if decision.StopLoss > 0 && decision.TakeProfit > 0 {
+		slDist := adjustedSL - actualEntryPrice
+		tpDist := actualEntryPrice - adjustedTP
+		if slDist > 0 && tpDist > 0 {
+			ratio := tpDist / slDist
+			minRatio := 0.0
+			if at.strategyEngine != nil {
+				if cfg := at.strategyEngine.GetConfig(); cfg != nil && cfg.RiskControl.MinRiskRewardRatio > 0 {
+					minRatio = cfg.RiskControl.MinRiskRewardRatio
+				}
+			}
+			if minRatio > 0 && ratio < minRatio {
+				actionRecord.Error = fmt.Sprintf("盈亏比 %.2f:1 低于最小要求 %.1f:1，已拒绝开仓", ratio, minRatio)
+				logger.Infof("  ⛔ %s", actionRecord.Error)
+				return nil
+			}
+		}
+	}
+
 	if math.Abs(priceDeviation) > 0.1 {
 		logger.Infof("  📊 SL/TP adjusted for actual entry: AI price %.6f → actual %.6f (%.2f%% deviation)",
 			aiAnalysisPrice, actualEntryPrice, priceDeviation)
 		logger.Infof("     SL: %.6f → %.6f, TP: %.6f → %.6f",
 			decision.StopLoss, adjustedSL, decision.TakeProfit, adjustedTP)
 	}
-
-	// Warn if price deviation is large (>2%)
 	if math.Abs(priceDeviation) > 2.0 {
 		logger.Infof("  ⚠️ Large price deviation (%.2f%%) - market moved significantly since AI analysis", priceDeviation)
 	}
 
-	// Set stop loss and take profit with adjusted values
+	if err := at.trader.SetMarginMode(decision.Symbol, at.config.IsCrossMargin); err != nil {
+		logger.Infof("  ⚠️ Failed to set margin mode: %v", err)
+	}
+
+	order, err := at.trader.OpenShort(decision.Symbol, quantity, leverage)
+	if err != nil {
+		return err
+	}
+
+	if orderID, ok := order["orderId"].(int64); ok {
+		actionRecord.OrderID = orderID
+	}
+
+	logger.Infof("  ✓ Position opened successfully, order ID: %v, quantity: %.4f, leverage: %dx", order["orderId"], quantity, leverage)
+
+	at.recordAndConfirmOrder(order, decision.Symbol, "open_short", quantity, actualEntryPrice, leverage, 0)
+
+	posKey := decision.Symbol + "_short"
+	at.positionFirstSeenTime[posKey] = time.Now().UnixMilli()
+
+	actionRecord.StopLoss = adjustedSL
+	actionRecord.TakeProfit = adjustedTP
+
 	if err := at.trader.SetStopLoss(decision.Symbol, "SHORT", quantity, adjustedSL); err != nil {
 		logger.Infof("  ⚠ Failed to set stop loss: %v", err)
 	}
@@ -1663,10 +1716,8 @@ func (at *AutoTrader) executeOpenShortWithRecord(decision *kernel.Decision, acti
 		logger.Infof("  ⚠ Failed to set take profit: %v", err)
 	}
 
-	// Store fixed params for API/UI (same as backtest current-position display)
 	at.setPositionParams(posKey, adjustedSL, adjustedTP)
 
-	// Persist params to DB open position so 交易记录 shows them when closed (by us or by sync)
 	if at.store != nil {
 		normalizedSymbol := market.Normalize(decision.Symbol)
 		at.positionParamsMu.RLock()
@@ -2476,7 +2527,7 @@ func (at *AutoTrader) startDynamicSLTPMonitor() {
 		for {
 			select {
 			case <-ticker.C:
-				if err := at.checkDynamicStopLossTakeProfit(); err != nil {
+				if err := at.checkDynamicStopLossTakeProfit(nil); err != nil {
 					logger.Infof("⚠️ [%s] Strategy SL/TP check failed: %v", at.name, err)
 				}
 			case <-at.stopMonitorCh:
@@ -3213,7 +3264,9 @@ func (at *AutoTrader) GetOpenOrders(symbol string) ([]OpenOrder, error) {
 
 // checkDynamicStopLossTakeProfit checks all positions for dynamic stop loss and take profit triggers.
 // 实盘与实盘模拟共用：positions 来自 at.trader.GetPositions()（交易所或 PaperTrader），后续判断与执行逻辑一致。
-func (at *AutoTrader) checkDynamicStopLossTakeProfit() error {
+// trendViewByPosKey: optional. When non-nil, key = symbol_side (e.g. "BTCUSDT_long"); value = "trend_intact"|"choppy"|"reversing".
+// Used to modulate SL confirm: reversing→faster stop; trend_intact/choppy→one more confirm to reduce oscillation wash.
+func (at *AutoTrader) checkDynamicStopLossTakeProfit(trendViewByPosKey map[string]string) error {
 	// Check if dynamic stop loss/take profit is enabled
 	if at.strategyEngine == nil || at.strategyEngine.GetConfig() == nil {
 		return nil
@@ -3511,6 +3564,21 @@ func (at *AutoTrader) checkDynamicStopLossTakeProfit() error {
 					}
 					if atr > atrLong*highMult {
 						requiredCycles++ // high volatility: require one more confirm
+					}
+				}
+				// AI trend view: modulate confirm to balance "early cut" vs "oscillation wash"
+				if trendViewByPosKey != nil {
+					if tv, ok := trendViewByPosKey[posKey]; ok {
+						switch tv {
+						case "reversing":
+							if requiredCycles > 1 {
+								requiredCycles--
+								logger.Infof("📋 SL confirm: %s %s trend_view=reversing → requiredCycles %d", symbol, side, requiredCycles)
+							}
+						case "trend_intact", "choppy":
+							requiredCycles++
+							logger.Infof("📋 SL confirm: %s %s trend_view=%s → requiredCycles %d", symbol, side, tv, requiredCycles)
+						}
 					}
 				}
 				at.slConfirmCountMu.Lock()

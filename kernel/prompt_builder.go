@@ -83,7 +83,7 @@ func (pb *PromptBuilder) buildSystemPromptZH() string {
 ### 顺势交易
 - **震荡市仍可开仓**：若有清晰区间（支撑/阻力），可在区间下沿附近做多、上沿附近做空；目标是**拿住持仓**（不被区间内波动洗出）、**盈利后平仓**（不贪大趋势）。止损用较宽 ATR（2.0-2.5×）扛住震荡，止盈用适中目标（2.5-3× ATR）盈利即出。
 - 趋势市：多周期与 OI 明确同向时才考虑开仓。
-- **开仓过滤（减少逆势亏损）**：仅在**多周期趋势一致**时开仓；单周期信号或趋势不明时**不开仓或仅小仓位**。避免逆势开仓导致亏损扩大；震荡市用宽止损拿住仓，但开仓前务必确认方向与多周期/结构一致。
+- **开仓过滤（减少逆势亏损）**：**先根据 4h/1h 定多空方向，再在主周期找入场**。多周期方向一致时用正常仓位；**多周期不一致时倾向轻仓或提高置信度，仍可开仓**（如有清晰区间可在区间下沿多、上沿空）。避免逆势开仓导致亏损扩大；震荡市用宽止损拿住仓，开仓前务必确认方向与多周期/结构。
 - **仓位与置信度**：多周期共振、结构清晰时用正常仓位；单周期或置信度较低时**减小 position_size_usd 或降低杠杆**，以控制单笔最大亏损。
 - 结合持仓量(OI)变化判断资金流向真实性
 - OI增加+价格上涨 = 强多头趋势
@@ -238,7 +238,7 @@ func (pb *PromptBuilder) buildSystemPromptEN() string {
 ### Trend Following
 - **In ranging markets you can still open**: When there is a clear range (support/resistance), open long near the range low and short near the range high. Goal: **hold the position** (don't get stopped out by range noise) and **exit in profit** (don't chase a big trend). Use wider stop (2.0-2.5× ATR) to survive chop, and modest TP (2.5-3× ATR) to take profit when reached.
 - In trending markets: only consider opening when multi-timeframe and OI clearly align.
-- **Entry filter (reduce adverse loss)**: Open only when **multi-timeframe trend aligns**; when only one timeframe or trend is unclear, **do not open or use smaller size**. Avoid opening against trend so that loss expands; in ranging markets use wide stop to hold, but always confirm direction and multi-TF/structure before opening.
+- **Entry filter (reduce adverse loss)**: **First set direction from 4h/1h, then find entry on primary TF.** When multi-timeframe aligns use normal size; when **not aligned prefer smaller size or higher confidence—still may open** (e.g. near range low for long, range high for short). Avoid opening against trend; in ranging use wide stop to hold, always confirm direction and multi-TF/structure before opening.
 - **Size vs confidence**: Use full size when multi-TF aligns and structure is clear; **reduce position_size_usd or leverage** when single-TF or lower confidence to cap single-trade max loss.
 - Use Open Interest (OI) changes to validate capital flow authenticity
 - OI up + Price up = Strong bullish trend

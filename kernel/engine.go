@@ -200,6 +200,10 @@ type Decision struct {
 	Confidence int     `json:"confidence,omitempty"` // Confidence level (0-100)
 	RiskUSD    float64 `json:"risk_usd,omitempty"`   // Maximum USD risk
 	Reasoning  string  `json:"reasoning"`
+
+	// Holding-period trend view: only meaningful when action is "hold" for an existing position.
+	// Used by strategy to modulate SL confirm (reversing→faster stop; trend_intact/choppy→one more confirm to reduce wash).
+	TrendView string `json:"trend_view,omitempty"` // "trend_intact" | "choppy" | "reversing"
 }
 
 // FullDecision AI's complete decision (including chain of thought)
@@ -1088,15 +1092,16 @@ func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string
 		sb.WriteString(fmt.Sprintf("\nFeel free to use any effective analysis method, but **confidence ≥ %d** required to open positions; avoid low-quality behaviors such as single indicators, contradictory signals, sideways consolidation, reopening immediately after closing, etc.\n\n", riskControl.MinConfidence))
 	}
 
-	// 6. Decision process (editable)
+	// 6. Decision process & entry order (strategy philosophy: direction first, ranging can still open)
 	if promptSections.DecisionProcess != "" {
 		sb.WriteString(promptSections.DecisionProcess)
 		sb.WriteString("\n\n")
 	} else {
 		sb.WriteString("# 📋 Decision Process\n\n")
 		sb.WriteString("1. Check positions → Should we take profit/stop-loss\n")
-		sb.WriteString("2. Scan candidate coins + multi-timeframe → Are there strong signals\n")
-		sb.WriteString("3. Output structured JSON first, then write chain of thought (never omit the JSON)\n\n")
+		sb.WriteString("2. **Entry order (hard)**: First determine **direction from 4h/1h** (data has 4h dir, 1h dir, 1h vs 4h aligned); then find **entry on primary timeframe (e.g. 15m)**. When 1h and 4h are not aligned, use **smaller position or higher confidence**—do not refuse to open; in clear range still open near range low (long) or high (short).\n")
+		sb.WriteString("3. Scan candidate coins + multi-timeframe → Are there strong signals\n")
+		sb.WriteString("4. Output structured JSON first, then write chain of thought (never omit the JSON)\n\n")
 	}
 
 	// 7. Output format
@@ -1111,6 +1116,7 @@ func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string
 	sb.WriteString(fmt.Sprintf("  {\"symbol\": \"BTCUSDT\", \"action\": \"open_short\", \"leverage\": %d, \"position_size_usd\": %.0f, \"stop_loss\": 97000, \"take_profit\": 91000, \"confidence\": 85, \"risk_usd\": 300},\n",
 		riskControl.BTCETHMaxLeverage, examplePositionSize))
 	sb.WriteString("  {\"symbol\": \"ETHUSDT\", \"action\": \"close_long\"}\n")
+	sb.WriteString("  {\"symbol\": \"BTCUSDT\", \"action\": \"hold\", \"trend_view\": \"trend_intact\", \"reasoning\": \"...\"}\n")
 	sb.WriteString("]\n```\n")
 	sb.WriteString("</decision>\n\n")
 	sb.WriteString("<reasoning>\n")
@@ -1118,6 +1124,7 @@ func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string
 	sb.WriteString("</reasoning>\n\n")
 	sb.WriteString("## Field Description\n\n")
 	sb.WriteString("- `action`: open_long | open_short | close_long | close_short | hold | wait\n")
+	sb.WriteString("- When action is **hold** for an **existing position**, you MUST output **trend_view**: one of **trend_intact** (trend still valid) | **choppy** (ranging/oscillating) | **reversing** (trend reversing or structure broken). Strategy uses it to adjust SL confirm: reversing→faster stop; trend_intact/choppy→one more confirm to reduce oscillation wash.\n")
 	sb.WriteString(fmt.Sprintf("- `confidence`: 0-100 (opening recommended ≥ %d)\n", riskControl.MinConfidence))
 	sb.WriteString("- Required when opening: leverage, position_size_usd, stop_loss, take_profit, confidence, risk_usd\n")
 	sb.WriteString("- **IMPORTANT**: All numeric values must be calculated numbers, NOT formulas/expressions (e.g., use `27.76` not `3000 * 0.01`)\n\n")
@@ -1241,12 +1248,20 @@ func (e *StrategyEngine) BuildUserPrompt(ctx *Context) string {
 		}
 	}
 
-	// AI 仅开仓模式：对已有持仓一律输出 hold，平仓由策略动态 SL/TP 执行
+	// AI 仅开仓模式：对已有持仓一律输出 hold，平仓由策略动态 SL/TP 执行；并对每个持仓输出 trend_view 供策略调节止损确认
 	if e.config.RiskControl.AIOnlyEntry {
 		if e.GetLanguage() == LangChinese {
 			sb.WriteString("**当前为「AI 仅开仓」模式：你只负责预测市场、决定开仓方向与开仓时的止损/止盈参数；持仓的平仓完全由策略（动态止损、追踪止损、分层止盈）执行。对已有持仓请一律输出 hold，不要输出 close_long 或 close_short。**\n\n")
+			if len(ctx.Positions) > 0 {
+				sb.WriteString("**对每个已有持仓，若输出 hold，必须同时输出 trend_view**（三选一）：**trend_intact**（趋势仍在）/ **choppy**（震荡）/ **reversing**（反转中）。策略会根据 trend_view 调节止损确认次数：reversing 时更快止损，trend_intact 或 choppy 时多确认一周期以减少震荡被洗。\n\n")
+				sb.WriteString("**注意**：你的分析仅用于**实时市场趋势区分**。市场多为波动，随时可能出现结构反转、趋势破坏等情况；**当识别到结构反转或趋势破坏时，请输出 trend_view=reversing**，策略将减少止损确认周期、更快执行止损。每周期都需对持仓做趋势/震荡/反转判断。\n\n")
+			}
 		} else {
 			sb.WriteString("**AI-only-entry mode: You only predict market and decide entry direction/params; strategy handles all exits (dynamic SL/TP, trailing, scaled TP). For existing positions always output hold, do NOT output close_long or close_short.**\n\n")
+			if len(ctx.Positions) > 0 {
+				sb.WriteString("**For each existing position, when outputting hold, you MUST also output trend_view** (one of): **trend_intact** (trend still valid) | **choppy** (ranging/oscillating) | **reversing** (reversal or structure broken). Strategy uses it to adjust SL confirm: reversing→faster stop; trend_intact/choppy→one more confirm to reduce oscillation wash.\n\n")
+				sb.WriteString("**Note**: Your analysis is for **real-time market trend distinction** only. Markets are volatile and structure reversal can happen anytime; **when you identify structure reversal or trend break, output trend_view=reversing** so the strategy will require fewer SL confirm cycles and exit faster. Re-assess trend/choppy/reversing for each position every cycle.\n\n")
+			}
 		}
 	}
 
@@ -1395,6 +1410,14 @@ func (e *StrategyEngine) BuildUserPrompt(ctx *Context) string {
 		}
 		sb.WriteString("\n")
 	}
+	// 本周期若无任何候选币有行情数据，显式说明原因，避免 AI 误以为「有候选但被隐藏」或误报无数据
+	if displayedCount == 0 && len(ctx.CandidateCoins) > 0 {
+		if e.GetLanguage() == LangChinese {
+			sb.WriteString("（本周期暂无候选币种 K 线/技术数据，可能因行情接口暂时失败或候选拉取被过滤；请仅基于当前持仓与下方排行榜信息决策。）\n\n")
+		} else {
+			sb.WriteString("(No candidate coin kline/technical data this cycle—fetch may have failed or been filtered; base decision only on current positions and ranking data below.)\n\n")
+		}
+	}
 	sb.WriteString("\n")
 
 	// Get language for market data formatting
@@ -1428,9 +1451,10 @@ func (e *StrategyEngine) formatPositionInfo(index int, pos PositionInfo, ctx *Co
 	var sb strings.Builder
 
 	holdingDuration := ""
+	durationMin := int64(0)
 	if pos.UpdateTime > 0 {
 		durationMs := time.Now().UnixMilli() - pos.UpdateTime
-		durationMin := durationMs / (1000 * 60)
+		durationMin = durationMs / (1000 * 60)
 		if durationMin < 60 {
 			holdingDuration = fmt.Sprintf(" | Holding Duration %d min", durationMin)
 		} else {
@@ -1449,6 +1473,33 @@ func (e *StrategyEngine) formatPositionInfo(index int, pos PositionInfo, ctx *Co
 		index, pos.Symbol, strings.ToUpper(pos.Side),
 		pos.EntryPrice, pos.MarkPrice, pos.Quantity, positionValue, pos.UnrealizedPnLPct, pos.UnrealizedPnL, pos.PeakPnLPct,
 		pos.Leverage, pos.MarginUsed, pos.LiquidationPrice, holdingDuration))
+
+	// 显式说明是否已满最小持仓，避免 AI 推理时误写「未达到最小持仓」导致与真实执行逻辑矛盾
+	minHoldMinutes := 0.0
+	if rc := e.config.RiskControl; rc != nil {
+		if sl := rc.DynamicStopLoss; sl != nil && sl.Enabled && sl.MinHoldMinutes > 0 {
+			minHoldMinutes = sl.MinHoldMinutes
+		}
+		if tp := rc.DynamicTakeProfit; tp != nil && tp.Enabled && tp.MinHoldMinutes > 0 && tp.MinHoldMinutes > minHoldMinutes {
+			minHoldMinutes = tp.MinHoldMinutes
+		}
+	}
+	if minHoldMinutes > 0 {
+		zh := e.GetLanguage() == LangChinese
+		if float64(durationMin) >= minHoldMinutes {
+			if zh {
+				sb.WriteString(fmt.Sprintf("   → 本仓位已满最小持仓时间（当前 %d 分钟 ≥ 最小 %.0f 分钟），策略会参与止损/止盈检查。\n\n", durationMin, minHoldMinutes))
+			} else {
+				sb.WriteString(fmt.Sprintf("   → This position has met min hold (current %d min ≥ %.0f min); strategy will run SL/TP checks.\n\n", durationMin, minHoldMinutes))
+			}
+		} else {
+			if zh {
+				sb.WriteString(fmt.Sprintf("   → 本仓位未满最小持仓时间（当前 %d 分钟 < 最小 %.0f 分钟），本周期策略不参与止损/止盈。\n\n", durationMin, minHoldMinutes))
+			} else {
+				sb.WriteString(fmt.Sprintf("   → This position has not met min hold (current %d min < %.0f min); strategy will skip SL/TP this cycle.\n\n", durationMin, minHoldMinutes))
+			}
+		}
+	}
 
 	if marketData, ok := ctx.MarketDataMap[pos.Symbol]; ok {
 		sb.WriteString(e.formatMarketData(marketData))
@@ -1724,13 +1775,42 @@ func (e *StrategyEngine) formatMarketData(data *market.Data) string {
 
 	// 明确标注币种
 	sb.WriteString(fmt.Sprintf("=== %s Market Data ===\n\n", data.Symbol))
-	// 多周期涨跌提示，便于先定趋势再定多空（减少逆势与入场时机误判）
-	if data.PriceChange1h != 0 || data.PriceChange4h != 0 {
-		if e.GetLanguage() == LangChinese {
-			sb.WriteString(fmt.Sprintf("多周期涨跌: 1h %+.2f%% 4h %+.2f%%（负=偏空 正=偏多，供趋势参考）\n\n", data.PriceChange1h, data.PriceChange4h))
+	// 显式 4h/1h 方向与是否同向，便于先定方向再在 15m 找入场（策略理念：方向正确优先，震荡也做方向判断）
+	const dirThreshold = 0.15
+	dir4h := "ranging"
+	if data.PriceChange4h > dirThreshold {
+		dir4h = "up"
+	} else if data.PriceChange4h < -dirThreshold {
+		dir4h = "down"
+	}
+	dir1h := "ranging"
+	if data.PriceChange1h > dirThreshold {
+		dir1h = "up"
+	} else if data.PriceChange1h < -dirThreshold {
+		dir1h = "down"
+	}
+	sameDir := (dir4h == dir1h) || (dir4h != "ranging" && dir1h != "ranging" && (data.PriceChange4h > 0) == (data.PriceChange1h > 0))
+	if e.GetLanguage() == LangChinese {
+		d4, d1 := dir4h, dir1h
+		if d4 == "up" {
+			d4 = "多"
+		} else if d4 == "down" {
+			d4 = "空"
 		} else {
-			sb.WriteString(fmt.Sprintf("Multi-timeframe: 1h %+.2f%% 4h %+.2f%% (negative=bearish, positive=bullish, for trend reference)\n\n", data.PriceChange1h, data.PriceChange4h))
+			d4 = "震荡"
 		}
+		if d1 == "up" {
+			d1 = "多"
+		} else if d1 == "down" {
+			d1 = "空"
+		} else {
+			d1 = "震荡"
+		}
+		sb.WriteString(fmt.Sprintf("多周期涨跌: 1h %+.2f%% 4h %+.2f%%（负=偏空 正=偏多）\n", data.PriceChange1h, data.PriceChange4h))
+		sb.WriteString(fmt.Sprintf("4h方向: %s | 1h方向: %s | 1h与4h同向: %s（请先据此定多空方向，再在主周期找入场；多周期不一致时倾向轻仓或提高置信度，仍可开仓）\n\n", d4, d1, map[bool]string{true: "是", false: "否"}[sameDir]))
+	} else {
+		sb.WriteString(fmt.Sprintf("Multi-timeframe: 1h %+.2f%% 4h %+.2f%% (negative=bearish, positive=bullish)\n", data.PriceChange1h, data.PriceChange4h))
+		sb.WriteString(fmt.Sprintf("4h dir: %s | 1h dir: %s | 1h vs 4h aligned: %s (set direction from 4h/1h first, then find entry on primary TF; when not aligned use smaller size or higher confidence, still may open e.g. in clear range)\n\n", dir4h, dir1h, map[bool]string{true: "yes", false: "no"}[sameDir]))
 	}
 	sb.WriteString(fmt.Sprintf("current_price = %.4f", data.CurrentPrice))
 
