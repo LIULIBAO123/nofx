@@ -415,13 +415,19 @@ func fetchMarketDataWithStrategy(ctx *Context, engine *StrategyEngine) error {
 	logger.Infof("📊 Strategy timeframes: %v, Primary: %s, Kline count: %d", timeframes, primaryTimeframe, klineCount)
 
 	// 1. First fetch data for position coins (must fetch)
+	var positionFetchFailed []string
 	for _, pos := range ctx.Positions {
 		data, err := market.GetWithTimeframes(pos.Symbol, timeframes, primaryTimeframe, klineCount)
 		if err != nil {
 			logger.Infof("⚠️  Failed to fetch market data for position %s: %v", pos.Symbol, err)
+			positionFetchFailed = append(positionFetchFailed, pos.Symbol)
 			continue
 		}
 		ctx.MarketDataMap[pos.Symbol] = data
+	}
+	if len(positionFetchFailed) > 0 {
+		logger.Infof("⛔ Missing market data for %d position(s): %v (will continue, but AI SL/TP and trend_view quality may degrade)",
+			len(positionFetchFailed), positionFetchFailed)
 	}
 
 	// 2. Fetch data for candidate coins (cap count to control prompt size / token usage)

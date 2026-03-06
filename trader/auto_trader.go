@@ -1404,6 +1404,19 @@ func (at *AutoTrader) getEffectiveLeverage(decision *kernel.Decision) int {
 func (at *AutoTrader) executeOpenLongWithRecord(decision *kernel.Decision, actionRecord *store.DecisionAction) error {
 	logger.Infof("  📈 Open long: %s", decision.Symbol)
 
+	// [CODE ENFORCED] Min confidence: reject open if AI confidence below strategy minimum
+	minConfidence := 0
+	if at.strategyEngine != nil {
+		if cfg := at.strategyEngine.GetConfig(); cfg != nil && cfg.RiskControl.MinConfidence > 0 {
+			minConfidence = cfg.RiskControl.MinConfidence
+		}
+	}
+	if minConfidence > 0 && decision.Confidence < minConfidence {
+		actionRecord.Error = fmt.Sprintf("置信度 %d 低于最小要求 %d，已拒绝开仓", decision.Confidence, minConfidence)
+		logger.Infof("  ⛔ %s", actionRecord.Error)
+		return nil
+	}
+
 	leverage := at.getEffectiveLeverage(decision)
 	if decision.Leverage <= 0 {
 		decision.Leverage = leverage
@@ -1578,6 +1591,19 @@ func (at *AutoTrader) executeOpenLongWithRecord(decision *kernel.Decision, actio
 // executeOpenShortWithRecord executes open short position and records detailed information
 func (at *AutoTrader) executeOpenShortWithRecord(decision *kernel.Decision, actionRecord *store.DecisionAction) error {
 	logger.Infof("  📉 Open short: %s", decision.Symbol)
+
+	// [CODE ENFORCED] Min confidence: reject open if AI confidence below strategy minimum
+	minConfidence := 0
+	if at.strategyEngine != nil {
+		if cfg := at.strategyEngine.GetConfig(); cfg != nil && cfg.RiskControl.MinConfidence > 0 {
+			minConfidence = cfg.RiskControl.MinConfidence
+		}
+	}
+	if minConfidence > 0 && decision.Confidence < minConfidence {
+		actionRecord.Error = fmt.Sprintf("置信度 %d 低于最小要求 %d，已拒绝开仓", decision.Confidence, minConfidence)
+		logger.Infof("  ⛔ %s", actionRecord.Error)
+		return nil
+	}
 
 	leverage := at.getEffectiveLeverage(decision)
 	if decision.Leverage <= 0 {
