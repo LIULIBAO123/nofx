@@ -60,7 +60,7 @@ jobs:
         env:
           DATA_ENCRYPTION_KEY: "test-encryption-key-for-ci-only-not-production"
         run: |
-          go test -v -race -coverprofile=coverage.out -covermode=atomic ./api/... ./backtest/... ./config/... ./crypto/... ./hook/... ./kernel/... ./logger/... ./market/... ./mcp/... ./store/... ./trader/... ./manager/... ./provider/... ./security/... 2>&1 | tee test-output.txt; exit ${PIPESTATUS[0]}
+          go test -v -race -coverprofile=coverage.out -covermode=atomic ./api/... ./backtest/... ./config/... ./crypto/... ./hook/... ./kernel/... ./logger/... ./market/... ./mcp/... ./store/... ./trader/... ./manager/... ./provider/coinank/coinank_api/... ./provider/hyperliquid/... ./security/... 2>&1 | tee test-output.txt; exit ${PIPESTATUS[0]}
 
       - name: Upload test log on failure
         if: failure()

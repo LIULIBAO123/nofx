@@ -393,6 +393,11 @@ func (tm *TraderManager) RemoveTrader(traderID string) {
 	defer tm.mu.Unlock()
 
 	if t, exists := tm.traders[traderID]; exists {
+		if t == nil {
+			delete(tm.traders, traderID)
+			logger.Infof("✓ Trader %s removed from memory (was nil)", traderID)
+			return
+		}
 		// Stop the trader if it's running (this ensures the goroutine exits)
 		status := t.GetStatus()
 		if isRunning, ok := status["is_running"].(bool); ok && isRunning {
