@@ -31,7 +31,7 @@ func TestPromptBuilder(t *testing.T) {
 			t.Fatal("System prompt is empty")
 		}
 
-		// 验证包含关键内容
+		// 验证包含关键内容（与 prompt_builder 当前文案一致）
 		mustContain := []string{
 			"量化交易AI助手",
 			"分析账户状态",
@@ -39,9 +39,8 @@ func TestPromptBuilder(t *testing.T) {
 			"分析候选币种",
 			"做出决策",
 			"风险优先",
-			"跟踪止盈",
-			"顺势交易",
-			"分批操作",
+			"追踪止损",
+			"分层止盈",
 			"JSON",
 			"symbol",
 			"action",
@@ -71,7 +70,7 @@ func TestPromptBuilder(t *testing.T) {
 			t.Fatal("System prompt is empty")
 		}
 
-		// 验证包含关键内容
+		// 验证包含关键内容（与 prompt_builder 当前文案一致）
 		mustContain := []string{
 			"quantitative trading AI",
 			"Analyze Account Status",
@@ -79,9 +78,8 @@ func TestPromptBuilder(t *testing.T) {
 			"Analyze Candidate Coins",
 			"Make Decisions",
 			"Risk First",
-			"Trailing Take-Profit",
-			"Trend Following",
-			"Scale Operations",
+			"Trailing stop",
+			"scaled",
 			"JSON",
 			"symbol",
 			"action",

@@ -252,9 +252,9 @@ func TestClient_BuildMCPRequestBody(t *testing.T) {
 		t.Error("body should have model field")
 	}
 
-	messages, ok := body["messages"].([]map[string]string)
+	messages, ok := body["messages"].([]map[string]any)
 	if !ok {
-		t.Fatal("messages should be []map[string]string")
+		t.Fatal("messages should be []map[string]any")
 	}
 
 	if len(messages) != 2 {
