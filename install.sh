@@ -3,11 +3,16 @@
 # NOFX One-Click Installation Script
 # https://github.com/LIULIBAO123/nofx
 #
-# Usage:
+# 首次部署（空目录）:
 #   curl -fsSL https://raw.githubusercontent.com/LIULIBAO123/nofx/dev/install.sh | bash
 #
-# Or with custom directory:
+# 指定目录首次部署:
 #   curl -fsSL https://raw.githubusercontent.com/LIULIBAO123/nofx/dev/install.sh | bash -s -- /opt/nofx
+#
+# 后续更新（在已安装目录下执行）:
+#   cd $HOME/nofx && curl -fsSL https://raw.githubusercontent.com/LIULIBAO123/nofx/dev/install.sh | bash -s -- $HOME/nofx
+#
+# 详见: docs/云服务器一键部署命令.md
 #
 
 set -e
