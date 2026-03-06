@@ -50,6 +50,8 @@ jobs:
             ${{ runner.os }}-go-
 
       - name: Download dependencies
+        env:
+          GOTOOLCHAIN: auto
         run: go mod download
 
       - name: Verify Go coverage tool
@@ -59,6 +61,7 @@ jobs:
       - name: Run tests with coverage
         env:
           DATA_ENCRYPTION_KEY: "test-encryption-key-for-ci-only-not-production"
+          GOTOOLCHAIN: auto
         run: |
           go test -v -coverprofile=coverage.out -covermode=count ./api/... ./backtest/... ./config/... ./crypto/... ./hook/... ./kernel/... ./logger/... ./market/... ./mcp/... ./store/... ./trader/... ./manager/... ./provider/coinank/coinank_api/... ./provider/hyperliquid/... ./security/... > test-output.txt 2>&1; TEST_EXIT=$?; cat test-output.txt; exit $TEST_EXIT
 
