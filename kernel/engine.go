@@ -1476,13 +1476,12 @@ func (e *StrategyEngine) formatPositionInfo(index int, pos PositionInfo, ctx *Co
 
 	// 显式说明是否已满最小持仓，避免 AI 推理时误写「未达到最小持仓」导致与真实执行逻辑矛盾
 	minHoldMinutes := 0.0
-	if rc := e.config.RiskControl; rc != nil {
-		if sl := rc.DynamicStopLoss; sl != nil && sl.Enabled && sl.MinHoldMinutes > 0 {
-			minHoldMinutes = sl.MinHoldMinutes
-		}
-		if tp := rc.DynamicTakeProfit; tp != nil && tp.Enabled && tp.MinHoldMinutes > 0 && tp.MinHoldMinutes > minHoldMinutes {
-			minHoldMinutes = tp.MinHoldMinutes
-		}
+	rc := e.config.RiskControl
+	if sl := rc.DynamicStopLoss; sl != nil && sl.Enabled && sl.MinHoldMinutes > 0 {
+		minHoldMinutes = sl.MinHoldMinutes
+	}
+	if tp := rc.DynamicTakeProfit; tp != nil && tp.Enabled && tp.MinHoldMinutes > 0 && tp.MinHoldMinutes > minHoldMinutes {
+		minHoldMinutes = tp.MinHoldMinutes
 	}
 	if minHoldMinutes > 0 {
 		zh := e.GetLanguage() == LangChinese
