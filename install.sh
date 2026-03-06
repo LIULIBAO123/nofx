@@ -22,8 +22,6 @@ NC='\033[0m' # No Color
 
 # Default installation directory
 INSTALL_DIR="${1:-$HOME/nofx}"
-COMPOSE_FILE="docker-compose.prod.yml"
-GITHUB_RAW="https://raw.githubusercontent.com/LIULIBAO123/nofx/dev"
 
 echo -e "${BLUE}"
 echo "╔════════════════════════════════════════════════════════════╗"
@@ -61,19 +59,17 @@ check_docker() {
     echo -e "${GREEN}✓ Docker is ready${NC}"
 }
 
-# Create installation directory
+# Create installation directory (do not create data/logs/keys here so clone can run in empty dir)
 setup_directory() {
     echo -e "${YELLOW}Setting up installation directory: ${INSTALL_DIR}${NC}"
     mkdir -p "$INSTALL_DIR"
-    mkdir -p "$INSTALL_DIR/data"
-    mkdir -p "$INSTALL_DIR/logs"
-    mkdir -p "$INSTALL_DIR/keys"
     cd "$INSTALL_DIR"
     echo -e "${GREEN}✓ Directory ready${NC}"
 }
 
-# Generate RSA key files for backend (required by docker-compose.prod.yml)
+# Ensure data/keys/logs exist and generate RSA keys for backend
 ensure_rsa_keys() {
+    mkdir -p data logs keys
     if [ -f "keys/private.pem" ] && [ -f "keys/public.pem" ]; then
         echo -e "${GREEN}✓ RSA keys already exist in keys/${NC}"
         return
@@ -89,13 +85,30 @@ ensure_rsa_keys() {
     fi
 }
 
-# Download compose file
-download_files() {
-    echo -e "${YELLOW}Downloading configuration files...${NC}"
-
-    curl -fsSL "$GITHUB_RAW/$COMPOSE_FILE" -o docker-compose.yml
-
-    echo -e "${GREEN}✓ Files downloaded${NC}"
+# Clone or update repo (build from source so one-click install gets latest preset v3.0)
+clone_or_pull_repo() {
+    if ! command -v git &> /dev/null; then
+        echo -e "${RED}Error: git is required. Install with: apt-get install -y git (Debian/Ubuntu) or yum install -y git (CentOS)${NC}"
+        exit 1
+    fi
+    echo -e "${YELLOW}Fetching NOFX source (dev branch)...${NC}"
+    if [ -d ".git" ]; then
+        git fetch origin dev
+        git reset --hard origin/dev
+        git checkout -B dev origin/dev 2>/dev/null || git checkout dev
+        echo -e "${GREEN}✓ Repo updated (dev)${NC}"
+    else
+        # Directory must be empty for clone into .
+        if [ -n "$(ls -A 2>/dev/null)" ]; then
+            echo -e "${RED}Error: $INSTALL_DIR is not empty.${NC}"
+            echo -e "${YELLOW}To install from source (preset v3.0): use an empty directory, e.g.${NC}"
+            echo -e "  mkdir -p $HOME/nofx-app && curl -fsSL https://raw.githubusercontent.com/LIULIBAO123/nofx/dev/install.sh | bash -s -- $HOME/nofx-app"
+            echo -e "${YELLOW}Or backup and remove current dir then re-run this script.${NC}"
+            exit 1
+        fi
+        git clone -b dev --depth 1 https://github.com/LIULIBAO123/nofx.git .
+        echo -e "${GREEN}✓ Repo cloned (dev)${NC}"
+    fi
 }
 
 # Generate encryption keys and create .env file
@@ -146,11 +159,11 @@ EOF
     echo -e "${GREEN}✓ Encryption keys generated${NC}"
 }
 
-# Pull images
-pull_images() {
-    echo -e "${YELLOW}Pulling Docker images (this may take a few minutes)...${NC}"
-    $COMPOSE_CMD pull
-    echo -e "${GREEN}✓ Images pulled${NC}"
+# Build images from source (ensures latest preset v3.0 / one-click strategy is used)
+build_images() {
+    echo -e "${YELLOW}Building Docker images from source (this may take several minutes)...${NC}"
+    $COMPOSE_CMD build --no-cache
+    echo -e "${GREEN}✓ Images built${NC}"
 }
 
 # Ask user if they want to clear trading data
@@ -273,19 +286,19 @@ print_success() {
     echo -e "  ${BLUE}Install Dir:${NC}    $INSTALL_DIR"
     echo ""
     echo -e "${CYAN}╔════════════════════════════════════════════════════════════╗"
-    echo -e "║  💡 Keep Updated: Run this command to update               ║"
+    echo -e "║  💡 Keep Updated: Re-run this script to get latest code    ║"
     echo -e "╚════════════════════════════════════════════════════════════╝${NC}"
     echo ""
-    echo -e "  ${GREEN}curl -fsSL https://raw.githubusercontent.com/LIULIBAO123/nofx/dev/install.sh | bash${NC}"
+    echo -e "  ${GREEN}cd $INSTALL_DIR && curl -fsSL https://raw.githubusercontent.com/LIULIBAO123/nofx/dev/install.sh | bash -s -- $INSTALL_DIR${NC}"
     echo ""
-    echo -e "  This will pull the latest images and restart services."
+    echo -e "  This will git pull and rebuild from source (preset v3.0 / one-click strategy)."
     echo ""
     echo -e "${YELLOW}Quick Commands:${NC}"
     echo "  cd $INSTALL_DIR"
     echo "  $COMPOSE_CMD logs -f       # View logs"
     echo "  $COMPOSE_CMD restart       # Restart services"
     echo "  $COMPOSE_CMD down          # Stop services"
-    echo "  $COMPOSE_CMD pull && $COMPOSE_CMD up -d  # Update to latest"
+    echo "  Re-run this script from $INSTALL_DIR to update to latest"
     echo ""
     echo -e "${YELLOW}Next Steps:${NC}"
     echo "  1. Open http://${SERVER_IP}:3000 in your browser"
@@ -305,10 +318,10 @@ print_success() {
 main() {
     check_docker
     setup_directory
+    clone_or_pull_repo
     ensure_rsa_keys
-    download_files
     generate_env
-    pull_images
+    build_images
     ask_clear_trading_data
     start_services
     wait_for_services

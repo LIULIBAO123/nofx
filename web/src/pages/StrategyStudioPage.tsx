@@ -256,7 +256,8 @@ export function StrategyStudioPage() {
       )
       if (!response.ok) throw new Error('Failed to create optimized strategy')
       const result = await response.json()
-      notify.success(language === 'zh' ? '预设策略已创建' : 'Preset strategy created')
+      const ver = result.preset_version || '3.0'
+      notify.success(language === 'zh' ? `预设策略 v${ver} 已创建` : `Preset strategy v${ver} created`)
       await fetchStrategies()
       // Auto-select the newly created strategy
       if (result.id && result.config) {

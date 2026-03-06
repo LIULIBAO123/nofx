@@ -434,9 +434,10 @@ func (s *Server) handleCreateOptimizedStrategy(c *gin.Context) {
 	warnings := validateStrategyConfig(&optimizedConfig)
 
 	response := gin.H{
-		"id":      strategy.ID,
-		"message": "Optimized strategy created successfully",
-		"config":  optimizedConfig,
+		"id":             strategy.ID,
+		"message":        "Optimized strategy created successfully",
+		"config":         optimizedConfig,
+		"preset_version": "3.0", // 与 GetOptimizedStrategyConfig 一致，便于确认云服务器已更新
 	}
 	if len(warnings) > 0 {
 		response["warnings"] = warnings
