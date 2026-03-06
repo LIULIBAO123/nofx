@@ -60,7 +60,7 @@ jobs:
         env:
           DATA_ENCRYPTION_KEY: "test-encryption-key-for-ci-only-not-production"
         run: |
-          go test -v -race -coverprofile=coverage.out -covermode=atomic $(go list ./... | grep -v '/scripts' | grep -v '/cmd/lighter_test')
+          go test -v -race -coverprofile=coverage.out -covermode=atomic ./api/... ./backtest/... ./config/... ./crypto/... ./hook/... ./kernel/... ./llm/... ./logger/... ./market/... ./mcp/... ./store/... ./trader/... ./manager/... ./provider/... ./security/...
 
       - name: Calculate coverage and generate report
         id: coverage
