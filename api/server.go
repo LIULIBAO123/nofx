@@ -248,11 +248,12 @@ func (s *Server) handleGetAIUsage(c *gin.Context) {
 	})
 }
 
-// handleHealth Health check
+// handleHealth Health check (preset_version 用于确认云服务器是否为最新预设 v3.0)
 func (s *Server) handleHealth(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
-		"status": "ok",
-		"time":   c.Request.Context().Value("time"),
+		"status":          "ok",
+		"time":            c.Request.Context().Value("time"),
+		"preset_version":  "3.0",
 	})
 }
 

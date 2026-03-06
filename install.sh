@@ -98,16 +98,21 @@ clone_or_pull_repo() {
         git checkout -B dev origin/dev 2>/dev/null || git checkout dev
         echo -e "${GREEN}✓ Repo updated (dev)${NC}"
     else
-        # Directory must be empty for clone into .
         if [ -n "$(ls -A 2>/dev/null)" ]; then
-            echo -e "${RED}Error: $INSTALL_DIR is not empty.${NC}"
-            echo -e "${YELLOW}To install from source (preset v3.0): use an empty directory, e.g.${NC}"
-            echo -e "  mkdir -p $HOME/nofx-app && curl -fsSL https://raw.githubusercontent.com/LIULIBAO123/nofx/dev/install.sh | bash -s -- $HOME/nofx-app"
-            echo -e "${YELLOW}Or backup and remove current dir then re-run this script.${NC}"
-            exit 1
+            # 已有旧安装（无 .git）：克隆到子目录并沿用现有 .env/keys/data，实现原地升级
+            echo -e "${YELLOW}Existing files detected; cloning into nofx-src/ and reusing .env, keys, data...${NC}"
+            git clone -b dev --depth 1 https://github.com/LIULIBAO123/nofx.git nofx-src
+            [ -f .env ] && cp -a .env nofx-src/
+            [ -d keys ] && cp -a keys nofx-src/ 2>/dev/null || true
+            [ -d data ] && cp -a data nofx-src/ 2>/dev/null || true
+            [ -d logs ] && cp -a logs nofx-src/ 2>/dev/null || true
+            cd nofx-src
+            INSTALL_DIR="$(pwd)"
+            echo -e "${GREEN}✓ Repo cloned to nofx-src (preset v3.0)${NC}"
+        else
+            git clone -b dev --depth 1 https://github.com/LIULIBAO123/nofx.git .
+            echo -e "${GREEN}✓ Repo cloned (dev)${NC}"
         fi
-        git clone -b dev --depth 1 https://github.com/LIULIBAO123/nofx.git .
-        echo -e "${GREEN}✓ Repo cloned (dev)${NC}"
     fi
 }
 
@@ -168,7 +173,7 @@ build_images() {
 
 # Ask user if they want to clear trading data
 ask_clear_trading_data() {
-    local db_file="data/nofx.db"
+    local db_file="data/data.db"
 
     # Only ask if database file exists
     if [ ! -f "$db_file" ]; then
@@ -211,7 +216,7 @@ clear_trading_data() {
         return 0
     fi
 
-    local db_file="data/nofx.db"
+    local db_file="data/data.db"
 
     if [ ! -f "$db_file" ]; then
         echo -e "${YELLOW}Database file not found, skipping...${NC}"
@@ -229,7 +234,7 @@ clear_trading_data() {
         fi
     else
         echo -e "${YELLOW}sqlite3 not found. To clear data manually, install sqlite3 and run:${NC}"
-        echo -e "${BLUE}  sqlite3 data/nofx.db 'DELETE FROM trader_fills; DELETE FROM trader_orders; DELETE FROM trader_positions;'${NC}"
+        echo -e "${BLUE}  sqlite3 data/data.db 'DELETE FROM trader_fills; DELETE FROM trader_orders; DELETE FROM trader_positions;'${NC}"
     fi
 }
 
