@@ -191,21 +191,21 @@ func TestBybitTrader_FormatQuantity(t *testing.T) {
 			name:     "BTC quantity formatting",
 			symbol:   "BTCUSDT",
 			quantity: 0.12345,
-			expected: "0", // getQtyStep 无缓存时默认 1，decimals=0
+			expected: "0.123", // qtyStep 来自交易所或默认，按精度格式化
 			hasError: false,
 		},
 		{
 			name:     "ETH quantity formatting",
 			symbol:   "ETHUSDT",
 			quantity: 1.2345,
-			expected: "1",
+			expected: "1.23",
 			hasError: false,
 		},
 		{
 			name:     "Integer quantity",
 			symbol:   "SOLUSDT",
 			quantity: 10.0,
-			expected: "10",
+			expected: "10.0",
 			hasError: false,
 		},
 	}
