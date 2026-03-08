@@ -50,7 +50,9 @@ RUN sed -i 's|dl-cdn.alpinelinux.org|mirrors.aliyun.com|g' /etc/apk/repositories
 COPY --from=ta-lib-builder /usr/local /usr/local
 
 WORKDIR /app
-ENV GOPROXY=https://proxy.golang.org,direct
+# 云服务器构建可传 BUILD_GOPROXY 加速（国内示例: https://goproxy.cn,direct）
+ARG GOPROXY=https://proxy.golang.org,direct
+ENV GOPROXY=${GOPROXY}
 ENV GOTOOLCHAIN=auto
 COPY . .
 RUN sed -i 's/\r$$//' go.mod go.sum 2>/dev/null || true

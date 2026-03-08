@@ -90,7 +90,7 @@ ensure_rsa_keys() {
     fi
 }
 
-# Clone or update repo (build from source so one-click install gets latest preset v3.0)
+# Clone or update repo (get compose file and config; images are pulled from GHCR, no build on server)
 clone_or_pull_repo() {
     if ! command -v git &> /dev/null; then
         echo -e "${RED}Error: git is required. Install with: apt-get install -y git (Debian/Ubuntu) or yum install -y git (CentOS)${NC}"
@@ -169,11 +169,21 @@ EOF
     echo -e "${GREEN}✓ Encryption keys generated${NC}"
 }
 
-# Build images from source (ensures latest preset v3.0 / one-click strategy is used)
-build_images() {
-    echo -e "${YELLOW}Building Docker images from source (this may take several minutes)...${NC}"
-    $COMPOSE_CMD build --no-cache
-    echo -e "${GREEN}✓ Images built${NC}"
+# Use prod compose (pre-built images from GHCR; no build on server)
+set_prod_compose() {
+    export COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.prod.yml}"
+}
+
+# Pull pre-built images from GitHub Container Registry (no build on server)
+pull_images() {
+    set_prod_compose
+    echo -e "${YELLOW}Pulling pre-built Docker images from GHCR (no build, usually 1–3 min)...${NC}"
+    if ! $COMPOSE_CMD pull; then
+        echo -e "${YELLOW}If pull fails (e.g. 404/403), ensure CI has pushed images for dev branch.${NC}"
+        echo -e "${YELLOW}For private images: docker login ghcr.io -u USERNAME -p TOKEN${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}✓ Images pulled${NC}"
 }
 
 # Ask user if they want to clear trading data
@@ -208,8 +218,9 @@ ask_clear_trading_data() {
     echo ""
 }
 
-# Start services
+# Start services (uses COMPOSE_FILE set by set_prod_compose/pull_images)
 start_services() {
+    set_prod_compose
     echo -e "${YELLOW}Starting NOFX services...${NC}"
     $COMPOSE_CMD up -d
     echo -e "${GREEN}✓ Services started${NC}"
@@ -296,12 +307,12 @@ print_success() {
     echo -e "  ${BLUE}Install Dir:${NC}    $INSTALL_DIR"
     echo ""
     echo -e "${CYAN}╔════════════════════════════════════════════════════════════╗"
-    echo -e "║  💡 Keep Updated: Re-run this script to get latest code    ║"
+    echo -e "║  💡 Keep Updated: Re-run this script to get latest images   ║"
     echo -e "╚════════════════════════════════════════════════════════════╝${NC}"
     echo ""
     echo -e "  ${GREEN}cd $INSTALL_DIR && curl -fsSL https://raw.githubusercontent.com/LIULIBAO123/nofx/dev/install.sh | bash -s -- $INSTALL_DIR${NC}"
     echo ""
-    echo -e "  This will git pull and rebuild from source (preset v3.0 / one-click strategy)."
+    echo -e "  This will git pull, pull latest images from GHCR, and restart (no build on server)."
     echo ""
     echo -e "${YELLOW}Quick Commands:${NC}"
     echo "  cd $INSTALL_DIR"
@@ -331,7 +342,7 @@ main() {
     clone_or_pull_repo
     ensure_rsa_keys
     generate_env
-    build_images
+    pull_images
     ask_clear_trading_data
     start_services
     wait_for_services

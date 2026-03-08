@@ -13,6 +13,9 @@ ARG NGINX_VERSION=alpine
 # ──────────────────────────────────────────────────────────────
 FROM node:${NODE_VERSION} AS builder
 WORKDIR /build
+# 云服务器构建可传 BUILD_NPM_REGISTRY 加速（国内示例: https://registry.npmmirror.com）
+ARG NPM_REGISTRY=
+RUN if [ -n "$NPM_REGISTRY" ]; then npm config set registry "$NPM_REGISTRY"; fi
 
 COPY web/package*.json ./
 RUN npm ci
