@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/glebarez/sqlite"
 	"gorm.io/driver/postgres"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -18,7 +18,7 @@ func DB() *gorm.DB {
 	return gormDB
 }
 
-// InitGorm initializes GORM with SQLite
+// InitGorm initializes GORM with SQLite (pure-Go driver, works with CGO_ENABLED=0)
 func InitGorm(dbPath string) (*gorm.DB, error) {
 	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
