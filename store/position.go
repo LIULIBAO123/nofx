@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"strconv"
@@ -9,6 +10,17 @@ import (
 
 	"gorm.io/gorm"
 )
+
+// CloseEvent 单次平仓记录（部分平仓或全平的一笔），用于分层止盈等场景在历史中展示
+type CloseEvent struct {
+	ExitTimeMs    int64   `json:"exit_time_ms"`
+	ClosedQty     float64 `json:"closed_qty"`
+	ExitPrice     float64 `json:"exit_price"`
+	RealizedPnL   float64 `json:"realized_pnl"`
+	CloseReason   string  `json:"close_reason,omitempty"`
+	IsPartial     bool    `json:"is_partial"`
+	ProfitPercent float64 `json:"profit_percent,omitempty"` // 触发档位盈利% (e.g. 2.5, 6, 10)，便于展示「第1档」
+}
 
 // adaptivePriceRound rounds a price based on its magnitude to preserve meaningful precision.
 // For small prices (like meme coins), it preserves more decimal places.
@@ -96,9 +108,12 @@ type TraderPosition struct {
 	RealizedPnL        float64 `gorm:"column:realized_pnl;default:0" json:"realized_pnl"`
 	Fee                float64 `gorm:"column:fee;default:0" json:"fee"`
 	Leverage           int     `gorm:"column:leverage;default:1" json:"leverage"`
-	Status             string  `gorm:"column:status;default:OPEN;index:idx_positions_status" json:"status"`
-	CloseReason        string  `gorm:"column:close_reason;default:''" json:"close_reason"`
-	Source             string  `gorm:"column:source;default:system" json:"source"`
+	Status                   string  `gorm:"column:status;default:OPEN;index:idx_positions_status" json:"status"`
+	CloseReason              string  `gorm:"column:close_reason;default:''" json:"close_reason"`
+	CloseReasonAIAdjusted    bool    `gorm:"column:close_reason_ai_adjusted;default:false" json:"close_reason_ai_adjusted"`
+	CloseReasonTriggerDetail string  `gorm:"column:close_reason_trigger_detail;default:''" json:"close_reason_trigger_detail"` // JSON: 触发时生效的 AI 调节参数或触发的价格等
+	CloseEvents              string  `gorm:"column:close_events;default:''" json:"close_events"`                                 // JSON array: 每笔部分平仓/全平记录，供历史展示分层止盈明细
+	Source                   string  `gorm:"column:source;default:system" json:"source"`
 	// Fixed params at open (for history UI, same as backtest trade params)
 	StopLoss      float64 `gorm:"column:stop_loss;default:0" json:"stop_loss,omitempty"`
 	TakeProfit    float64 `gorm:"column:take_profit;default:0" json:"take_profit,omitempty"`
@@ -240,9 +255,40 @@ func (s *PositionStore) UpdatePositionQuantityAndPrice(id int64, addQty float64,
 	}).Error
 }
 
-// ReducePositionQuantity reduces position quantity for partial close
-// If quantity reaches 0 (or near 0), automatically closes the position
-func (s *PositionStore) ReducePositionQuantity(id int64, reduceQty float64, exitPrice float64, addFee float64, addPnL float64) error {
+const maxCloseEvents = 30
+
+func parseCloseEvents(s string) ([]CloseEvent, error) {
+	if s == "" {
+		return nil, nil
+	}
+	var list []CloseEvent
+	if err := json.Unmarshal([]byte(s), &list); err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
+func appendCloseEvent(existing string, ev CloseEvent) (string, error) {
+	list, _ := parseCloseEvents(existing)
+	if list == nil {
+		list = []CloseEvent{}
+	}
+	list = append(list, ev)
+	if len(list) > maxCloseEvents {
+		list = list[len(list)-maxCloseEvents:]
+	}
+	b, err := json.Marshal(list)
+	if err != nil {
+		return existing, err
+	}
+	return string(b), nil
+}
+
+// ReducePositionQuantity reduces position quantity for partial close.
+// exitTimeMs and closeReason are used to record this close in close_events for 分层止盈 history.
+// If quantity reaches 0 (or near 0), automatically closes the position and appends final event.
+func (s *PositionStore) ReducePositionQuantity(id int64, reduceQty float64, exitPrice float64, addFee float64, addPnL float64, exitTimeMs int64, closeReason string) error {
+	const quantityTolerance = 0.0001
 	var pos TraderPosition
 	if err := s.db.First(&pos, id).Error; err != nil {
 		return fmt.Errorf("failed to get current position: %w", err)
@@ -258,30 +304,69 @@ func (s *PositionStore) ReducePositionQuantity(id int64, reduceQty float64, exit
 	var newExitPrice float64
 	if newClosedQty > 0 {
 		newExitPrice = (pos.ExitPrice*closedQty + exitPrice*reduceQty) / newClosedQty
-		// Use adaptive precision based on price magnitude (for meme coins with very small prices)
 		newExitPrice = adaptivePriceRound(newExitPrice, pos.ExitPrice, exitPrice, pos.EntryPrice)
 	}
 
 	nowMs := time.Now().UTC().UnixMilli()
+	if exitTimeMs <= 0 {
+		exitTimeMs = nowMs
+	}
+	if closeReason == "" {
+		closeReason = pos.CloseReason
+	}
+	if closeReason == "" {
+		closeReason = "sync"
+	}
 
-	// Check if position should be fully closed (quantity reduced to ~0)
-	const QUANTITY_TOLERANCE = 0.0001
-	if newQty <= QUANTITY_TOLERANCE {
-		// Auto-close: set status to CLOSED. Preserve close_reason if already set (e.g. system:tp:scaled / system:sl:xxx by strategy before sync).
-		closeReason := "sync"
-		if pos.CloseReason != "" {
-			closeReason = pos.CloseReason
+	// Append this close to close_events for position history
+	var newCloseEvents string
+	{
+		ev := CloseEvent{
+			ExitTimeMs:  exitTimeMs,
+			ClosedQty:   reduceQty,
+			ExitPrice:   exitPrice,
+			RealizedPnL: addPnL,
+			CloseReason: closeReason,
+			IsPartial:   newQty > quantityTolerance,
 		}
-		return s.db.Model(&TraderPosition{}).Where("id = ?", id).Updates(map[string]interface{}{
+		var err error
+		newCloseEvents, err = appendCloseEvent(pos.CloseEvents, ev)
+		if err != nil {
+			newCloseEvents = pos.CloseEvents
+		}
+	}
+
+	if newQty <= quantityTolerance {
+		// Full close via reduce: last event already appended as partial; fix last to is_partial=false and use remaining qty/pnl
+		list, _ := parseCloseEvents(newCloseEvents)
+		if len(list) > 0 {
+			list[len(list)-1].IsPartial = false
+			list[len(list)-1].ClosedQty = reduceQty
+			list[len(list)-1].RealizedPnL = addPnL
+			if b, e := json.Marshal(list); e == nil {
+				newCloseEvents = string(b)
+			}
+		}
+		reason := closeReason
+		if pos.CloseReason != "" {
+			reason = pos.CloseReason
+		}
+		upd := map[string]interface{}{
 			"quantity":     0,
 			"fee":          newFee,
 			"exit_price":   newExitPrice,
 			"realized_pnl": newPnL,
 			"status":       "CLOSED",
 			"exit_time":    nowMs,
-			"close_reason": closeReason,
+			"close_reason": reason,
+			"close_events": newCloseEvents,
 			"updated_at":   nowMs,
-		}).Error
+		}
+		if pos.CloseReasonTriggerDetail != "" || pos.CloseReasonAIAdjusted {
+			upd["close_reason_ai_adjusted"] = pos.CloseReasonAIAdjusted
+			upd["close_reason_trigger_detail"] = pos.CloseReasonTriggerDetail
+		}
+		return s.db.Model(&TraderPosition{}).Where("id = ?", id).Updates(upd).Error
 	}
 
 	return s.db.Model(&TraderPosition{}).Where("id = ?", id).Updates(map[string]interface{}{
@@ -289,6 +374,7 @@ func (s *PositionStore) ReducePositionQuantity(id int64, reduceQty float64, exit
 		"fee":          newFee,
 		"exit_price":   newExitPrice,
 		"realized_pnl": newPnL,
+		"close_events": newCloseEvents,
 		"updated_at":   nowMs,
 	}).Error
 }
@@ -303,8 +389,8 @@ func (s *PositionStore) UpdatePositionExchangeInfo(id int64, exchangeID, exchang
 	}).Error
 }
 
-// ClosePositionFully marks position as fully closed
-// exitTimeMs is Unix milliseconds UTC
+// ClosePositionFully marks position as fully closed.
+// Appends final close to close_events so 分层止盈 + 全平 的完整明细可在历史中展示.
 func (s *PositionStore) ClosePositionFully(id int64, exitPrice float64, exitOrderID string, exitTimeMs int64, totalRealizedPnL float64, totalFee float64, closeReason string) error {
 	var pos TraderPosition
 	if err := s.db.First(&pos, id).Error; err != nil {
@@ -316,17 +402,40 @@ func (s *PositionStore) ClosePositionFully(id int64, exitPrice float64, exitOrde
 		quantity = pos.EntryQuantity
 	}
 
-	return s.db.Model(&TraderPosition{}).Where("id = ?", id).Updates(map[string]interface{}{
+	// Append final close event (pnl = total - sum of partial closes already in close_events)
+	list, _ := parseCloseEvents(pos.CloseEvents)
+	var sumPartialPnL float64
+	for _, e := range list {
+		sumPartialPnL += e.RealizedPnL
+	}
+	finalPnL := totalRealizedPnL - sumPartialPnL
+	ev := CloseEvent{
+		ExitTimeMs:  exitTimeMs,
+		ClosedQty:   quantity,
+		ExitPrice:   exitPrice,
+		RealizedPnL: finalPnL,
+		CloseReason: closeReason,
+		IsPartial:   false,
+	}
+	newCloseEvents, _ := appendCloseEvent(pos.CloseEvents, ev)
+
+	upd := map[string]interface{}{
 		"quantity":       quantity,
-		"exit_price":     exitPrice,
-		"exit_order_id":  exitOrderID,
-		"exit_time":      exitTimeMs,
-		"realized_pnl":   totalRealizedPnL,
+		"exit_price":    exitPrice,
+		"exit_order_id": exitOrderID,
+		"exit_time":     exitTimeMs,
+		"realized_pnl":  totalRealizedPnL,
 		"fee":            totalFee,
 		"status":         "CLOSED",
 		"close_reason":   closeReason,
-		"updated_at":     time.Now().UTC().UnixMilli(),
-	}).Error
+		"close_events":   newCloseEvents,
+		"updated_at":    time.Now().UTC().UnixMilli(),
+	}
+	if pos.CloseReasonTriggerDetail != "" || pos.CloseReasonAIAdjusted {
+		upd["close_reason_ai_adjusted"] = pos.CloseReasonAIAdjusted
+		upd["close_reason_trigger_detail"] = pos.CloseReasonTriggerDetail
+	}
+	return s.db.Model(&TraderPosition{}).Where("id = ?", id).Updates(upd).Error
 }
 
 // UpdatePositionParams updates fixed params on a position (e.g. after close, to show in history).
@@ -366,9 +475,23 @@ func (s *PositionStore) SetPendingCloseReason(id int64, closeReason string) erro
 // Uses same symbol fallback as GetOpenPositionBySymbol (try base without USDT if no row updated),
 // so that reason is written even when DB stores symbol as "VVV" and caller passes "VVVUSDT".
 func (s *PositionStore) SetPendingCloseReasonBySymbol(traderID, symbol, side, closeReason string) error {
+	return s.setPendingCloseReasonBySymbol(traderID, symbol, side, closeReason, false, "")
+}
+
+// SetPendingCloseReasonAndDetailBySymbol pre-sets close_reason and optional AI-adjusted trigger detail on an OPEN position.
+func (s *PositionStore) SetPendingCloseReasonAndDetailBySymbol(traderID, symbol, side, closeReason string, aiAdjusted bool, triggerDetail string) error {
+	return s.setPendingCloseReasonBySymbol(traderID, symbol, side, closeReason, aiAdjusted, triggerDetail)
+}
+
+func (s *PositionStore) setPendingCloseReasonBySymbol(traderID, symbol, side, closeReason string, aiAdjusted bool, triggerDetail string) error {
+	upd := map[string]interface{}{"close_reason": closeReason}
+	if triggerDetail != "" || aiAdjusted {
+		upd["close_reason_ai_adjusted"] = aiAdjusted
+		upd["close_reason_trigger_detail"] = triggerDetail
+	}
 	res := s.db.Model(&TraderPosition{}).
 		Where("trader_id = ? AND symbol = ? AND side = ? AND status = ?", traderID, symbol, side, "OPEN").
-		Update("close_reason", closeReason)
+		Updates(upd)
 	if res.Error != nil {
 		return res.Error
 	}
@@ -379,7 +502,7 @@ func (s *PositionStore) SetPendingCloseReasonBySymbol(traderID, symbol, side, cl
 		baseSymbol := strings.TrimSuffix(symbol, "USDT")
 		return s.db.Model(&TraderPosition{}).
 			Where("trader_id = ? AND symbol = ? AND side = ? AND status = ?", traderID, baseSymbol, side, "OPEN").
-			Update("close_reason", closeReason).Error
+			Updates(upd).Error
 	}
 	return nil
 }

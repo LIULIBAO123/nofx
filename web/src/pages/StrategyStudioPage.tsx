@@ -38,6 +38,7 @@ import { RiskControlEditor } from '../components/strategy/RiskControlEditor'
 import { PromptSectionsEditor } from '../components/strategy/PromptSectionsEditor'
 import { PublishSettingsEditor } from '../components/strategy/PublishSettingsEditor'
 import { GridConfigEditor, defaultGridConfig } from '../components/strategy/GridConfigEditor'
+import { DirectionPoolEditor } from '../components/strategy/DirectionPoolEditor'
 import { DeepVoidBackground } from '../components/DeepVoidBackground'
 import { GrainOverlay } from '../components/ui/GrainOverlay'
 import { AIUsageCard } from '../components/AIUsageCard'
@@ -64,8 +65,10 @@ export function StrategyStudioPage() {
   const [expandedSections, setExpandedSections] = useState({
     gridConfig: true,
     coinSource: true,
-    indicators: true, // 默认展开，便于看到「写入 Prompt 的候选币数」等
-    riskControl: true, // 默认展开，便于看到「AI 仅开仓」等选项
+    indicators: true,
+    riskControl: true,
+    strategyMode: true,
+    directionPool: false,
     promptSections: false,
     customPrompt: false,
     publishSettings: false,
@@ -257,17 +260,17 @@ export function StrategyStudioPage() {
       if (!response.ok) throw new Error('Failed to create optimized strategy')
       const result = await response.json()
       const ver = result.preset_version || '3.0'
-      notify.success(language === 'zh' ? `预设策略 v${ver} 已创建` : `Preset strategy v${ver} created`)
+      notify.success(language === 'zh' ? '预设策略（默认）已创建' : 'Preset strategy (default) created')
       await fetchStrategies()
       // Auto-select the newly created strategy
       if (result.id && result.config) {
         const now = new Date().toISOString()
         const newStrategy = {
           id: result.id,
-          name: language === 'zh' ? '预设策略 v3.0' : 'Preset Strategy v3.0',
-          description: language === 'zh'
-            ? '一键预设：分批止盈 2.5%/6%/10%、AI 仅开仓+持仓 trend_view、15m 主周期、动态止损止盈'
-            : 'One-click preset: 2.5%/6%/10% scaled TP, AI-only entry + trend_view, 15m primary, dynamic SL/TP',
+          name: result.name || (language === 'zh' ? '预设策略（默认）' : 'Preset Strategy (Default)'),
+          description: result.description || (language === 'zh'
+            ? '一键生成：全部参数与勾选项为默认值（2.5%/6%/10% 分批止盈、AI 仅开仓、15m 主周期、动态止损止盈）'
+            : 'One-click: all params at default (2.5%/6%/10% scaled TP, AI-only entry, 15m primary, dynamic SL/TP)'),
           is_active: false,
           is_default: false,
           is_public: false,
@@ -419,6 +422,48 @@ export function StrategyStudioPage() {
     }
   }
 
+  // Apply preset config to current strategy (one-click restore all params to default)
+  const handleApplyPresetToCurrent = async () => {
+    if (!token || !selectedStrategy || selectedStrategy.is_default) return
+    setIsSaving(true)
+    try {
+      const response = await fetch(
+        `${API_BASE}/api/strategies/default-config?lang=${language}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      )
+      if (!response.ok) throw new Error('Failed to fetch preset config')
+      const presetConfig = await response.json()
+      const configWithLang = { ...presetConfig, language: language as 'zh' | 'en' }
+      const putRes = await fetch(
+        `${API_BASE}/api/strategies/${selectedStrategy.id}`,
+        {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            name: selectedStrategy.name,
+            description: selectedStrategy.description,
+            config: configWithLang,
+            is_public: selectedStrategy.is_public,
+            config_visible: selectedStrategy.config_visible,
+          }),
+        }
+      )
+      if (!putRes.ok) throw new Error('Failed to apply preset')
+      setEditingConfig(configWithLang)
+      setHasChanges(false)
+      notify.success(language === 'zh' ? '已应用默认预设到当前策略' : 'Default preset applied to current strategy')
+      await fetchStrategies()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error')
+      notify.error(err instanceof Error ? err.message : 'Unknown error')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
   // Save strategy
   const handleSaveStrategy = async () => {
     if (!token || !selectedStrategy || !editingConfig) return
@@ -541,9 +586,14 @@ export function StrategyStudioPage() {
       gridTrading: { zh: 'AI 网格交易', en: 'AI Grid Trading' },
       gridTradingDesc: { zh: 'AI 控制网格策略，在震荡市场获利', en: 'AI-controlled grid strategy for ranging markets' },
       gridConfig: { zh: '网格配置', en: 'Grid Configuration' },
+      strategyModeClassic: { zh: '经典', en: 'Classic' },
+      strategyModeMultilayer: { zh: '多层过滤', en: 'Multilayer Filter' },
+      strategyModeDesc: { zh: '「多层过滤」启用 Layer1/2/3 与方向池，可与「系统执行开仓」配合使用', en: 'Multilayer filter enables Layer1/2/3 and direction pool; use with "System executes entry".' },
       coinSource: { zh: '币种来源', en: 'Coin Source' },
       indicators: { zh: '技术指标', en: 'Indicators' },
       riskControl: { zh: '风控参数', en: 'Risk Control' },
+      strategyMode: { zh: '策略模式', en: 'Strategy Mode' },
+      directionPool: { zh: '方向池', en: 'Direction Pool' },
       promptSections: { zh: 'Prompt 编辑', en: 'Prompt Editor' },
       customPrompt: { zh: '附加提示', en: 'Extra Prompt' },
       save: { zh: '保存', en: 'Save' },
@@ -655,6 +705,68 @@ export function StrategyStudioPage() {
       ),
     },
     {
+      key: 'strategyMode' as const,
+      icon: Settings,
+      color: '#F0B90B',
+      title: t('strategyMode'),
+      forStrategyType: 'ai_trading' as const,
+      content: editingConfig && (
+        <div className="space-y-4">
+          <p className="text-xs text-[#848E9C]" style={{ color: '#848E9C' }}>
+            {t('strategyModeDesc')}
+          </p>
+          <div className="flex items-center gap-3">
+            <label className="text-sm font-medium" style={{ color: '#EAECEF' }}>
+              {language === 'zh' ? '模式' : 'Mode'}
+            </label>
+            <select
+              value={editingConfig.strategy_mode ?? 'multilayer_filter'}
+              onChange={(e) => {
+                const mode = e.target.value as 'classic' | 'multilayer_filter'
+                updateConfig('strategy_mode', mode)
+                if (mode === 'multilayer_filter' && !editingConfig.multilayer_filter) {
+                  updateConfig('multilayer_filter', { enabled: true })
+                }
+              }}
+              disabled={!!selectedStrategy?.is_default}
+              className="px-3 py-2 rounded border min-w-[140px]"
+              style={{
+                background: '#1E2329',
+                border: '1px solid #2B3139',
+                color: '#EAECEF',
+              }}
+            >
+              <option value="classic">{t('strategyModeClassic')}</option>
+              <option value="multilayer_filter">{t('strategyModeMultilayer')}</option>
+            </select>
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: 'directionPool' as const,
+      icon: Activity,
+      color: '#F0B90B',
+      title: t('directionPool'),
+      forStrategyType: 'ai_trading' as const,
+      content: editingConfig && (
+        editingConfig.strategy_mode === 'multilayer_filter' && editingConfig.multilayer_filter
+          ? (
+            <DirectionPoolEditor
+              config={editingConfig.multilayer_filter}
+              onChange={(multilayerFilter) => updateConfig('multilayer_filter', multilayerFilter)}
+              disabled={selectedStrategy?.is_default}
+              language={language}
+            />
+            )
+          : (
+            <p className="text-sm text-[#5E6673]">
+              {language === 'zh' ? '请先将策略模式设为「多层过滤」后可配置方向池。' : 'Set strategy mode to "Multilayer filter" to configure direction pool.'}
+            </p>
+            )
+      ),
+    },
+    {
       key: 'promptSections' as const,
       icon: FileText,
       color: '#a855f7',
@@ -748,35 +860,51 @@ export function StrategyStudioPage() {
         {/* Left Column - Strategy List */}
         <div className="w-48 flex-shrink-0 border-r border-white/10 overflow-y-auto bg-white/[0.02] backdrop-blur-sm z-10">
           <div className="p-2">
-            <div className="flex items-center justify-between mb-2 px-2">
-              <span className="text-xs font-semibold text-zinc-400 uppercase tracking-wide">{t('strategies')}</span>
-              <div className="flex items-center gap-1">
-                {/* Import button */}
-                <label className="p-1.5 rounded-md hover:bg-white/10 transition-all cursor-pointer text-zinc-400 hover:text-white hover:shadow-sm" title={language === 'zh' ? '导入策略' : 'Import Strategy'}>
-                  <Upload className="w-3.5 h-3.5" />
-                  <input
-                    type="file"
-                    accept=".json"
-                    onChange={handleImportStrategy}
-                    className="hidden"
-                  />
-                </label>
-                {/* 优化策略按钮 */}
-                <button
-                  onClick={handleCreateOptimizedStrategy}
-                  className="p-1.5 rounded-md transition-all bg-gradient-to-br from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white shadow-sm hover:shadow-md hover:scale-105 active:scale-95"
-                  title={language === 'zh' ? '一键生成预设策略（2.5%/6%/10% 分批止盈、AI 仅开仓、15m 主周期）' : 'One-click preset strategy (2.5%/6%/10% scaled TP, AI-only entry, 15m primary)'}
-                >
-                  <Sparkles className="w-3.5 h-3.5" />
-                </button>
-                {/* 新建按钮 */}
-                <button
-                  onClick={handleCreateStrategy}
-                  className="p-1.5 rounded-md transition-all teal-gradient text-white shadow-sm hover:shadow-md hover:scale-105 active:scale-95"
-                  title={language === 'zh' ? '新建策略' : 'New Strategy'}
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                </button>
+            <div className="mb-2 px-2">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-xs font-semibold text-zinc-400 uppercase tracking-wide">{t('strategies')}</span>
+                <div className="flex items-center gap-1">
+                  <label className="p-1.5 rounded-md hover:bg-white/10 transition-all cursor-pointer text-zinc-400 hover:text-white hover:shadow-sm" title={language === 'zh' ? '导入策略' : 'Import Strategy'}>
+                    <Upload className="w-3.5 h-3.5" />
+                    <input type="file" accept=".json" onChange={handleImportStrategy} className="hidden" />
+                  </label>
+                  <button
+                    onClick={handleCreateStrategy}
+                    className="p-1.5 rounded-md transition-all teal-gradient text-white shadow-sm hover:shadow-md"
+                    title={language === 'zh' ? '新建策略' : 'New Strategy'}
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+              {/* 默认值 · 一键生成 / 应用默认 */}
+              <div className="rounded-lg bg-white/[0.04] border border-white/10 p-2 space-y-2">
+                <p className="text-[11px] text-zinc-500 leading-tight">
+                  {language === 'zh'
+                    ? '默认值：2.5%/6%/10% 分批止盈、AI 仅开仓、15m 主周期、动态止损止盈、多层过滤'
+                    : 'Default: 2.5%/6%/10% scaled TP, AI-only entry, 15m primary, dynamic SL/TP, multilayer filter'}
+                </p>
+                <div className="flex flex-col gap-1.5">
+                  <button
+                    onClick={handleCreateOptimizedStrategy}
+                    className="flex items-center justify-center gap-1.5 w-full py-1.5 px-2 rounded-md bg-gradient-to-br from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white text-xs font-medium shadow-sm hover:shadow-md"
+                    title={language === 'zh' ? '一键生成预设策略（全部参数与勾选项为默认值）' : 'One-click: create preset strategy (all params and options at default)'}
+                  >
+                    <Sparkles className="w-3.5 h-3.5 flex-shrink-0" />
+                    {language === 'zh' ? '一键生成' : 'One-click generate'}
+                  </button>
+                  {selectedStrategy && !selectedStrategy.is_default && (
+                    <button
+                      onClick={handleApplyPresetToCurrent}
+                      disabled={isSaving}
+                      className="flex items-center justify-center gap-1.5 w-full py-1.5 px-2 rounded-md bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 hover:text-amber-300 text-xs font-medium shadow-sm disabled:opacity-50"
+                      title={language === 'zh' ? '将当前策略的参数与勾选项恢复为默认值' : 'Restore current strategy to default params and options'}
+                    >
+                      <RefreshCw className="w-3.5 h-3.5 flex-shrink-0" />
+                      {language === 'zh' ? '应用默认' : 'Apply default'}
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
             <div className="space-y-1">
@@ -805,24 +933,20 @@ export function StrategyStudioPage() {
                       >
                         <Download className="w-3 h-3" />
                       </button>
-                      {!strategy.is_default && (
-                        <>
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleDuplicateStrategy(strategy.id) }}
-                            className="p-1 rounded hover:bg-white/10 text-nofx-text-muted hover:text-white"
-                            title={language === 'zh' ? '复制' : 'Duplicate'}
-                          >
-                            <Copy className="w-3 h-3" />
-                          </button>
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleDeleteStrategy(strategy.id) }}
-                            className="p-1 rounded hover:bg-nofx-danger/20 text-nofx-danger"
-                            title={language === 'zh' ? '删除' : 'Delete'}
-                          >
-                            <Trash2 className="w-3 h-3" />
-                          </button>
-                        </>
-                      )}
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleDuplicateStrategy(strategy.id) }}
+                        className="p-1 rounded hover:bg-white/10 text-nofx-text-muted hover:text-white"
+                        title={language === 'zh' ? '复制' : 'Duplicate'}
+                      >
+                        <Copy className="w-3 h-3" />
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleDeleteStrategy(strategy.id) }}
+                        className="p-1 rounded hover:bg-nofx-danger/20 text-nofx-danger"
+                        title={language === 'zh' ? '删除' : 'Delete'}
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
                     </div>
                   </div>
                   <div className="flex items-center gap-1 mt-1 flex-wrap">

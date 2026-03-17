@@ -6,6 +6,8 @@ interface DecisionCardProps {
   decision: DecisionRecord
   language: Language
   onSymbolClick?: (symbol: string) => void
+  /** 仪表盘用：当本周期仅有系统开/平仓（无 wait/hold）时显示提示 */
+  systemExecutionHint?: boolean
 }
 
 // Action type configuration
@@ -239,12 +241,13 @@ function keyActionsSummary(decisions: DecisionAction[] | undefined, language: La
   return parts.join(' · ') + suffix
 }
 
-export function DecisionCard({ decision, language, onSymbolClick }: DecisionCardProps) {
+export function DecisionCard({ decision, language, onSymbolClick, systemExecutionHint }: DecisionCardProps) {
   const [cycleBlockExpanded, setCycleBlockExpanded] = useState(false)
   const [showSystemPrompt, setShowSystemPrompt] = useState(false)
   const [showInputPrompt, setShowInputPrompt] = useState(false)
   const [showCoT, setShowCoT] = useState(false)
   const summary = keyActionsSummary(decision.decisions, language)
+  const onlySystemExecution = systemExecutionHint && (!decision.decisions || decision.decisions.length === 0)
 
   // Copy text to clipboard
   const copyToClipboard = async (text: string, label: string) => {
@@ -298,12 +301,16 @@ export function DecisionCard({ decision, language, onSymbolClick }: DecisionCard
             <div className="text-xs" style={{ color: '#848E9C' }}>
               {new Date(decision.timestamp).toLocaleString()}
             </div>
-            {/* When collapsed: show key open/close summary */}
-            {!cycleBlockExpanded && summary && (
+            {/* When collapsed: show key wait/hold summary or system-execution hint */}
+            {!cycleBlockExpanded && (summary ? (
               <div className="text-xs mt-1 font-mono" style={{ color: '#848E9C' }}>
                 {summary}
               </div>
-            )}
+            ) : onlySystemExecution ? (
+              <div className="text-xs mt-1" style={{ color: '#848E9C' }}>
+                {t('systemExecutionHintCollapsed', language)}
+              </div>
+            ) : null)}
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
@@ -325,14 +332,18 @@ export function DecisionCard({ decision, language, onSymbolClick }: DecisionCard
 
       {cycleBlockExpanded && (
         <>
-      {/* Decision Actions - Beautiful Grid */}
-      {decision.decisions && decision.decisions.length > 0 && (
+      {/* Decision Actions - Beautiful Grid (AI 思维链仅展示 wait/hold；开平仓见系统周期) */}
+      {decision.decisions && decision.decisions.length > 0 ? (
         <div className="space-y-3 mb-4">
           {decision.decisions.map((action, index) => (
             <ActionCard key={`${action.symbol}-${index}`} action={action} language={language} onSymbolClick={onSymbolClick} />
           ))}
         </div>
-      )}
+      ) : onlySystemExecution ? (
+        <div className="py-3 px-4 rounded-lg mb-4 text-sm" style={{ background: 'rgba(132, 142, 156, 0.1)', color: '#848E9C' }}>
+          {t('systemExecutionHintExpanded', language)}
+        </div>
+      ) : null}
 
       {/* Collapsible Sections */}
       <div className="space-y-2">

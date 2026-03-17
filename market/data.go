@@ -312,6 +312,8 @@ func GetWithTimeframes(symbol string, timeframes []string, primaryTimeframe stri
 	// Store data for all timeframes
 	timeframeData := make(map[string]*TimeframeSeriesData)
 	var primaryKlines []Kline
+	var longTfKlines []Kline
+	var longTf string
 
 	// Check if this is an xyz dex asset (use Hyperliquid API)
 	isXyzAsset := IsXyzDexAsset(symbol)
@@ -346,6 +348,13 @@ func GetWithTimeframes(symbol string, timeframes []string, primaryTimeframe stri
 		if tf == primaryTimeframe {
 			primaryKlines = klines
 		}
+		if tf == "4h" {
+			longTfKlines = klines
+			longTf = "4h"
+		} else if tf == "1h" && longTfKlines == nil {
+			longTfKlines = klines
+			longTf = "1h"
+		}
 
 		// Calculate series data for this timeframe (use count from config)
 		seriesData := calculateTimeframeSeries(klines, tf, count)
@@ -370,8 +379,13 @@ func GetWithTimeframes(symbol string, timeframes []string, primaryTimeframe stri
 	currentRSI7 := calculateRSI(primaryKlines, 7)
 
 	// Calculate price changes
-	priceChange1h := calculatePriceChangeByBars(primaryKlines, primaryTimeframe, 60) // 1 hour
+	priceChange1h := calculatePriceChangeByBars(primaryKlines, primaryTimeframe, 60)   // 1 hour
 	priceChange4h := calculatePriceChangeByBars(primaryKlines, primaryTimeframe, 240) // 4 hours
+	priceChange24h, priceChange7d := 0.0, 0.0
+	if len(longTfKlines) > 0 && longTf != "" {
+		priceChange24h = calculatePriceChangeByBars(longTfKlines, longTf, 1440)   // 24h
+		priceChange7d = calculatePriceChangeByBars(longTfKlines, longTf, 10080) // 7d
+	}
 
 	// Get OI data
 	oiData, err := getOpenInterestData(symbol)
@@ -382,17 +396,23 @@ func GetWithTimeframes(symbol string, timeframes []string, primaryTimeframe stri
 	// Get Funding Rate
 	fundingRate, _ := getFundingRate(symbol)
 
+	// 多周期策略下 pipeline Layer1 的 volume_ok/volume_trend 依赖 IntradaySeries.Volume；用主周期 K 线生成
+	intradaySeries := calculateIntradaySeries(primaryKlines)
+
 	return &Data{
-		Symbol:        symbol,
-		CurrentPrice:  currentPrice,
-		PriceChange1h: priceChange1h,
-		PriceChange4h: priceChange4h,
-		CurrentEMA20:  currentEMA20,
-		CurrentMACD:   currentMACD,
-		CurrentRSI7:   currentRSI7,
-		OpenInterest:  oiData,
-		FundingRate:   fundingRate,
-		TimeframeData: timeframeData,
+		Symbol:         symbol,
+		CurrentPrice:   currentPrice,
+		PriceChange1h:  priceChange1h,
+		PriceChange4h:  priceChange4h,
+		PriceChange24h: priceChange24h,
+		PriceChange7d:  priceChange7d,
+		CurrentEMA20:   currentEMA20,
+		CurrentMACD:    currentMACD,
+		CurrentRSI7:    currentRSI7,
+		OpenInterest:   oiData,
+		FundingRate:    fundingRate,
+		TimeframeData:  timeframeData,
+		IntradaySeries: intradaySeries,
 	}, nil
 }
 

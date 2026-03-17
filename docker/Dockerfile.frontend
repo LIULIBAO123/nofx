@@ -21,6 +21,10 @@ COPY web/package*.json ./
 RUN npm ci
 
 COPY web/ ./
+# 写入构建时版本信息，用于确认前端是否最新（访问 /version.json）
+ARG GIT_COMMIT=unknown
+RUN BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ) && \
+    echo "{\"version\":\"1.0.0\",\"buildTime\":\"$BUILD_TIME\",\"gitCommit\":\"${GIT_COMMIT}\"}" > public/version.json
 RUN npm run build
 
 # ──────────────────────────────────────────────────────────────

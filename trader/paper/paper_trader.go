@@ -1,6 +1,8 @@
 package paper
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"math"
 	"nofx/market"
@@ -39,6 +41,23 @@ type paperPosition struct {
 
 func posKey(symbol, side string) string {
 	return symbol + "_" + side
+}
+
+// nextOrderID returns a globally-unique paper order id.
+// IMPORTANT: must not repeat across process restarts, otherwise DB UNIQUE(exchange_order_id) will reject inserts
+// and the UI will miss order records.
+func (p *PaperTrader) nextOrderID() string {
+	// Monotonic within this PaperTrader instance
+	p.orderIDGen++
+
+	// Add strong uniqueness across restarts and across multiple traders:
+	// - UTC millis timestamp
+	// - per-instance seq
+	// - 4 random bytes
+	nowMs := time.Now().UTC().UnixMilli()
+	rb := make([]byte, 4)
+	_, _ = rand.Read(rb)
+	return fmt.Sprintf("paper_%d_%d_%s", nowMs, p.orderIDGen, hex.EncodeToString(rb))
 }
 
 // NewPaperTrader creates a paper/simulation trader with virtual balance; uses market data for prices.
@@ -180,7 +199,7 @@ func (p *PaperTrader) OpenLong(symbol string, quantity float64, leverage int) (m
 		}
 	}
 	p.orderIDGen++
-	return map[string]interface{}{"order_id": fmt.Sprintf("paper_%d", p.orderIDGen), "status": "FILLED"}, nil
+	return map[string]interface{}{"order_id": p.nextOrderID(), "status": "FILLED"}, nil
 }
 
 func (p *PaperTrader) OpenShort(symbol string, quantity float64, leverage int) (map[string]interface{}, error) {
@@ -224,7 +243,7 @@ func (p *PaperTrader) OpenShort(symbol string, quantity float64, leverage int) (
 		}
 	}
 	p.orderIDGen++
-	return map[string]interface{}{"order_id": fmt.Sprintf("paper_%d", p.orderIDGen), "status": "FILLED"}, nil
+	return map[string]interface{}{"order_id": p.nextOrderID(), "status": "FILLED"}, nil
 }
 
 func (p *PaperTrader) CloseLong(symbol string, quantity float64) (map[string]interface{}, error) {
@@ -282,8 +301,7 @@ func (p *PaperTrader) closePosition(symbol, side string, quantity float64) (map[
 	if pos.Quantity <= 0 {
 		delete(p.positions, key)
 	}
-	p.orderIDGen++
-	return map[string]interface{}{"order_id": fmt.Sprintf("paper_%d", p.orderIDGen), "status": "FILLED"}, nil
+	return map[string]interface{}{"order_id": p.nextOrderID(), "status": "FILLED"}, nil
 }
 
 // RestoreOpenPosition 从 DB 恢复一条未平仓位（进程重启后调用），与实盘一致：扣减占用保证金。

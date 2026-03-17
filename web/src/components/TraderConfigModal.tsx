@@ -34,6 +34,8 @@ interface FormState {
   is_cross_margin: boolean
   show_in_competition: boolean
   scan_interval_minutes: number
+  system_interval_minutes?: number
+  sltp_analysis_interval_minutes?: number
   initial_balance?: number
 }
 
@@ -68,6 +70,8 @@ export function TraderConfigModal({
     is_cross_margin: true,
     show_in_competition: true,
     scan_interval_minutes: 3,
+    system_interval_minutes: 0,
+    sltp_analysis_interval_minutes: 0,
   })
   const [isSaving, setIsSaving] = useState(false)
   const [strategies, setStrategies] = useState<Strategy[]>([])
@@ -116,6 +120,8 @@ export function TraderConfigModal({
         is_cross_margin: true,
         show_in_competition: true,
         scan_interval_minutes: 3,
+        system_interval_minutes: 0,
+        sltp_analysis_interval_minutes: 0,
         initial_balance: isSimulation ? 10000 : undefined,
       })
     }
@@ -175,6 +181,8 @@ export function TraderConfigModal({
         is_cross_margin: formData.is_cross_margin,
         show_in_competition: formData.show_in_competition,
         scan_interval_minutes: formData.scan_interval_minutes,
+        system_interval_minutes: formData.system_interval_minutes ?? 0,
+        sltp_analysis_interval_minutes: formData.sltp_analysis_interval_minutes ?? 0,
       }
 
       // 编辑模式或实盘模拟创建时包含 initial_balance
@@ -448,6 +456,46 @@ export function TraderConfigModal({
                   />
                   <p className="text-xs text-gray-500 mt-1">
                     {t('scanIntervalRecommend', language)}
+                  </p>
+                </div>
+                <div>
+                  <label className="text-sm text-[#EAECEF] block mb-2">
+                    {language === 'zh' ? '系统周期 (分钟)' : 'System interval (min)'}
+                  </label>
+                  <input
+                    type="number"
+                    value={formData.system_interval_minutes ?? 0}
+                    onChange={(e) => {
+                      const v = Number(e.target.value)
+                      handleInputChange('system_interval_minutes', Number.isFinite(v) && v >= 0 ? v : 0)
+                    }}
+                    className="w-full px-3 py-2 bg-[#0B0E11] border border-[#2B3139] rounded text-[#EAECEF] focus:border-[#F0B90B] focus:outline-none"
+                    min="0"
+                    max="60"
+                    step="1"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    {language === 'zh' ? '0=与 AI 周期一致；1~59 且小于上方间隔时：系统(数据/开仓/止盈止损)更频繁，AI 按上方间隔调用以省 token' : '0=same as AI; 1–59 and &lt; above: system runs more often, AI at above interval to save tokens'}
+                  </p>
+                </div>
+                <div>
+                  <label className="text-sm text-[#EAECEF] block mb-2">
+                    {language === 'zh' ? '止盈止损分析周期 (分钟)' : 'SL/TP analysis interval (min)'}
+                  </label>
+                  <input
+                    type="number"
+                    value={formData.sltp_analysis_interval_minutes ?? 0}
+                    onChange={(e) => {
+                      const v = Number(e.target.value)
+                      handleInputChange('sltp_analysis_interval_minutes', Number.isFinite(v) && v >= 0 ? v : 0)
+                    }}
+                    className="w-full px-3 py-2 bg-[#0B0E11] border border-[#2B3139] rounded text-[#EAECEF] focus:border-[#F0B90B] focus:outline-none"
+                    min="0"
+                    max="60"
+                    step="1"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    {language === 'zh' ? '0=不启用；1~且小于 AI 间隔时：单独跑持仓止盈止损轻量分析（仅实时+预测调 SL/TP 参数），不写决策、不开平仓' : '0=disabled; 1– and &lt; AI interval: run SL/TP-only analysis (positions + real-time + prediction for adjustments only)'}
                   </p>
                 </div>
               </div>

@@ -411,6 +411,8 @@ export function AITradersPage({ onTraderSelect, traders: tradersProp, isSimulati
         strategy_id: data.strategy_id,
         initial_balance: data.initial_balance,
         scan_interval_minutes: data.scan_interval_minutes,
+        system_interval_minutes: data.system_interval_minutes ?? 0,
+        sltp_analysis_interval_minutes: data.sltp_analysis_interval_minutes ?? 0,
         is_cross_margin: data.is_cross_margin,
         show_in_competition: data.show_in_competition,
       }

@@ -645,6 +645,18 @@ func (tm *TraderManager) addTraderFromStore(traderCfg *store.Trader, aiModelCfg 
 		}
 		scanMins = 3
 	}
+	systemMins := traderCfg.SystemIntervalMinutes
+	if systemMins <= 0 || systemMins >= scanMins {
+		systemMins = 0
+	} else if systemMins < 1 {
+		systemMins = 1
+	}
+	sltpMins := traderCfg.SLTPAnalysisIntervalMinutes
+	if sltpMins <= 0 || sltpMins >= scanMins {
+		sltpMins = 0
+	} else if sltpMins < 1 {
+		sltpMins = 1
+	}
 
 	// Build AutoTraderConfig (ai500APIURL/oiTopAPIURL obtained from strategy config, used in StrategyEngine)
 	traderConfig := trader.AutoTraderConfig{
@@ -662,7 +674,9 @@ func (tm *TraderManager) addTraderFromStore(traderCfg *store.Trader, aiModelCfg 
 		QwenKey:               "",
 		CustomAPIURL:          aiModelCfg.CustomAPIURL,
 		CustomModelName:       aiModelCfg.CustomModelName,
-		ScanInterval:         time.Duration(scanMins) * time.Minute,
+		ScanInterval:          time.Duration(scanMins) * time.Minute,
+		SystemInterval:        time.Duration(systemMins) * time.Minute,
+		SLTPAnalysisInterval:  time.Duration(sltpMins) * time.Minute,
 		InitialBalance:        traderCfg.InitialBalance,
 		IsCrossMargin:         traderCfg.IsCrossMargin,
 		ShowInCompetition:     traderCfg.ShowInCompetition,
@@ -670,8 +684,11 @@ func (tm *TraderManager) addTraderFromStore(traderCfg *store.Trader, aiModelCfg 
 		StrategyConfig:        strategyConfig,
 	}
 
-	logger.Infof("📊 Loading trader %s: ScanIntervalMinutes=%d (from DB), ScanInterval=%v",
-		traderCfg.Name, scanMins, traderConfig.ScanInterval)
+	if systemMins > 0 || sltpMins > 0 {
+		logger.Infof("📊 Loading trader %s: AI=%dm, system=%dm, SL/TP analysis=%dm", traderCfg.Name, scanMins, systemMins, sltpMins)
+	} else {
+		logger.Infof("📊 Loading trader %s: ScanIntervalMinutes=%d (from DB), ScanInterval=%v", traderCfg.Name, scanMins, traderConfig.ScanInterval)
+	}
 
 	// Set API keys based on exchange type (convert EncryptedString to string)
 	switch exchangeCfg.ExchangeType {

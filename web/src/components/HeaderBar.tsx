@@ -11,8 +11,10 @@ type Page =
   | 'traders'
   | 'trader'
   | 'simulation'
+  | 'radar'
   | 'backtest'
   | 'strategy'
+  | 'datastats'
   | 'login'
   | 'register'
 
@@ -98,8 +100,10 @@ export default function HeaderBar({
               const navTabs: { page: Page; path: string; label: string; requiresAuth: boolean }[] = [
                 { page: 'traders', path: '/traders', label: t('configNav', language), requiresAuth: true },
                 { page: 'trader', path: '/dashboard', label: t('dashboardNav', language), requiresAuth: true },
+                { page: 'radar', path: '/radar', label: language === 'zh' ? '多空雷达' : 'Radar', requiresAuth: true },
                 { page: 'simulation', path: '/simulation', label: language === 'zh' ? '实盘模拟' : 'Paper', requiresAuth: true },
                 { page: 'strategy', path: '/strategy', label: t('strategyNav', language), requiresAuth: true },
+                { page: 'datastats', path: '/datastats', label: t('dataStatsNav', language), requiresAuth: true },
                 { page: 'competition', path: '/competition', label: t('realtimeNav', language), requiresAuth: true },
                 { page: 'backtest', path: '/backtest', label: 'Backtest', requiresAuth: true },
               ]
@@ -324,6 +328,7 @@ export default function HeaderBar({
                     { page: 'trader', path: '/dashboard', label: t('dashboardNav', language), requiresAuth: true },
                     { page: 'simulation', path: '/simulation', label: language === 'zh' ? '实盘模拟' : 'Paper', requiresAuth: true },
                     { page: 'strategy', path: '/strategy', label: t('strategyNav', language), requiresAuth: true },
+                    { page: 'datastats', path: '/datastats', label: t('dataStatsNav', language), requiresAuth: true },
                     { page: 'competition', path: '/competition', label: t('realtimeNav', language), requiresAuth: true },
                     { page: 'backtest', path: '/backtest', label: 'Backtest', requiresAuth: true },
                   ]

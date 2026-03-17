@@ -25,6 +25,11 @@ import type {
   Strategy,
   StrategyConfig,
   PositionHistoryResponse,
+  RadarConfig,
+  OrderFlowInfo,
+  DirectionPoolResponse,
+  LatestAnalysisResponse,
+  DataStatsResponse,
 } from '../types'
 import { CryptoService } from './crypto'
 import { httpClient } from './httpClient'
@@ -140,6 +145,50 @@ export const api = {
       `${API_BASE}/traders/${traderId}/config`
     )
     if (!result.success) throw new Error('获取交易员配置失败')
+    return result.data!
+  },
+
+  /** 多空雷达配置 */
+  async getRadarConfig(traderId: string): Promise<RadarConfig> {
+    const result = await httpClient.get<RadarConfig>(
+      `${API_BASE}/traders/${traderId}/radar-config`
+    )
+    if (!result.success) throw new Error('获取多空雷达配置失败')
+    return result.data!
+  },
+
+  async putRadarConfig(traderId: string, config: RadarConfig): Promise<void> {
+    const result = await httpClient.put(
+      `${API_BASE}/traders/${traderId}/radar-config`,
+      config
+    )
+    if (!result.success) throw new Error('更新多空雷达配置失败')
+  },
+
+  /** 挂单流程信息（管线、第一层不达标统计、按币种不达标） */
+  async getOrderFlowInfo(traderId: string): Promise<OrderFlowInfo> {
+    const result = await httpClient.get<OrderFlowInfo>(
+      `${API_BASE}/traders/${traderId}/order-flow-info`
+    )
+    if (!result.success) throw new Error('获取挂单流程信息失败')
+    return result.data!
+  },
+
+  /** 方向池(多)/方向池(空) */
+  async getDirectionPool(traderId: string): Promise<DirectionPoolResponse> {
+    const result = await httpClient.get<DirectionPoolResponse>(
+      `${API_BASE}/traders/${traderId}/direction-pool`
+    )
+    if (!result.success) throw new Error('获取方向池失败')
+    return result.data!
+  },
+
+  /** 最新周期 AI 分析快照（market_regime、scenario、symbol_predictions），供「实时数据+AI预测」展示 */
+  async getLatestAnalysis(traderId: string): Promise<LatestAnalysisResponse> {
+    const result = await httpClient.get<LatestAnalysisResponse>(
+      `${API_BASE}/traders/${traderId}/latest-analysis`
+    )
+    if (!result.success) throw new Error('获取最新分析失败')
     return result.data!
   },
 
@@ -722,6 +771,14 @@ export const api = {
   async duplicateStrategy(strategyId: string): Promise<Strategy> {
     const result = await httpClient.post<Strategy>(`${API_BASE}/strategies/${strategyId}/duplicate`)
     if (!result.success) throw new Error('复制策略失败')
+    return result.data!
+  },
+
+  // 数据统计（数据调用监控）
+  async getDataStatistics(traderId?: string): Promise<DataStatsResponse> {
+    const q = traderId ? `?trader_id=${encodeURIComponent(traderId)}` : ''
+    const result = await httpClient.get<DataStatsResponse>(`${API_BASE}/data-statistics${q}`)
+    if (!result.success) throw new Error(result.message || '获取数据统计失败')
     return result.data!
   },
 

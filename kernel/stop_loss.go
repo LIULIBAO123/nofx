@@ -148,6 +148,10 @@ func (c *StopLossChecker) checkTrailingStop(position *PositionInfo, currentPrice
 	if len(c.config.TrailingLevels) == 0 {
 		return &StopLossSignal{Triggered: false}
 	}
+	// 若配置为「仅在第一档分层止盈后启用追踪」且尚未触发过任何分层止盈，则跳过追踪止损
+	if c.config.TrailingStopOnlyAfterFirstScaledTP != nil && *c.config.TrailingStopOnlyAfterFirstScaledTP && len(position.ScaledLevelsTaken) == 0 {
+		return &StopLossSignal{Triggered: false}
+	}
 
 	entryPrice := position.EntryPrice
 	

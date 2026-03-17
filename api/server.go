@@ -13,6 +13,7 @@ import (
 		"nofx/logger"
 		"nofx/manager"
 		"nofx/mcp"
+	"nofx/monitor"
 	"nofx/market"
 	"nofx/provider/alpaca"
 	"nofx/provider/coinank/coinank_api"
@@ -159,6 +160,13 @@ func (s *Server) setupRoutes() {
 			protected.PUT("/traders/:id/competition", s.handleToggleCompetition)
 			protected.GET("/traders/:id/grid-risk", s.handleGetGridRiskInfo)
 
+			// 多空雷达与挂单流程信息（见 api/radar.go）
+			protected.GET("/traders/:id/radar-config", s.handleGetRadarConfig)
+			protected.PUT("/traders/:id/radar-config", s.handlePutRadarConfig)
+			protected.GET("/traders/:id/order-flow-info", s.handleGetOrderFlowInfo)
+			protected.GET("/traders/:id/direction-pool", s.handleGetDirectionPool)
+			protected.GET("/traders/:id/latest-analysis", s.handleGetLatestAnalysis)
+
 			// AI model configuration
 			protected.GET("/models", s.handleGetModelConfigs)
 			protected.PUT("/models", s.handleUpdateModelConfigs)
@@ -197,6 +205,7 @@ func (s *Server) setupRoutes() {
 			protected.GET("/decisions", s.handleDecisions)
 			protected.GET("/decisions/latest", s.handleLatestDecisions)
 			protected.GET("/statistics", s.handleStatistics)
+			protected.GET("/data-statistics", s.handleDataStatistics)
 
 			// Backtest routes
 			backtest := protected.Group("/backtest")
@@ -445,6 +454,8 @@ type CreateTraderRequest struct {
 	StrategyID          string  `json:"strategy_id"` // Strategy ID (new version)
 	InitialBalance      float64 `json:"initial_balance"`
 	ScanIntervalMinutes int     `json:"scan_interval_minutes"`
+	SystemIntervalMinutes int    `json:"system_interval_minutes"` // 0 = same as scan_interval (AI only)
+	SLTPAnalysisIntervalMinutes int `json:"sltp_analysis_interval_minutes"` // 0 = disabled; 1~ scan_interval-1 = SL/TP-only analysis interval
 	IsCrossMargin       *bool   `json:"is_cross_margin"`     // Pointer type, nil means use default value true
 	ShowInCompetition   *bool   `json:"show_in_competition"` // Pointer type, nil means use default value true
 	IsSimulation        *bool   `json:"is_simulation"`      // 实盘模拟：虚拟资金，不发出真实订单；为 true 时 initial_balance 为自定义虚拟初始资金
@@ -601,6 +612,26 @@ func (s *Server) handleCreateTrader(c *gin.Context) {
 	if scanIntervalMinutes < 3 {
 		scanIntervalMinutes = 3 // Default 3 minutes, not allowed to be less than 3
 	}
+	systemIntervalMinutes := req.SystemIntervalMinutes
+	if systemIntervalMinutes < 0 {
+		systemIntervalMinutes = 0
+	}
+	if systemIntervalMinutes > 0 && systemIntervalMinutes >= scanIntervalMinutes {
+		systemIntervalMinutes = 0 // 系统周期须小于 AI 周期，否则视为不分离
+	}
+	if systemIntervalMinutes > 0 && systemIntervalMinutes < 1 {
+		systemIntervalMinutes = 1 // 至少 1 分钟
+	}
+	sltpAnalysisIntervalMinutes := req.SLTPAnalysisIntervalMinutes
+	if sltpAnalysisIntervalMinutes < 0 {
+		sltpAnalysisIntervalMinutes = 0
+	}
+	if sltpAnalysisIntervalMinutes > 0 && sltpAnalysisIntervalMinutes >= scanIntervalMinutes {
+		sltpAnalysisIntervalMinutes = 0 // 须小于主 AI 周期
+	}
+	if sltpAnalysisIntervalMinutes > 0 && sltpAnalysisIntervalMinutes < 1 {
+		sltpAnalysisIntervalMinutes = 1
+	}
 
 	// 实盘模拟：使用自定义虚拟资金，不查询交易所
 	isSimulation := req.IsSimulation != nil && *req.IsSimulation
@@ -745,9 +776,11 @@ func (s *Server) handleCreateTrader(c *gin.Context) {
 		SystemPromptTemplate: systemPromptTemplate,
 		IsCrossMargin:        isCrossMargin,
 		ShowInCompetition:    showInCompetition,
-		ScanIntervalMinutes:  scanIntervalMinutes,
-		IsRunning:            false,
-		IsSimulation:         isSimulation,
+		ScanIntervalMinutes:        scanIntervalMinutes,
+		SystemIntervalMinutes:      systemIntervalMinutes,
+		SLTPAnalysisIntervalMinutes: sltpAnalysisIntervalMinutes,
+		IsRunning:                  false,
+		IsSimulation:          isSimulation,
 	}
 
 	// Save to database
@@ -787,8 +820,10 @@ type UpdateTraderRequest struct {
 	StrategyID          string  `json:"strategy_id"` // Strategy ID (new version)
 	InitialBalance      float64 `json:"initial_balance"`
 	ScanIntervalMinutes int     `json:"scan_interval_minutes"`
-	IsCrossMargin       *bool   `json:"is_cross_margin"`
-	ShowInCompetition   *bool   `json:"show_in_competition"`
+	SystemIntervalMinutes      int    `json:"system_interval_minutes"`
+	SLTPAnalysisIntervalMinutes int   `json:"sltp_analysis_interval_minutes"`
+	IsCrossMargin             *bool   `json:"is_cross_margin"`
+	ShowInCompetition         *bool   `json:"show_in_competition"`
 	// The following fields are kept for backward compatibility, new version uses strategy config
 	BTCETHLeverage       int    `json:"btc_eth_leverage"`
 	AltcoinLeverage      int    `json:"altcoin_leverage"`
@@ -851,6 +886,22 @@ func (s *Server) handleUpdateTrader(c *gin.Context) {
 		scanIntervalMinutes = 3
 	}
 	logger.Infof("📊 Final scan_interval_minutes: %d", scanIntervalMinutes)
+	systemIntervalMinutes := req.SystemIntervalMinutes
+	if systemIntervalMinutes < 0 {
+		systemIntervalMinutes = existingTrader.SystemIntervalMinutes
+	} else if systemIntervalMinutes > 0 && systemIntervalMinutes >= scanIntervalMinutes {
+		systemIntervalMinutes = 0
+	} else if systemIntervalMinutes > 0 && systemIntervalMinutes < 1 {
+		systemIntervalMinutes = 1
+	}
+	sltpAnalysisIntervalMinutes := req.SLTPAnalysisIntervalMinutes
+	if sltpAnalysisIntervalMinutes < 0 {
+		sltpAnalysisIntervalMinutes = existingTrader.SLTPAnalysisIntervalMinutes
+	} else if sltpAnalysisIntervalMinutes > 0 && sltpAnalysisIntervalMinutes >= scanIntervalMinutes {
+		sltpAnalysisIntervalMinutes = 0
+	} else if sltpAnalysisIntervalMinutes > 0 && sltpAnalysisIntervalMinutes < 1 {
+		sltpAnalysisIntervalMinutes = 1
+	}
 
 	// Set system prompt template
 	systemPromptTemplate := req.SystemPromptTemplate
@@ -866,23 +917,25 @@ func (s *Server) handleUpdateTrader(c *gin.Context) {
 
 	// Update trader configuration
 	traderRecord := &store.Trader{
-		ID:                   traderID,
-		UserID:               userID,
-		Name:                 req.Name,
-		AIModelID:            req.AIModelID,
-		ExchangeID:           req.ExchangeID,
-		StrategyID:           strategyID, // Associated strategy ID
-		InitialBalance:       req.InitialBalance,
-		BTCETHLeverage:       btcEthLeverage,
-		AltcoinLeverage:      altcoinLeverage,
-		TradingSymbols:       req.TradingSymbols,
-		CustomPrompt:         req.CustomPrompt,
-		OverrideBasePrompt:   req.OverrideBasePrompt,
-		SystemPromptTemplate: systemPromptTemplate,
-		IsCrossMargin:        isCrossMargin,
-		ShowInCompetition:    showInCompetition,
-		ScanIntervalMinutes:  scanIntervalMinutes,
-		IsRunning:            existingTrader.IsRunning, // Keep original value
+		ID:                    traderID,
+		UserID:                userID,
+		Name:                  req.Name,
+		AIModelID:             req.AIModelID,
+		ExchangeID:            req.ExchangeID,
+		StrategyID:            strategyID, // Associated strategy ID
+		InitialBalance:        req.InitialBalance,
+		BTCETHLeverage:        btcEthLeverage,
+		AltcoinLeverage:       altcoinLeverage,
+		TradingSymbols:        req.TradingSymbols,
+		CustomPrompt:          req.CustomPrompt,
+		OverrideBasePrompt:    req.OverrideBasePrompt,
+		SystemPromptTemplate:  systemPromptTemplate,
+		IsCrossMargin:         isCrossMargin,
+		ShowInCompetition:     showInCompetition,
+		ScanIntervalMinutes:        scanIntervalMinutes,
+		SystemIntervalMinutes:      systemIntervalMinutes,
+		SLTPAnalysisIntervalMinutes: sltpAnalysisIntervalMinutes,
+		IsRunning:                  existingTrader.IsRunning, // Keep original value
 	}
 
 	// Check if trader was running before update (we'll restart it after)
@@ -2208,8 +2261,10 @@ func (s *Server) handleGetTraderConfig(c *gin.Context) {
 		"exchange_id":           traderConfig.ExchangeID,
 		"strategy_id":           traderConfig.StrategyID,
 		"initial_balance":       traderConfig.InitialBalance,
-		"scan_interval_minutes": traderConfig.ScanIntervalMinutes,
-		"btc_eth_leverage":      traderConfig.BTCETHLeverage,
+		"scan_interval_minutes":   traderConfig.ScanIntervalMinutes,
+		"system_interval_minutes": traderConfig.SystemIntervalMinutes,
+		"sltp_analysis_interval_minutes": traderConfig.SLTPAnalysisIntervalMinutes,
+		"btc_eth_leverage":       traderConfig.BTCETHLeverage,
 		"altcoin_leverage":      traderConfig.AltcoinLeverage,
 		"trading_symbols":       traderConfig.TradingSymbols,
 		"custom_prompt":         traderConfig.CustomPrompt,
@@ -2224,7 +2279,7 @@ func (s *Server) handleGetTraderConfig(c *gin.Context) {
 }
 
 // handleStatus System status (实盘或实盘模拟)
-// 约定：与实盘模拟看板相关的接口更新（如重试、缓存）需同时适用于实盘；仅「交易员未在内存时的回退」为模拟专用
+// 约定：实盘与实盘模拟共用同一套周期、提示词与看板逻辑，任何接口/字段更新需同时适用于两者；仅「交易员未在内存时的回退」为模拟专用
 func (s *Server) handleStatus(c *gin.Context) {
 	userID := c.GetString("user_id")
 	_, traderID, err := s.getTraderFromQuery(c)
@@ -2246,12 +2301,14 @@ func (s *Server) handleStatus(c *gin.Context) {
 	if isSimulation {
 		// 模拟交易员未启动：返回 DB 静态信息
 		c.JSON(http.StatusOK, gin.H{
-			"trader_id":       traderRecord.ID,
-			"trader_name":    traderRecord.Name,
-			"ai_model":       traderRecord.AIModelID,
-			"is_running":     traderRecord.IsRunning,
+			"trader_id":    traderRecord.ID,
+			"trader_name":  traderRecord.Name,
+			"ai_model":     traderRecord.AIModelID,
+			"is_running":   traderRecord.IsRunning,
 			"initial_balance": traderRecord.InitialBalance,
-			"scan_interval":  fmt.Sprintf("%dm", traderRecord.ScanIntervalMinutes),
+			"scan_interval": fmt.Sprintf("%dm", traderRecord.ScanIntervalMinutes),
+			"system_interval_minutes": traderRecord.SystemIntervalMinutes,
+			"sltp_analysis_interval_minutes": traderRecord.SLTPAnalysisIntervalMinutes,
 		})
 		return
 	}
@@ -3384,6 +3441,13 @@ func (s *Server) handleStatistics(c *gin.Context) {
 	SafeNotFound(c, "Trader")
 }
 
+// handleDataStatistics 返回数据调用统计：目录（按数据源分类）、按源/流程汇总、最近调用详情。可选 query: trader_id 筛选该交易员。
+func (s *Server) handleDataStatistics(c *gin.Context) {
+	traderID := strings.TrimSpace(c.Query("trader_id"))
+	resp := monitor.GetDataStats(traderID)
+	c.JSON(http.StatusOK, resp)
+}
+
 // handleCompetition Competition overview (compare all traders)
 func (s *Server) handleCompetition(c *gin.Context) {
 	userID := c.GetString("user_id")
@@ -3560,29 +3624,9 @@ func (s *Server) handleRegister(c *gin.Context) {
 		return
 	}
 
-	// Check if email already exists (must check before maxUsers to allow incomplete OTP users)
-	existingUser, err := s.store.User().GetByEmail(req.Email)
+	// Check if email already exists
+	_, err := s.store.User().GetByEmail(req.Email)
 	if err == nil {
-		// User exists, check OTP verification status
-		if !existingUser.OTPVerified {
-			// OTP not verified, verify password first for security
-			if !auth.CheckPassword(req.Password, existingUser.PasswordHash) {
-				c.JSON(http.StatusUnauthorized, gin.H{"error": "Email or password incorrect"})
-				return
-			}
-			// Password correct, allow user to continue OTP setup
-			// Return existing OTP information
-			qrCodeURL := auth.GetOTPQRCodeURL(existingUser.OTPSecret, req.Email)
-			c.JSON(http.StatusOK, gin.H{
-				"user_id":     existingUser.ID,
-				"email":       existingUser.Email,
-				"otp_secret":  existingUser.OTPSecret,
-				"qr_code_url": qrCodeURL,
-				"message":     "Incomplete registration detected, please continue OTP setup",
-			})
-			return
-		}
-		// OTP already verified, reject duplicate registration
 		c.JSON(http.StatusConflict, gin.H{"error": "Email already registered"})
 		return
 	}
@@ -3608,21 +3652,14 @@ func (s *Server) handleRegister(c *gin.Context) {
 		return
 	}
 
-	// Generate OTP secret
-	otpSecret, err := auth.GenerateOTPSecret()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "OTP secret generation failed"})
-		return
-	}
-
-	// Create user (unverified OTP status)
+	// Create user (OTP disabled: no secret, marked verified so login works without OTP)
 	userID := uuid.New().String()
 	user := &store.User{
 		ID:           userID,
 		Email:        req.Email,
 		PasswordHash: passwordHash,
-		OTPSecret:    otpSecret,
-		OTPVerified:  false,
+		OTPSecret:    "",
+		OTPVerified:  true,
 	}
 
 	err = s.store.User().Create(user)
@@ -3632,14 +3669,17 @@ func (s *Server) handleRegister(c *gin.Context) {
 		return
 	}
 
-	// Return OTP setup information
-	qrCodeURL := auth.GetOTPQRCodeURL(otpSecret, req.Email)
+	// Issue JWT so user is logged in immediately (no OTP step)
+	token, err := auth.GenerateJWT(userID, req.Email)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Registration succeeded but token generation failed"})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
-		"user_id":     userID,
-		"email":       req.Email,
-		"otp_secret":  otpSecret,
-		"qr_code_url": qrCodeURL,
-		"message":     "Please scan the QR code with Google Authenticator and verify OTP",
+		"token":   token,
+		"user_id": userID,
+		"email":   req.Email,
+		"message": "Registration completed",
 	})
 }
 
@@ -3721,27 +3761,17 @@ func (s *Server) handleLogin(c *gin.Context) {
 		return
 	}
 
-	// Check if OTP is verified
-	if !user.OTPVerified {
-		// Return OTP info so user can complete setup
-		qrCodeURL := auth.GetOTPQRCodeURL(user.OTPSecret, user.Email)
-		c.JSON(http.StatusOK, gin.H{
-			"user_id":            user.ID,
-			"email":              user.Email,
-			"otp_secret":         user.OTPSecret,
-			"qr_code_url":        qrCodeURL,
-			"requires_otp_setup": true,
-			"message":            "Please complete OTP setup first",
-		})
+	// OTP disabled: issue JWT directly after password verification
+	token, err := auth.GenerateJWT(user.ID, user.Email)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
 		return
 	}
-
-	// Return status requiring OTP verification
 	c.JSON(http.StatusOK, gin.H{
-		"user_id":      user.ID,
-		"email":        user.Email,
-		"message":      "Please enter Google Authenticator code",
-		"requires_otp": true,
+		"token":   token,
+		"user_id": user.ID,
+		"email":   user.Email,
+		"message": "Login successful",
 	})
 }
 
@@ -3785,12 +3815,11 @@ func (s *Server) handleVerifyOTP(c *gin.Context) {
 	})
 }
 
-// handleResetPassword Reset password (via email + OTP verification)
+// handleResetPassword Reset password (OTP verification disabled: email + new password only)
 func (s *Server) handleResetPassword(c *gin.Context) {
 	var req struct {
 		Email       string `json:"email" binding:"required,email"`
 		NewPassword string `json:"new_password" binding:"required,min=6"`
-		OTPCode     string `json:"otp_code" binding:"required"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -3802,12 +3831,6 @@ func (s *Server) handleResetPassword(c *gin.Context) {
 	user, err := s.store.User().GetByEmail(req.Email)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Email does not exist"})
-		return
-	}
-
-	// Verify OTP
-	if !auth.VerifyOTP(user.OTPSecret, req.OTPCode) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Google Authenticator code error"})
 		return
 	}
 

@@ -27,6 +27,10 @@ type Trader struct {
 	StrategyID          string    `gorm:"column:strategy_id;default:''" json:"strategy_id"`
 	InitialBalance      float64   `gorm:"column:initial_balance;not null" json:"initial_balance"`
 	ScanIntervalMinutes int       `gorm:"column:scan_interval_minutes;default:3" json:"scan_interval_minutes"`
+	// SystemIntervalMinutes 系统周期（数据/方向池/开仓/止盈止损）间隔；0=与 AI 周期一致（仅用 scan_interval_minutes）
+	SystemIntervalMinutes int     `gorm:"column:system_interval_minutes;default:0" json:"system_interval_minutes"`
+	// SLTPAnalysisIntervalMinutes 持仓止盈止损专用 AI 分析周期（分钟）；0=不启用，仅用主 AI 周期的分析
+	SLTPAnalysisIntervalMinutes int `gorm:"column:sltp_analysis_interval_minutes;default:0" json:"sltp_analysis_interval_minutes"`
 	IsRunning           bool      `gorm:"column:is_running;default:false" json:"is_running"`
 	IsCrossMargin       bool      `gorm:"column:is_cross_margin;default:true" json:"is_cross_margin"`
 	ShowInCompetition   bool      `gorm:"column:show_in_competition;default:true" json:"show_in_competition"`
@@ -58,12 +62,23 @@ type TraderFullConfig struct {
 	Strategy *Strategy
 }
 
+// RadarConfigRow 多空雷达配置持久化表
+type RadarConfigRow struct {
+	TraderID   string    `gorm:"column:trader_id;primaryKey" json:"trader_id"`
+	ConfigJSON string    `gorm:"column:config_json;type:text" json:"config_json"`
+	UpdatedAt  time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+}
+
+func (RadarConfigRow) TableName() string { return "radar_configs" }
+
 func (s *TraderStore) initTables() error {
 	// For PostgreSQL with existing table, skip AutoMigrate
 	if s.db.Dialector.Name() == "postgres" {
 		var tableExists int64
 		s.db.Raw(`SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'traders'`).Scan(&tableExists)
 		if tableExists > 0 {
+			// 仍需确保 radar_configs 存在
+			_ = s.db.AutoMigrate(&RadarConfigRow{})
 			return nil
 		}
 	}
@@ -71,7 +86,32 @@ func (s *TraderStore) initTables() error {
 	if err := s.db.AutoMigrate(&Trader{}); err != nil {
 		return fmt.Errorf("failed to migrate traders table: %w", err)
 	}
+	if err := s.db.AutoMigrate(&RadarConfigRow{}); err != nil {
+		return fmt.Errorf("failed to migrate radar_configs table: %w", err)
+	}
 	return nil
+}
+
+// GetRadarConfigBytes 读取多空雷达配置 JSON，不存在返回 nil, nil
+func (s *TraderStore) GetRadarConfigBytes(traderID string) ([]byte, error) {
+	var row RadarConfigRow
+	err := s.db.Where("trader_id = ?", traderID).First(&row).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if row.ConfigJSON == "" {
+		return nil, nil
+	}
+	return []byte(row.ConfigJSON), nil
+}
+
+// PutRadarConfigBytes 写入多空雷达配置 JSON
+func (s *TraderStore) PutRadarConfigBytes(traderID string, data []byte) error {
+	row := RadarConfigRow{TraderID: traderID, ConfigJSON: string(data)}
+	return s.db.Save(&row).Error
 }
 
 // Create creates trader
@@ -128,6 +168,8 @@ func (s *TraderStore) Update(trader *Trader) error {
 	} else {
 		fmt.Printf("⚠️ TraderStore.Update: scan_interval_minutes=%d (<=0, NOT updating)\n", trader.ScanIntervalMinutes)
 	}
+	updates["system_interval_minutes"] = trader.SystemIntervalMinutes
+	updates["sltp_analysis_interval_minutes"] = trader.SLTPAnalysisIntervalMinutes
 
 	return s.db.Model(&Trader{}).
 		Where("id = ? AND user_id = ?", trader.ID, trader.UserID).

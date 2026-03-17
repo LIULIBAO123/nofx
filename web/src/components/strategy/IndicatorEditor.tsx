@@ -4,6 +4,9 @@ import type { IndicatorConfig } from '../../types'
 // Default NofxOS API Key
 const DEFAULT_NOFXOS_API_KEY = 'cm_568c67eae410d912c54c'
 
+// KeyStore 代理 Coinglass 预设 Base URL（文档 4.2：显式 V4 推荐）
+const DEFAULT_KEYSTORE_COINGLASS_PROXY_URL = 'https://www.keystore.com.cn/api/v1/proxy/coinglass/v4'
+
 interface IndicatorEditorProps {
   config: IndicatorConfig
   onChange: (config: IndicatorConfig) => void
@@ -527,6 +530,138 @@ export function IndicatorEditor({
                   </div>
                 )}
               </div>
+            </div>
+
+            {/* 币安衍生数据（多空比、资金费率、Taker）— 以币安为主，无需 API Key */}
+            <div
+              className="flex items-center justify-between gap-2 p-3 rounded-lg cursor-pointer transition-colors"
+              style={{
+                background: (config.enable_binance_long_short_ratio || config.enable_binance_funding_history || config.enable_binance_taker_volume) ? 'rgba(234, 179, 8, 0.08)' : 'rgba(30, 35, 41, 0.5)',
+                border: (config.enable_binance_long_short_ratio || config.enable_binance_funding_history || config.enable_binance_taker_volume) ? '1px solid rgba(234, 179, 8, 0.25)' : '1px solid rgba(43, 49, 57, 0.5)',
+              }}
+              onClick={() => !disabled && onChange({
+                ...config,
+                enable_binance_long_short_ratio: !(config.enable_binance_long_short_ratio ?? false),
+                enable_binance_funding_history: !(config.enable_binance_funding_history ?? false),
+                enable_binance_taker_volume: !(config.enable_binance_taker_volume ?? false),
+                ...(!(config.enable_binance_long_short_ratio ?? false) && !config.binance_long_short_period ? { binance_long_short_period: '15m', binance_taker_period: '15m' } : {}),
+              })}
+            >
+              <div>
+                <span className="text-xs font-medium" style={{ color: '#EAECEF' }}>
+                  {language === 'zh' ? '币安衍生数据' : 'Binance derivatives'}
+                </span>
+                <p className="text-[10px] mt-0.5" style={{ color: '#5E6673' }}>
+                  {language === 'zh' ? '多空比、资金费率、Taker 买卖比（公开接口，无需 Key）' : 'L/S ratio, funding, taker (public API)'}
+                </p>
+              </div>
+              <input
+                type="checkbox"
+                checked={!!(config.enable_binance_long_short_ratio || config.enable_binance_funding_history || config.enable_binance_taker_volume)}
+                onChange={(e) => {
+                  const on = e.target.checked
+                  onChange({
+                    ...config,
+                    enable_binance_long_short_ratio: on,
+                    enable_binance_funding_history: on,
+                    enable_binance_taker_volume: on,
+                    ...(on && !config.binance_long_short_period ? { binance_long_short_period: '15m', binance_taker_period: '15m' } : {}),
+                  })
+                }}
+                disabled={disabled}
+                className="w-3.5 h-3.5 rounded accent-amber-500"
+              />
+            </div>
+
+            {/* 数据补强：资金费率历史、Basis、BTC 占比、币安 WS 强平、CoinAnk 清算 */}
+            <div className="mt-3 p-3 rounded-lg space-y-2" style={{ background: 'rgba(30, 35, 41, 0.5)', border: '1px solid rgba(43, 49, 57, 0.5)' }}>
+              <div className="text-xs font-medium mb-2" style={{ color: '#848E9C' }}>
+                {language === 'zh' ? '数据补强（可选）' : 'Data strengthening (optional)'}
+              </div>
+              <div className="flex flex-wrap gap-3">
+                {[
+                  { key: 'enable_binance_funding_rate_history' as const, label: language === 'zh' ? '资金费率 8h 均值' : 'Funding 8h avg' },
+                  { key: 'enable_basis' as const, label: language === 'zh' ? '永续-现货 Basis' : 'Basis' },
+                  { key: 'enable_btc_dominance' as const, label: language === 'zh' ? 'BTC 占比' : 'BTC dominance' },
+                  { key: 'enable_binance_ws_force_order' as const, label: language === 'zh' ? '币安 WS 强平' : 'Binance WS liquidation' },
+                  { key: 'enable_coinank_liquidation' as const, label: language === 'zh' ? 'CoinAnk 清算' : 'CoinAnk liquidation' },
+                  { key: 'enable_coinglass_data' as const, label: language === 'zh' ? 'Coinglass 中转站' : 'Coinglass proxy' },
+                ].map(({ key, label }) => (
+                  <label key={key} className="flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={!!(config[key] ?? false)}
+                      onChange={(e) => !disabled && onChange({ ...config, [key]: e.target.checked })}
+                      disabled={disabled}
+                      className="w-3.5 h-3.5 rounded accent-amber-500"
+                    />
+                    <span className="text-[10px]" style={{ color: '#EAECEF' }}>{label}</span>
+                  </label>
+                ))}
+              </div>
+              {config.enable_coinank_liquidation && (
+                <div className="flex flex-col gap-1.5 mt-2">
+                  <input
+                    type="text"
+                    placeholder={language === 'zh' ? 'CoinAnk API Key（套餐1 含清算统计）' : 'CoinAnk API Key'}
+                    value={config.coinank_api_key ?? ''}
+                    onChange={(e) => !disabled && onChange({ ...config, coinank_api_key: e.target.value })}
+                    disabled={disabled}
+                    className="px-2 py-1 rounded text-[10px] w-full"
+                    style={{ background: '#1E2329', border: '1px solid #2B3139', color: '#EAECEF' }}
+                  />
+                  <input
+                    type="text"
+                    placeholder={language === 'zh' ? 'CoinAnk URL（可选，默认 open-api.coinank.com）' : 'CoinAnk URL (optional)'}
+                    value={config.coinank_url ?? ''}
+                    onChange={(e) => !disabled && onChange({ ...config, coinank_url: e.target.value })}
+                    disabled={disabled}
+                    className="px-2 py-1 rounded text-[10px] w-full"
+                    style={{ background: '#1E2329', border: '1px solid #2B3139', color: '#EAECEF' }}
+                  />
+                </div>
+              )}
+              {config.enable_coinglass_data && (
+                <div className="flex flex-col gap-1.5 mt-2">
+                  <input
+                    type="text"
+                    placeholder={DEFAULT_KEYSTORE_COINGLASS_PROXY_URL}
+                    value={config.coinglass_proxy_url ?? ''}
+                    onChange={(e) => !disabled && onChange({ ...config, coinglass_proxy_url: e.target.value })}
+                    disabled={disabled}
+                    className="px-2 py-1 rounded text-[10px] w-full"
+                    style={{ background: '#1E2329', border: '1px solid #2B3139', color: '#EAECEF' }}
+                  />
+                  <span className="text-[10px]" style={{ color: '#848E9C' }}>
+                    {language === 'zh'
+                      ? 'KeyStore 代理 Base URL：留空使用默认 V4 地址（推荐）；可选 V3：…/v3，自动路由：…/coinglass'
+                      : 'KeyStore proxy Base URL: leave empty for default V4 (recommended); or use …/v3, …/coinglass for auto-route'}
+                  </span>
+                  <label className="flex items-center gap-2 mt-1">
+                    <input
+                      type="checkbox"
+                      checked={!!config.enable_coinglass_wss}
+                      onChange={(e) => !disabled && onChange({ ...config, enable_coinglass_wss: e.target.checked })}
+                      disabled={disabled}
+                    />
+                    <span className="text-[10px]" style={{ color: '#848E9C' }}>
+                      {language === 'zh' ? '启用 WSS 实时（融资率/清算/OI/价格）补强 AI' : 'Enable WSS real-time (funding/liquidation/OI/price) for AI'}
+                    </span>
+                  </label>
+                  <input
+                    type="password"
+                    placeholder={language === 'zh' ? 'KeyStore API Key（X-Api-Key）' : 'KeyStore API Key (X-Api-Key)'}
+                    value={config.coinglass_api_key ?? ''}
+                    onChange={(e) => !disabled && onChange({ ...config, coinglass_api_key: e.target.value })}
+                    disabled={disabled}
+                    className="px-2 py-1 rounded text-[10px] w-full"
+                    style={{ background: '#1E2329', border: '1px solid #2B3139', color: '#EAECEF' }}
+                  />
+                  <span className="text-[10px]" style={{ color: '#848E9C' }}>
+                    {language === 'zh' ? '通过 KeyStore 中转获取 Coinglass 数据（OI/资金费率/强平等），请求格式与官方一致。' : 'Fetch Coinglass data via KeyStore proxy (OI, funding, liquidation, etc.).'}
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* Warning if features enabled but no API key */}

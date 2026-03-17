@@ -381,7 +381,7 @@ func (s *Server) handleGetOptimizedStrategyConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, optimizedConfig)
 }
 
-// handleCreateOptimizedStrategy Create optimized strategy (v2.0) with one click
+// handleCreateOptimizedStrategy Create preset strategy with one click (uses default config: all params and checkboxes at default values)
 func (s *Server) handleCreateOptimizedStrategy(c *gin.Context) {
 	userID := c.GetString("user_id")
 	if userID == "" {
@@ -395,24 +395,24 @@ func (s *Server) handleCreateOptimizedStrategy(c *gin.Context) {
 		lang = "zh"
 	}
 
-	// Get optimized strategy configuration
-	optimizedConfig := store.GetOptimizedStrategyConfig(lang)
+	// Use default strategy configuration so that all parameters and checkboxes are at default values
+	defaultConfig := store.GetDefaultStrategyConfig(lang)
 
 	// Serialize configuration
-	configJSON, err := json.Marshal(optimizedConfig)
+	configJSON, err := json.Marshal(defaultConfig)
 	if err != nil {
 		SafeInternalError(c, "Serialize configuration", err)
 		return
 	}
 
-	// Create strategy name and description based on language (preset v3.0 = 2.5%/6%/10% scaled TP, AI-only entry, 15m primary)
+	// Create strategy name and description: 默认预设 / Default preset
 	var name, description string
 	if lang == "zh" {
-		name = "预设策略 v3.0"
-		description = "一键预设：分批止盈 2.5%/6%/10%、AI 仅开仓+持仓 trend_view、15m 主周期、动态止损止盈"
+		name = "预设策略（默认）"
+		description = "一键生成：全部参数与勾选项为默认值（2.5%/6%/10% 分批止盈、AI 仅开仓、15m 主周期、动态止损止盈）"
 	} else {
-		name = "Preset Strategy v3.0"
-		description = "One-click preset: 2.5%/6%/10% scaled TP, AI-only entry + trend_view, 15m primary, dynamic SL/TP"
+		name = "Preset Strategy (Default)"
+		description = "One-click: all params and options at default (2.5%/6%/10% scaled TP, AI-only entry, 15m primary, dynamic SL/TP)"
 	}
 
 	strategy := &store.Strategy{
@@ -426,18 +426,20 @@ func (s *Server) handleCreateOptimizedStrategy(c *gin.Context) {
 	}
 
 	if err := s.store.Strategy().Create(strategy); err != nil {
-		SafeInternalError(c, "Failed to create optimized strategy", err)
+		SafeInternalError(c, "Failed to create preset strategy", err)
 		return
 	}
 
 	// Validate configuration and collect warnings
-	warnings := validateStrategyConfig(&optimizedConfig)
+	warnings := validateStrategyConfig(&defaultConfig)
 
 	response := gin.H{
 		"id":             strategy.ID,
-		"message":        "Optimized strategy created successfully",
-		"config":         optimizedConfig,
-		"preset_version": "3.0", // 与 GetOptimizedStrategyConfig 一致，便于确认云服务器已更新
+		"name":           strategy.Name,
+		"description":    strategy.Description,
+		"message":        "Preset strategy (default) created successfully",
+		"config":         defaultConfig,
+		"preset_version": "3.0",
 	}
 	if len(warnings) > 0 {
 		response["warnings"] = warnings

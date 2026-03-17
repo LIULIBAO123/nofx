@@ -107,8 +107,16 @@ export function TraderConfigViewModal({
                 value={traderData.is_cross_margin ? '全仓' : '逐仓'}
               />
               <InfoRow
-                label="扫描间隔"
+                label="AI 间隔"
                 value={`${traderData.scan_interval_minutes || 3} 分钟`}
+              />
+              <InfoRow
+                label="系统间隔"
+                value={(traderData.system_interval_minutes ?? 0) > 0 ? `${traderData.system_interval_minutes} 分钟（数据/开仓/止盈止损）` : '与 AI 一致'}
+              />
+              <InfoRow
+                label="止盈止损分析间隔"
+                value={(traderData.sltp_analysis_interval_minutes ?? 0) > 0 ? `${traderData.sltp_analysis_interval_minutes} 分钟（仅持仓 SL/TP 轻量分析）` : '不启用'}
               />
             </div>
           </div>

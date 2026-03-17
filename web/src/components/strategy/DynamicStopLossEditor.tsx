@@ -36,6 +36,8 @@ export function DynamicStopLossEditor({
       trailingPercent: { zh: '允许回撤', en: 'Allowed Drawdown' },
       profitThresholdDesc: { zh: '当盈利达到此百分比时激活该层级', en: 'Activate this level when profit reaches this percentage' },
       trailingPercentDesc: { zh: '该层级允许的最大回撤百分比', en: 'Maximum drawdown allowed at this level' },
+      trailingOnlyAfterFirstScaledTP: { zh: '仅在第一档分层止盈后启用追踪', en: 'Trailing only after first scaled TP' },
+      trailingOnlyAfterFirstScaledTPDesc: { zh: '未触发过任何分层止盈时不启用追踪止损，先让分层止盈有机会触发，避免尚未止盈就被追踪平仓', en: 'Do not use trailing stop until at least one scaled TP level has triggered' },
       
       // ATR Stop - Dynamic Range
       atrStop: { zh: 'ATR 止损（动态区间）', en: 'ATR Stop (Dynamic Range)' },
@@ -351,6 +353,17 @@ export function DynamicStopLossEditor({
 
             {currentConfig.trailing_enabled && (
               <div className="space-y-3 pl-2">
+                <label className="flex items-center gap-2 cursor-pointer text-sm" style={{ color: '#EAECEF' }}>
+                  <input
+                    type="checkbox"
+                    checked={currentConfig.trailing_stop_only_after_first_scaled_tp ?? false}
+                    onChange={(e) => updateField('trailing_stop_only_after_first_scaled_tp', e.target.checked)}
+                    disabled={disabled}
+                    className="rounded border-[#2B3139] bg-[#1E2329] text-[#F0B90B]"
+                  />
+                  <span>{t('trailingOnlyAfterFirstScaledTP')}</span>
+                </label>
+                <p className="text-[10px] leading-relaxed" style={{ color: '#848E9C' }}>{t('trailingOnlyAfterFirstScaledTPDesc')}</p>
                 <div className="flex items-center justify-between mb-3">
                   <span className="text-xs font-semibold" style={{ color: '#848E9C' }}>
                     {t('trailingLevels')}

@@ -1,5 +1,12 @@
 import { Shield, AlertTriangle, TrendingDown, TrendingUp } from 'lucide-react'
-import type { RiskControlConfig } from '../../types'
+import type {
+  DynamicStopLossConfig,
+  DynamicTakeProfitConfig,
+  PositionSizeBucketsConfig,
+  RiskControlConfig,
+  ScaledTakeProfitLevel,
+  TrailingStopLevel,
+} from '../../types'
 import { DynamicStopLossEditor } from './DynamicStopLossEditor'
 import { DynamicTakeProfitEditor } from './DynamicTakeProfitEditor'
 
@@ -44,10 +51,47 @@ export function RiskControlEditor({
       minPositionSizeDesc: { zh: 'USDT 最小名义价值', en: 'Minimum notional value in USDT' },
       minConfidence: { zh: '最小信心度', en: 'Min Confidence' },
       minConfidenceDesc: { zh: 'AI 开仓信心度阈值', en: 'AI confidence threshold for entry' },
+      regimeAdjust: { zh: '按市场状态提高开仓置信度', en: 'Raise min confidence by market regime' },
+      regimeAdjustDesc: { zh: '开启后：当 AI 判定为震荡(ranging)/高波(high_volatility)/反转(reversal) 时，开仓要求的最低置信度将提高为下方设定值，减少在不利市况下开仓。', en: 'When on: in ranging/high_volatility/reversal, required min confidence is raised to values below.' },
+      regimeRanging: { zh: '震荡 (ranging)', en: 'Ranging' },
+      regimeHighVol: { zh: '高波动 (high_volatility)', en: 'High volatility' },
+      regimeReversal: { zh: '反转 (reversal)', en: 'Reversal' },
       aiOnlyEntry: { zh: 'AI 仅开仓', en: 'AI Only Entry' },
       aiOnlyEntryDesc: { zh: '开启后：AI 只负责预测与开仓；平仓完全由策略（动态止损/追踪/分层止盈）执行，不执行 AI 的 close 建议。适合震荡市拿住仓、盈利后平仓。', en: 'When on: AI only predicts and opens; strategy handles all exits (dynamic SL/TP, trailing, scaled TP). AI close suggestions are ignored. Suited for ranging markets.' },
+      systemExecutesEntry: { zh: '系统执行开仓', en: 'System Executes Entry' },
+      systemExecutesEntryDesc: { zh: '开启后：AI 仅作辅助，分析量化数据并输出 trend_view；开仓动作由系统根据多层过滤与方向池执行。需同时启用「多层过滤」策略模式。', en: 'When on: AI only assists (analyzes data, trend_view); system executes opens from pipeline. Requires multilayer_filter strategy mode.' },
+      aiPredictOnly: { zh: 'AI 仅预测（系统决策）', en: 'AI Predict Only (System Decides)' },
+      aiPredictOnlyDesc: { zh: '开启后：禁止 AI 输出开平仓，AI 只输出预测（market_regime、scenario、symbol_predictions 等）；开平仓完全由系统根据预测 + 多层过滤/方向池/止盈止损 执行。需在 <analysis> 中输出 symbol_predictions。', en: 'When on: AI must not output open/close; only prediction. System decides all entry/exit from prediction + pipeline + TP/SL. AI must output symbol_predictions in <analysis>.' },
+      allowAiClose: { zh: '允许 AI 平仓/止盈止损', en: 'Allow AI Close / TP-SL' },
+      allowAiCloseDesc: { zh: '开启后：AI 可建议 close_long/close_short；仅当结合历史+实时+预测认为交易与预测不符时，且满足置信度与 exit_reason 约束时才执行。与系统动态止盈止损并存。', en: 'When on: AI can suggest close; only executed when prediction mismatch + confidence and exit_reason constraints met. Coexists with system TP/SL.' },
+      minConfidenceForAiClose: { zh: 'AI 平仓最低置信度', en: 'Min confidence for AI close' },
+      minConfidenceForAiCloseDesc: { zh: 'AI 建议平仓时仅当 confidence ≥ 此值才执行；0 表示不额外要求', en: 'Execute AI close only when confidence ≥ this; 0 = no extra requirement' },
+      requireExitReasonForAiClose: { zh: '要求填写退出原因', en: 'Require exit_reason' },
+      requireExitReasonForAiCloseDesc: { zh: '仅当 exit_reason 为 take_profit | stop_loss | prediction_mismatch 之一时才执行 AI 平仓', en: 'Execute AI close only when exit_reason is take_profit | stop_loss | prediction_mismatch' },
       dynamicStopLoss: { zh: '动态止损', en: 'Dynamic Stop Loss' },
       dynamicTakeProfit: { zh: '动态止盈', en: 'Dynamic Take Profit' },
+      aiSizingAndProfiles: { zh: 'AI 仓位档位与止盈止损模板', en: 'AI Sizing Buckets & SL/TP Profiles' },
+      aiSizingAndProfilesDesc: { zh: 'AI 只选择档位/模板，系统会根据硬风控裁剪并执行。用于让 AI 参与仓位、分层止盈止损与追踪松紧。', en: 'AI selects buckets/profiles; system enforces hard caps. Lets AI participate in sizing, scaled TP/SL, and trailing aggressiveness.' },
+      posBuckets: { zh: '仓位档位（risk_bucket）', en: 'Position Size Buckets (risk_bucket)' },
+      posBucketsEnabled: { zh: '启用仓位档位', en: 'Enable buckets' },
+      defaultBucket: { zh: '默认档位', en: 'Default bucket' },
+      minBucketConf: { zh: '低信心强制默认档位', en: 'Force default when confidence below' },
+      maxBucket: { zh: '最大允许档位封顶', en: 'Max bucket cap' },
+      bucketRatios: { zh: '档位 → 净值比例', en: 'Bucket → equity ratio' },
+      tpProfiles: { zh: '止盈模板（tp_profile）', en: 'TP Profiles (tp_profile)' },
+      slProfiles: { zh: '止损模板（sl_profile）', en: 'SL Profiles (sl_profile)' },
+      resetProfiles: { zh: '恢复默认模板', en: 'Reset to defaults' },
+      levelProfit: { zh: '盈利阈值(%)', en: 'Profit(%)' },
+      levelClose: { zh: '平仓比例(%)', en: 'Close(%)' },
+      levelMoveBE: { zh: '移动止损到保本', en: 'Move SL to BE' },
+      addLevel: { zh: '新增一档', en: 'Add level' },
+      remove: { zh: '删除', en: 'Remove' },
+      confirmCycles: { zh: '止损确认周期', en: 'SL confirm cycles' },
+      atrMultMin: { zh: 'ATR 倍数最小', en: 'ATR mult min' },
+      atrMultMax: { zh: 'ATR 倍数最大', en: 'ATR mult max' },
+      trailingLevels: { zh: '追踪止损档位', en: 'Trailing levels' },
+      trailingProfit: { zh: '触发盈利(%)', en: 'Profit threshold(%)' },
+      trailingPct: { zh: '追踪回撤(%)', en: 'Trailing percent(%)' },
     }
     return translations[key]?.[language] || key
   }
@@ -59,6 +103,194 @@ export function RiskControlEditor({
     if (!disabled) {
       onChange({ ...config, [key]: value })
     }
+  }
+
+  const defaultBuckets = (): PositionSizeBucketsConfig => ({
+    enabled: true,
+    default_bucket: 'medium',
+    min_bucket_confidence: 70,
+    buckets: { low: 0.003, medium: 0.007, high: 0.012 },
+    max_bucket: 'high',
+  })
+
+  const defaultTPProfiles = (): Record<string, DynamicTakeProfitConfig> => ({
+    tp_conservative: {
+      enabled: true,
+      min_hold_minutes: 10,
+      scaled_enabled: true,
+      scaled_levels: [
+        { profit_percent: 3.0, close_percent: 50, move_stop_to_breakeven: true },
+        { profit_percent: 6.0, close_percent: 100, move_stop_to_breakeven: false },
+      ],
+    },
+    tp_balanced: {
+      enabled: true,
+      min_hold_minutes: 10,
+      scaled_enabled: true,
+      scaled_levels: [
+        { profit_percent: 2.5, close_percent: 25, move_stop_to_breakeven: false },
+        { profit_percent: 6.0, close_percent: 25, move_stop_to_breakeven: true },
+        { profit_percent: 10.0, close_percent: 100, move_stop_to_breakeven: false },
+      ],
+    },
+    tp_aggressive: {
+      enabled: true,
+      min_hold_minutes: 10,
+      scaled_enabled: true,
+      scaled_levels: [
+        { profit_percent: 1.5, close_percent: 30, move_stop_to_breakeven: false },
+        { profit_percent: 3.5, close_percent: 30, move_stop_to_breakeven: true },
+        { profit_percent: 10.0, close_percent: 100, move_stop_to_breakeven: false },
+      ],
+    },
+  })
+
+  const defaultSLProfiles = (): Record<string, DynamicStopLossConfig> => ({
+    sl_tight: {
+      enabled: true,
+      trigger_logic: 'any',
+      min_hold_minutes: 10,
+      initial_stop_percent: 0,
+      trailing_enabled: true,
+      trailing_levels: [
+        { profit_threshold: 2.0, trailing_percent: 1.2 },
+        { profit_threshold: 5.0, trailing_percent: 2.0 },
+      ],
+      atr_enabled: true,
+      atr_multiplier_min: 1.2,
+      atr_multiplier_max: 2.0,
+      confirm_cycles: 1,
+      atr_tolerance_enabled: true,
+      atr_high_multiplier: 1.2,
+      klines_timeframe: '15m',
+      trailing_stop_only_after_first_scaled_tp: true,
+      adverse_exit_when_never_profit_atr: 1.2,
+    },
+    sl_normal: {
+      enabled: true,
+      trigger_logic: 'any',
+      min_hold_minutes: 10,
+      initial_stop_percent: 0,
+      trailing_enabled: true,
+      trailing_levels: [
+        { profit_threshold: 2.5, trailing_percent: 1.5 },
+        { profit_threshold: 6.0, trailing_percent: 2.5 },
+      ],
+      atr_enabled: true,
+      atr_multiplier_min: 1.5,
+      atr_multiplier_max: 2.5,
+      confirm_cycles: 2,
+      atr_tolerance_enabled: true,
+      atr_high_multiplier: 1.2,
+      klines_timeframe: '15m',
+      trailing_stop_only_after_first_scaled_tp: true,
+      adverse_exit_when_never_profit_atr: 1.5,
+    },
+    sl_loose: {
+      enabled: true,
+      trigger_logic: 'any',
+      min_hold_minutes: 10,
+      initial_stop_percent: 0,
+      trailing_enabled: true,
+      trailing_levels: [
+        { profit_threshold: 3.0, trailing_percent: 2.0 },
+        { profit_threshold: 7.0, trailing_percent: 3.0 },
+      ],
+      atr_enabled: true,
+      atr_multiplier_min: 2.0,
+      atr_multiplier_max: 3.2,
+      confirm_cycles: 2,
+      atr_tolerance_enabled: true,
+      atr_high_multiplier: 1.25,
+      klines_timeframe: '15m',
+      trailing_stop_only_after_first_scaled_tp: true,
+      adverse_exit_when_never_profit_atr: 1.8,
+    },
+  })
+
+  const bucketOptions = ['low', 'medium', 'high'] as const
+  const tpProfileKeys = ['tp_conservative', 'tp_balanced', 'tp_aggressive'] as const
+  const slProfileKeys = ['sl_tight', 'sl_normal', 'sl_loose'] as const
+
+  const getBuckets = (): PositionSizeBucketsConfig =>
+    config.position_size_buckets || defaultBuckets()
+
+  const setBuckets = (next: PositionSizeBucketsConfig) =>
+    updateField('position_size_buckets', next)
+
+  const getTPProfiles = (): Record<string, DynamicTakeProfitConfig> =>
+    config.tp_profiles || defaultTPProfiles()
+  const setTPProfiles = (next: Record<string, DynamicTakeProfitConfig>) =>
+    updateField('tp_profiles', next)
+
+  const getSLProfiles = (): Record<string, DynamicStopLossConfig> =>
+    config.sl_profiles || defaultSLProfiles()
+  const setSLProfiles = (next: Record<string, DynamicStopLossConfig>) =>
+    updateField('sl_profiles', next)
+
+  const resetAiProfiles = () => {
+    if (disabled) return
+    updateField('position_size_buckets', defaultBuckets())
+    updateField('tp_profiles', defaultTPProfiles())
+    updateField('sl_profiles', defaultSLProfiles())
+  }
+
+  const updateTPLevel = (
+    key: string,
+    idx: number,
+    patch: Partial<ScaledTakeProfitLevel>
+  ) => {
+    const all = getTPProfiles()
+    const current = all[key] || { enabled: true }
+    const levels = (current.scaled_levels || []).slice()
+    levels[idx] = { ...levels[idx], ...patch }
+    setTPProfiles({ ...all, [key]: { ...current, scaled_levels: levels } })
+  }
+
+  const addTPLevel = (key: string) => {
+    const all = getTPProfiles()
+    const current = all[key] || { enabled: true }
+    const levels = (current.scaled_levels || []).slice()
+    levels.push({ profit_percent: 3, close_percent: 25, move_stop_to_breakeven: false })
+    setTPProfiles({ ...all, [key]: { ...current, scaled_levels: levels, scaled_enabled: true } })
+  }
+
+  const removeTPLevel = (key: string, idx: number) => {
+    const all = getTPProfiles()
+    const current = all[key]
+    if (!current?.scaled_levels) return
+    const levels = current.scaled_levels.slice()
+    levels.splice(idx, 1)
+    setTPProfiles({ ...all, [key]: { ...current, scaled_levels: levels } })
+  }
+
+  const updateTrailingLevel = (
+    key: string,
+    idx: number,
+    patch: Partial<TrailingStopLevel>
+  ) => {
+    const all = getSLProfiles()
+    const current = all[key] || { enabled: true, trigger_logic: 'any', initial_stop_percent: 0 }
+    const levels = (current.trailing_levels || []).slice()
+    levels[idx] = { ...levels[idx], ...patch }
+    setSLProfiles({ ...all, [key]: { ...current, trailing_levels: levels } })
+  }
+
+  const addTrailingLevel = (key: string) => {
+    const all = getSLProfiles()
+    const current = all[key] || { enabled: true, trigger_logic: 'any', initial_stop_percent: 0 }
+    const levels = (current.trailing_levels || []).slice()
+    levels.push({ profit_threshold: 3, trailing_percent: 2 })
+    setSLProfiles({ ...all, [key]: { ...current, trailing_levels: levels, trailing_enabled: true } })
+  }
+
+  const removeTrailingLevel = (key: string, idx: number) => {
+    const all = getSLProfiles()
+    const current = all[key]
+    if (!current?.trailing_levels) return
+    const levels = current.trailing_levels.slice()
+    levels.splice(idx, 1)
+    setSLProfiles({ ...all, [key]: { ...current, trailing_levels: levels } })
   }
 
   return (
@@ -123,6 +355,121 @@ export function RiskControlEditor({
                 className="w-5 h-5 rounded accent-yellow-500"
               />
             </div>
+          </div>
+
+          {/* 系统执行开仓 */}
+          <div
+            className="p-4 rounded-lg"
+            style={{ background: '#0B0E11', border: '1px solid #2B3139' }}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <label className="block text-sm mb-1" style={{ color: '#EAECEF' }}>
+                  {t('systemExecutesEntry')}
+                </label>
+                <p className="text-xs" style={{ color: '#848E9C' }}>
+                  {t('systemExecutesEntryDesc')}
+                </p>
+              </div>
+              <input
+                type="checkbox"
+                checked={!!config.system_executes_entry}
+                onChange={(e) => updateField('system_executes_entry', e.target.checked)}
+                disabled={disabled}
+                className="w-5 h-5 rounded accent-yellow-500"
+              />
+            </div>
+          </div>
+
+          {/* AI 仅预测（系统决策） */}
+          <div
+            className="p-4 rounded-lg"
+            style={{ background: '#0B0E11', border: '1px solid #2B3139' }}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <label className="block text-sm mb-1" style={{ color: '#EAECEF' }}>
+                  {t('aiPredictOnly')}
+                </label>
+                <p className="text-xs" style={{ color: '#848E9C' }}>
+                  {t('aiPredictOnlyDesc')}
+                </p>
+              </div>
+              <input
+                type="checkbox"
+                checked={!!config.ai_predict_only}
+                onChange={(e) => updateField('ai_predict_only', e.target.checked)}
+                disabled={disabled}
+                className="w-5 h-5 rounded accent-yellow-500"
+              />
+            </div>
+          </div>
+
+          {/* 允许 AI 平仓/止盈止损 */}
+          <div
+            className="p-4 rounded-lg"
+            style={{ background: '#0B0E11', border: '1px solid #2B3139' }}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <label className="block text-sm mb-1" style={{ color: '#EAECEF' }}>
+                  {t('allowAiClose')}
+                </label>
+                <p className="text-xs" style={{ color: '#848E9C' }}>
+                  {t('allowAiCloseDesc')}
+                </p>
+              </div>
+              <input
+                type="checkbox"
+                checked={!!config.allow_ai_close}
+                onChange={(e) => updateField('allow_ai_close', e.target.checked)}
+                disabled={disabled}
+                className="w-5 h-5 rounded accent-yellow-500"
+              />
+            </div>
+            {config.allow_ai_close && (
+              <div className="mt-3 pt-3 border-t border-[#2B3139] space-y-2">
+                <div>
+                  <label className="block text-xs mb-1" style={{ color: '#848E9C' }}>
+                    {t('minConfidenceForAiClose')}
+                  </label>
+                  <p className="text-xs mb-1" style={{ color: '#5E6673' }}>
+                    {t('minConfidenceForAiCloseDesc')}
+                  </p>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={config.min_confidence_for_ai_close ?? 70}
+                    onChange={(e) =>
+                      updateField('min_confidence_for_ai_close', parseInt(e.target.value, 10) || 0)
+                    }
+                    disabled={disabled}
+                    className="w-20 px-2 py-1 rounded bg-[#1E2329] border border-[#2B3139] text-sm"
+                    style={{ color: '#EAECEF' }}
+                  />
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <label className="block text-xs mb-1" style={{ color: '#848E9C' }}>
+                      {t('requireExitReasonForAiClose')}
+                    </label>
+                    <p className="text-xs" style={{ color: '#5E6673' }}>
+                      {t('requireExitReasonForAiCloseDesc')}
+                    </p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={config.require_exit_reason_for_ai_close !== false}
+                    onChange={(e) =>
+                      updateField('require_exit_reason_for_ai_close', e.target.checked)
+                    }
+                    disabled={disabled}
+                    className="w-5 h-5 rounded accent-yellow-500"
+                  />
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -413,6 +760,355 @@ export function RiskControlEditor({
                 {config.min_confidence ?? 75}
               </span>
             </div>
+
+            {/* Regime 调节：震荡/高波/反转时提高开仓置信度 */}
+            <div className="mt-4 pt-4 border-t border-[#2B3139]">
+              <label className="flex items-center gap-2 cursor-pointer text-sm" style={{ color: '#EAECEF' }}>
+                <input
+                  type="checkbox"
+                  checked={config.regime_adjust_enabled ?? false}
+                  onChange={(e) => updateField('regime_adjust_enabled', e.target.checked)}
+                  disabled={disabled}
+                  className="rounded accent-yellow-500"
+                />
+                {t('regimeAdjust')}
+              </label>
+              <p className="text-xs mt-1 mb-2" style={{ color: '#848E9C' }}>{t('regimeAdjustDesc')}</p>
+              {(config.regime_adjust_enabled ?? false) && (
+                <div className="grid grid-cols-3 gap-2 text-xs">
+                  {[
+                    { key: 'ranging', label: t('regimeRanging') },
+                    { key: 'high_volatility', label: t('regimeHighVol') },
+                    { key: 'reversal', label: t('regimeReversal') },
+                  ].map(({ key, label }) => (
+                    <div key={key} className="flex items-center gap-2">
+                      <span className="shrink-0" style={{ color: '#848E9C' }}>{label}</span>
+                      <input
+                        type="number"
+                        min={50}
+                        max={100}
+                        value={config.regime_min_confidence_map?.[key] ?? (key === 'ranging' ? 75 : key === 'high_volatility' ? 78 : 80)}
+                        onChange={(e) => {
+                          const v = parseInt(e.target.value, 10) || 0
+                          const map = { ...(config.regime_min_confidence_map ?? {}), [key]: v }
+                          updateField('regime_min_confidence_map', map)
+                        }}
+                        disabled={disabled}
+                        className="w-14 px-2 py-1 rounded"
+                        style={{ background: '#1E2329', border: '1px solid #2B3139', color: '#EAECEF' }}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* AI sizing buckets & SL/TP profiles */}
+      <div>
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <div className="flex items-center gap-2">
+            <Shield className="w-5 h-5" style={{ color: '#F0B90B' }} />
+            <h3 className="font-medium" style={{ color: '#EAECEF' }}>
+              {t('aiSizingAndProfiles')}
+            </h3>
+          </div>
+          <button
+            type="button"
+            onClick={resetAiProfiles}
+            disabled={disabled}
+            className="px-3 py-1.5 rounded text-xs"
+            style={{
+              background: '#1E2329',
+              border: '1px solid #2B3139',
+              color: disabled ? '#5E6673' : '#EAECEF',
+            }}
+          >
+            {t('resetProfiles')}
+          </button>
+        </div>
+        <p className="text-xs mb-4" style={{ color: '#848E9C' }}>
+          {t('aiSizingAndProfilesDesc')}
+        </p>
+
+        {/* Position size buckets */}
+        <div className="p-4 rounded-lg mb-4" style={{ background: '#0B0E11', border: '1px solid #2B3139' }}>
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <div>
+              <div className="text-sm" style={{ color: '#EAECEF' }}>{t('posBuckets')}</div>
+              <div className="text-xs" style={{ color: '#848E9C' }}>{t('bucketRatios')}</div>
+            </div>
+            <label className="flex items-center gap-2 text-xs" style={{ color: '#EAECEF' }}>
+              {t('posBucketsEnabled')}
+              <input
+                type="checkbox"
+                checked={!!getBuckets().enabled}
+                onChange={(e) => setBuckets({ ...getBuckets(), enabled: e.target.checked })}
+                disabled={disabled}
+                className="w-5 h-5 rounded accent-yellow-500"
+              />
+            </label>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4 mb-3">
+            <div>
+              <div className="text-xs mb-1" style={{ color: '#848E9C' }}>{t('defaultBucket')}</div>
+              <select
+                value={getBuckets().default_bucket || 'medium'}
+                onChange={(e) => setBuckets({ ...getBuckets(), default_bucket: e.target.value })}
+                disabled={disabled}
+                className="w-full px-3 py-2 rounded"
+                style={{ background: '#1E2329', border: '1px solid #2B3139', color: '#EAECEF' }}
+              >
+                {bucketOptions.map((b) => (
+                  <option key={b} value={b}>{b}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <div className="text-xs mb-1" style={{ color: '#848E9C' }}>{t('maxBucket')}</div>
+              <select
+                value={getBuckets().max_bucket || 'high'}
+                onChange={(e) => setBuckets({ ...getBuckets(), max_bucket: e.target.value })}
+                disabled={disabled}
+                className="w-full px-3 py-2 rounded"
+                style={{ background: '#1E2329', border: '1px solid #2B3139', color: '#EAECEF' }}
+              >
+                {bucketOptions.map((b) => (
+                  <option key={b} value={b}>{b}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4 mb-3">
+            <div>
+              <div className="text-xs mb-1" style={{ color: '#848E9C' }}>{t('minBucketConf')}</div>
+              <input
+                type="number"
+                value={getBuckets().min_bucket_confidence ?? 70}
+                onChange={(e) => setBuckets({ ...getBuckets(), min_bucket_confidence: parseInt(e.target.value) || 0 })}
+                disabled={disabled}
+                min={0}
+                max={100}
+                className="w-full px-3 py-2 rounded"
+                style={{ background: '#1E2329', border: '1px solid #2B3139', color: '#EAECEF' }}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
+            {bucketOptions.map((b) => (
+              <div key={b}>
+                <div className="text-xs mb-1" style={{ color: '#848E9C' }}>{b}</div>
+                <input
+                  type="number"
+                  value={(getBuckets().buckets?.[b] ?? defaultBuckets().buckets?.[b] ?? 0) as number}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value) || 0
+                    const nextBuckets = { ...(getBuckets().buckets || {}) }
+                    nextBuckets[b] = v
+                    setBuckets({ ...getBuckets(), buckets: nextBuckets })
+                  }}
+                  disabled={disabled}
+                  step={0.001}
+                  min={0}
+                  className="w-full px-3 py-2 rounded"
+                  style={{ background: '#1E2329', border: '1px solid #2B3139', color: '#EAECEF' }}
+                />
+                <div className="text-[11px] mt-1" style={{ color: '#5E6673' }}>
+                  equity × {((getBuckets().buckets?.[b] ?? 0) * 100).toFixed(2)}%
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* TP profiles */}
+        <div className="p-4 rounded-lg mb-4" style={{ background: '#0B0E11', border: '1px solid #2B3139' }}>
+          <div className="text-sm mb-3" style={{ color: '#EAECEF' }}>{t('tpProfiles')}</div>
+          <div className="space-y-4">
+            {tpProfileKeys.map((k) => {
+              const prof = getTPProfiles()[k] || defaultTPProfiles()[k]
+              const levels = prof.scaled_levels || []
+              return (
+                <div key={k} className="p-3 rounded" style={{ background: '#1E2329', border: '1px solid #2B3139' }}>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="text-xs font-mono" style={{ color: '#F0B90B' }}>{k}</div>
+                    <button
+                      type="button"
+                      onClick={() => addTPLevel(k)}
+                      disabled={disabled}
+                      className="px-2 py-1 rounded text-xs"
+                      style={{ background: '#0B0E11', border: '1px solid #2B3139', color: '#EAECEF' }}
+                    >
+                      {t('addLevel')}
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-12 gap-2 text-xs mb-1" style={{ color: '#848E9C' }}>
+                    <div className="col-span-3">{t('levelProfit')}</div>
+                    <div className="col-span-3">{t('levelClose')}</div>
+                    <div className="col-span-4">{t('levelMoveBE')}</div>
+                    <div className="col-span-2">{t('remove')}</div>
+                  </div>
+                  {levels.map((lv, idx) => (
+                    <div key={idx} className="grid grid-cols-12 gap-2 items-center mb-2">
+                      <input
+                        type="number"
+                        value={lv.profit_percent ?? 0}
+                        onChange={(e) => updateTPLevel(k, idx, { profit_percent: parseFloat(e.target.value) || 0 })}
+                        disabled={disabled}
+                        className="col-span-3 px-2 py-1 rounded text-xs"
+                        style={{ background: '#0B0E11', border: '1px solid #2B3139', color: '#EAECEF' }}
+                      />
+                      <input
+                        type="number"
+                        value={lv.close_percent ?? 0}
+                        onChange={(e) => updateTPLevel(k, idx, { close_percent: parseFloat(e.target.value) || 0 })}
+                        disabled={disabled}
+                        className="col-span-3 px-2 py-1 rounded text-xs"
+                        style={{ background: '#0B0E11', border: '1px solid #2B3139', color: '#EAECEF' }}
+                      />
+                      <label className="col-span-4 flex items-center gap-2 text-xs" style={{ color: '#EAECEF' }}>
+                        <input
+                          type="checkbox"
+                          checked={!!lv.move_stop_to_breakeven}
+                          onChange={(e) => updateTPLevel(k, idx, { move_stop_to_breakeven: e.target.checked })}
+                          disabled={disabled}
+                          className="w-4 h-4 rounded accent-yellow-500"
+                        />
+                        {t('levelMoveBE')}
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => removeTPLevel(k, idx)}
+                        disabled={disabled || levels.length <= 1}
+                        className="col-span-2 px-2 py-1 rounded text-xs"
+                        style={{ background: '#0B0E11', border: '1px solid #2B3139', color: '#EAECEF' }}
+                      >
+                        {t('remove')}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+
+        {/* SL profiles */}
+        <div className="p-4 rounded-lg" style={{ background: '#0B0E11', border: '1px solid #2B3139' }}>
+          <div className="text-sm mb-3" style={{ color: '#EAECEF' }}>{t('slProfiles')}</div>
+          <div className="space-y-4">
+            {slProfileKeys.map((k) => {
+              const prof = getSLProfiles()[k] || defaultSLProfiles()[k]
+              const trailing = prof.trailing_levels || []
+              return (
+                <div key={k} className="p-3 rounded" style={{ background: '#1E2329', border: '1px solid #2B3139' }}>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="text-xs font-mono" style={{ color: '#F6465D' }}>{k}</div>
+                    <button
+                      type="button"
+                      onClick={() => addTrailingLevel(k)}
+                      disabled={disabled}
+                      className="px-2 py-1 rounded text-xs"
+                      style={{ background: '#0B0E11', border: '1px solid #2B3139', color: '#EAECEF' }}
+                    >
+                      {t('addLevel')}
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-3 mb-3">
+                    <div>
+                      <div className="text-xs mb-1" style={{ color: '#848E9C' }}>{t('confirmCycles')}</div>
+                      <input
+                        type="number"
+                        value={prof.confirm_cycles ?? 2}
+                        onChange={(e) => {
+                          const all = getSLProfiles()
+                          setSLProfiles({ ...all, [k]: { ...prof, confirm_cycles: parseInt(e.target.value) || 1 } })
+                        }}
+                        disabled={disabled}
+                        min={1}
+                        max={10}
+                        className="w-full px-2 py-1 rounded text-xs"
+                        style={{ background: '#0B0E11', border: '1px solid #2B3139', color: '#EAECEF' }}
+                      />
+                    </div>
+                    <div>
+                      <div className="text-xs mb-1" style={{ color: '#848E9C' }}>{t('atrMultMin')}</div>
+                      <input
+                        type="number"
+                        value={prof.atr_multiplier_min ?? 1.5}
+                        onChange={(e) => {
+                          const all = getSLProfiles()
+                          setSLProfiles({ ...all, [k]: { ...prof, atr_multiplier_min: parseFloat(e.target.value) || 0 } })
+                        }}
+                        disabled={disabled}
+                        step={0.1}
+                        min={0}
+                        className="w-full px-2 py-1 rounded text-xs"
+                        style={{ background: '#0B0E11', border: '1px solid #2B3139', color: '#EAECEF' }}
+                      />
+                    </div>
+                    <div>
+                      <div className="text-xs mb-1" style={{ color: '#848E9C' }}>{t('atrMultMax')}</div>
+                      <input
+                        type="number"
+                        value={prof.atr_multiplier_max ?? 2.5}
+                        onChange={(e) => {
+                          const all = getSLProfiles()
+                          setSLProfiles({ ...all, [k]: { ...prof, atr_multiplier_max: parseFloat(e.target.value) || 0 } })
+                        }}
+                        disabled={disabled}
+                        step={0.1}
+                        min={0}
+                        className="w-full px-2 py-1 rounded text-xs"
+                        style={{ background: '#0B0E11', border: '1px solid #2B3139', color: '#EAECEF' }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="text-xs mb-2" style={{ color: '#848E9C' }}>{t('trailingLevels')}</div>
+                  <div className="grid grid-cols-12 gap-2 text-xs mb-1" style={{ color: '#848E9C' }}>
+                    <div className="col-span-4">{t('trailingProfit')}</div>
+                    <div className="col-span-4">{t('trailingPct')}</div>
+                    <div className="col-span-4">{t('remove')}</div>
+                  </div>
+                  {trailing.map((lv, idx) => (
+                    <div key={idx} className="grid grid-cols-12 gap-2 items-center mb-2">
+                      <input
+                        type="number"
+                        value={lv.profit_threshold ?? 0}
+                        onChange={(e) => updateTrailingLevel(k, idx, { profit_threshold: parseFloat(e.target.value) || 0 })}
+                        disabled={disabled}
+                        className="col-span-4 px-2 py-1 rounded text-xs"
+                        style={{ background: '#0B0E11', border: '1px solid #2B3139', color: '#EAECEF' }}
+                      />
+                      <input
+                        type="number"
+                        value={lv.trailing_percent ?? 0}
+                        onChange={(e) => updateTrailingLevel(k, idx, { trailing_percent: parseFloat(e.target.value) || 0 })}
+                        disabled={disabled}
+                        className="col-span-4 px-2 py-1 rounded text-xs"
+                        style={{ background: '#0B0E11', border: '1px solid #2B3139', color: '#EAECEF' }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeTrailingLevel(k, idx)}
+                        disabled={disabled || trailing.length <= 1}
+                        className="col-span-4 px-2 py-1 rounded text-xs"
+                        style={{ background: '#0B0E11', border: '1px solid #2B3139', color: '#EAECEF' }}
+                      >
+                        {t('remove')}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )
+            })}
           </div>
         </div>
       </div>

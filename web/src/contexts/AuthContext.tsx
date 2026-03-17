@@ -48,8 +48,7 @@ interface AuthContextType {
   ) => Promise<{ success: boolean; message?: string }>
   resetPassword: (
     email: string,
-    newPassword: string,
-    otpCode: string
+    newPassword: string
   ) => Promise<{ success: boolean; message?: string }>
   logout: () => void
   isLoading: boolean
@@ -123,7 +122,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const data = await response.json()
 
       if (response.ok) {
-        // Check for OTP setup required (incomplete registration)
+        // OTP disabled: backend returns token directly on success
+        if (data.token) {
+          reset401Flag()
+          const userInfo = { id: data.user_id, email: data.email }
+          setToken(data.token)
+          setUser(userInfo)
+          localStorage.setItem('auth_token', data.token)
+          localStorage.setItem('auth_user', JSON.stringify(userInfo))
+          const returnUrl = sessionStorage.getItem('returnUrl')
+          if (returnUrl) {
+            sessionStorage.removeItem('returnUrl')
+            window.history.pushState({}, '', returnUrl)
+            window.dispatchEvent(new PopStateEvent('popstate'))
+          } else {
+            window.history.pushState({}, '', '/traders')
+            window.dispatchEvent(new PopStateEvent('popstate'))
+          }
+          return { success: true }
+        }
+        // Legacy: OTP required (if backend ever returns these again)
         if (data.requires_otp_setup) {
           return {
             success: true,
@@ -135,7 +153,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             email: data.email
           }
         }
-        // Check for OTP verification required (normal login flow)
         if (data.requires_otp) {
           return {
             success: true,
@@ -146,7 +163,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             otpSecret: data.otp_secret
           }
         }
-        // Unexpected success response
         return { success: false, message: '登录响应异常' }
       } else {
         return {
@@ -219,13 +235,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     try {
       const result = await httpClient.post<{
+        token?: string
         user_id: string
-        otp_secret: string
-        qr_code_url: string
-        message: string
+        email: string
+        otp_secret?: string
+        qr_code_url?: string
+        message?: string
       }>('/api/register', requestBody)
 
       if (result.success && result.data) {
+        // OTP disabled: backend returns token directly, log in immediately
+        if (result.data.token) {
+          reset401Flag()
+          const userInfo = { id: result.data.user_id, email: result.data.email }
+          setToken(result.data.token)
+          setUser(userInfo)
+          localStorage.setItem('auth_token', result.data.token)
+          localStorage.setItem('auth_user', JSON.stringify(userInfo))
+          window.history.pushState({}, '', '/traders')
+          window.dispatchEvent(new PopStateEvent('popstate'))
+          return { success: true, message: result.data.message }
+        }
         return {
           success: true,
           userID: result.data.user_id,
@@ -340,11 +370,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
-  const resetPassword = async (
-    email: string,
-    newPassword: string,
-    otpCode: string
-  ) => {
+  const resetPassword = async (email: string, newPassword: string) => {
     try {
       const response = await fetch('/api/reset-password', {
         method: 'POST',
@@ -354,7 +380,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         body: JSON.stringify({
           email,
           new_password: newPassword,
-          otp_code: otpCode,
         }),
       })
 

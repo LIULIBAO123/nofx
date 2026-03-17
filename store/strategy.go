@@ -5,10 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
 	"gorm.io/gorm"
-
-	"nofx/logger"
 )
 
 // StrategyStore strategy storage
@@ -61,6 +58,83 @@ type StrategyConfig struct {
 
 	// Grid trading configuration (only used when StrategyType == "grid_trading")
 	GridConfig *GridStrategyConfig `json:"grid_config,omitempty"`
+
+	// Strategy mode: "classic" (default) or "multilayer_filter" (see docs/多层过滤与方向池策略-设计与部署.md)
+	StrategyMode string `json:"strategy_mode,omitempty"`
+	// Multilayer filter config (first/second/third layer + entry timing); used when StrategyMode == "multilayer_filter"
+	MultilayerFilter *MultilayerFilterConfig `json:"multilayer_filter,omitempty"`
+}
+
+// MultilayerFilterConfig config for multi-layer candidate filtering and entry timing (design: docs/多层过滤与方向池策略-设计与部署.md)
+type MultilayerFilterConfig struct {
+	Enabled           bool                `json:"enabled"`
+	DirectionPoolMode bool                `json:"direction_pool_mode,omitempty"` // optional: AI fills long/short pool only
+	DirectionPool     *DirectionPoolConfig `json:"direction_pool,omitempty"`       // 方向池可选：最低强度、单侧归属、按强度排序
+	Layer1            *Layer1Config       `json:"layer1,omitempty"`
+	Layer2            *Layer2Config       `json:"layer2,omitempty"`
+	Layer3            *Layer3Config       `json:"layer3,omitempty"`
+}
+
+// DirectionPoolConfig 方向池可选配置
+type DirectionPoolConfig struct {
+	// MinStrengthPct 仅将 StrengthPct >= 此值的标的放入方向池；0 表示不过滤
+	MinStrengthPct float64 `json:"min_strength_pct,omitempty"`
+	// SingleSideOnly 为 true 时每标的只归入多空池中强度更高的一侧（按 StrengthPct 比较），避免同标的出现在两侧
+	SingleSideOnly bool `json:"single_side_only,omitempty"`
+	// SortByStrength 为 true 时多/空池按 StrengthPct 降序排列，开仓与 API 展示时优先高强度
+	SortByStrength bool `json:"sort_by_strength,omitempty"`
+	// FilterPoolByLayer2 为 true 时仅 Layer2 达标（因子数、可靠度、入场信心）的标的进入方向池
+	FilterPoolByLayer2 bool `json:"filter_pool_by_layer2,omitempty"`
+	// EnableStrengthSmoothing 为 true 时对 StrengthPct 做短时平滑，减少抖动
+	EnableStrengthSmoothing bool `json:"enable_strength_smoothing,omitempty"`
+	// StrengthSmoothingWeight 平滑权重：smoothed = weight*last + (1-weight)*current，建议 0.6~0.8
+	StrengthSmoothingWeight float64 `json:"strength_smoothing_weight,omitempty"`
+	// StrengthBonusCap 补强加成对 StrengthPct 的上限（0 表示不设限）
+	StrengthBonusCap float64 `json:"strength_bonus_cap,omitempty"`
+	// ReliBonusCap 补强加成对 ReliabilityPct 的上限（0 表示不设限）
+	ReliBonusCap float64 `json:"reli_bonus_cap,omitempty"`
+	// MinStrengthPctToOpen 开仓最低强度：三条件共振后仅当方向池中该标的 StrengthPct >= 此值才允许开仓；0 表示不额外过滤（与进池门槛一致时可用 MinStrengthPct）
+	MinStrengthPctToOpen float64 `json:"min_strength_pct_to_open,omitempty"`
+}
+
+// Layer1Config first layer: N items all pass (or configurable) to enter candidate list
+type Layer1Config struct {
+	RequiredAll               bool              `json:"required_all"`   // if true, all enabled items must pass (when MinItemsToPass==0)
+	MinItemsToPass            int               `json:"min_items_to_pass,omitempty"` // 0=全部通过才过；>0 时至少通过 N 项即过（放宽过滤）
+	MinPeriodsAligned         int               `json:"min_periods_aligned,omitempty"` // 多周期至少一致数：2=三周期(4h/1h/短)至少两周期同向；0=不启用，沿用 long_tf/short_tf 单项
+	Items                     []Layer1Item     `json:"items,omitempty"`
+	MaxSignalAgeMinutes       int               `json:"max_signal_age_minutes,omitempty"` // e.g. 5 for "entry within 5 min"
+	FailClosedWhenDataMissing bool              `json:"fail_closed_when_data_missing,omitempty"` // 依赖数据缺失时视为不通过（默认 false 为原行为）
+}
+
+// Layer1Item single condition in layer1 (e.g. entry_timing, volume_ok, oi_ok, long_tf_aligned, ...)
+type Layer1Item struct {
+	ID      string   `json:"id"`      // e.g. "entry_timing", "volume_ok", "oi_ok"
+	Enabled bool     `json:"enabled"`
+	Allowed []string `json:"allowed,omitempty"` // for entry_timing: ["now","soon"]
+	Value   float64  `json:"value,omitempty"`   // for reliability_min: 0.4
+}
+
+// Layer2Config second layer: min factors + reliability + entry confidence thresholds
+type Layer2Config struct {
+	MinFactors                  int     `json:"min_factors"`                      // e.g. 6
+	ReliabilityThreshold        float64 `json:"reliability_threshold"`            // e.g. 0.67
+	EntryConfidenceThresholdPct float64 `json:"entry_confidence_threshold_pct"`   // e.g. 31
+}
+
+// Layer3Config third layer: final check before order submit (OI aligned, entry timing strength, custom factors, signal age)
+type Layer3Config struct {
+	OIAlignedRequired      bool    `json:"oi_aligned_required"`
+	EntryTimingStrengthMin float64 `json:"entry_timing_strength_min"`
+	CustomFactorsRequired  bool    `json:"custom_factors_required"`
+	MaxSignalAgeMinutes    int     `json:"max_signal_age_minutes"` // e.g. 5
+}
+
+// RealtimePriceConfig use latest price for SL/TP check to better grasp P&L (see 外部交易策略分析)
+type RealtimePriceConfig struct {
+	Enabled               bool   `json:"enabled"`
+	FetchBeforeSLTPCheck bool   `json:"fetch_before_sltp_check"`
+	Source               string `json:"source,omitempty"` // "exchange_mark" or leave empty
 }
 
 // GridStrategyConfig grid trading specific configuration
@@ -183,6 +257,30 @@ type IndicatorConfig struct {
 	EnablePriceRanking   bool   `json:"enable_price_ranking"`             // whether to enable price ranking data
 	PriceRankingDuration string `json:"price_ranking_duration,omitempty"` // durations: "1h" or "1h,4h,24h"
 	PriceRankingLimit    int    `json:"price_ranking_limit,omitempty"`    // number of entries per ranking (default 10)
+
+	// Binance derivatives data (long/short ratio, funding, taker) — 以币安为主增强市场判断
+	EnableBinanceLongShortRatio bool   `json:"enable_binance_long_short_ratio,omitempty"` // 启用币安多空比（全账户+大户）
+	BinanceLongShortPeriod      string `json:"binance_long_short_period,omitempty"`      // 5m, 15m, 1h, 4h（默认 15m）
+	EnableBinanceFundingHistory bool   `json:"enable_binance_funding_history,omitempty"` // 启用币安资金费率历史/当前
+	EnableBinanceTakerVolume    bool   `json:"enable_binance_taker_volume,omitempty"`    // 启用币安 Taker 买卖比
+	BinanceTakerPeriod          string `json:"binance_taker_period,omitempty"`           // 5m, 15m, 1h（默认 15m）
+
+	// 数据补强：资金费率近 8h 均值、永续-现货价差、BTC 占比、爆仓聚合、WS
+	EnableBinanceFundingRateHistory bool `json:"enable_binance_funding_rate_history,omitempty"` // 资金费率历史，算近 8h 均值
+	EnableBasis                     bool `json:"enable_basis,omitempty"`                         // 永续-现货价差 Basis（自算）
+	EnableBTCDominance              bool `json:"enable_btc_dominance,omitempty"`               // BTC 市值占比（CoinGecko）
+	EnableBinanceWSForceOrder       bool `json:"enable_binance_ws_force_order,omitempty"`       // 币安 WS 强平流，本地 1h/4h 聚合
+	// CoinAnk 清算（套餐1 含交易所清算统计 allExchange/intervals；爆仓排行榜需套餐2）
+	EnableCoinAnkLiquidation bool   `json:"enable_coinank_liquidation,omitempty"` // 启用 CoinAnk 清算统计（需 CoinAnk API Key）
+	CoinAnkAPIKey           string `json:"coinank_api_key,omitempty"`           // CoinAnk OpenAPI Key（与 NofxOS 独立）
+	CoinAnkURL              string `json:"coinank_url,omitempty"`               // 如 https://open-api.coinank.com，空则用默认
+
+	// Coinglass 中转站（KeyStore 代理）：通过 KeyStore 获取 Coinglass 市场数据（OI/资金费率/强平/多空比等）
+	EnableCoinglassData      bool   `json:"enable_coinglass_data,omitempty"`       // 是否启用 Coinglass 数据（经 KeyStore 代理）
+	CoinglassProxyURL        string `json:"coinglass_proxy_url,omitempty"`         // KeyStore 代理 Base URL，如 https://www.keystore.com.cn/api/v1/proxy/coinglass/v4
+	CoinglassAPIKey          string `json:"coinglass_api_key,omitempty"`           // KeyStore API Key（请求头 X-Api-Key，由网关消费并注入上游凭证）
+	CoinglassRateLimitPerMin int    `json:"coinglass_rate_limit_per_min,omitempty"` // 中转站每分钟请求上限，如 10；0 表示使用默认 10
+	EnableCoinglassWSS       bool   `json:"enable_coinglass_wss,omitempty"`        // 是否启用 Coinglass WSS 实时推送（融资率/清算/OI/价格），补强 AI 实时与预测
 }
 
 // KlineConfig K-line configuration
@@ -242,9 +340,67 @@ type RiskControlConfig struct {
 	// AI 仅开仓模式：true 时不执行 AI 的 close_long/close_short，平仓完全由策略动态 SL/TP 执行（适应震荡市拿住仓、盈利后平仓）
 	AIOnlyEntry bool `json:"ai_only_entry,omitempty"`
 
+	// 系统执行开仓：true 时 AI 仅作辅助、分析量化数据，不输出 open_long/open_short；开仓动作由系统根据多层过滤/方向池结果执行（需启用 strategy_mode=multilayer_filter）
+	SystemExecutesEntry bool `json:"system_executes_entry,omitempty"`
+
+	// AIPredictOnly: 为 true 时禁止 AI 输出开平仓动作，AI 只输出预测信息（market_regime、scenario、symbol_predictions 等）；开平仓完全由系统根据预测 + 多层过滤/方向池/动态止盈止损 判断执行。与 SystemExecutesEntry 同时生效时，开仓由 pipeline + AI 预测过滤后执行，平仓仅由系统 TP/SL 执行。
+	AIPredictOnly bool `json:"ai_predict_only,omitempty"`
+
+	// AllowAIClose: 当为 true 且 AIOnlyEntry=false 且 AIPredictOnly=false 时，允许执行 AI 的 close_long/close_short 建议（仍保留连续周期确认与置信度门槛）；false 或空 = 仅由动态 SL/TP 负责平仓
+	AllowAIClose bool `json:"allow_ai_close,omitempty"`
+	// MinConfidenceForAIClose: AI 建议平仓/止盈/止损时，仅当 confidence ≥ 此值才执行；0 = 不额外要求
+	MinConfidenceForAIClose int `json:"min_confidence_for_ai_close,omitempty"`
+	// RequireExitReasonForAIClose: 为 true 时，仅当 AI 输出 exit_reason 为 take_profit | stop_loss | prediction_mismatch 之一时才执行平仓（确保基于预测与交易不符的退出）
+	RequireExitReasonForAIClose bool `json:"require_exit_reason_for_ai_close,omitempty"`
+
+	// 额外补强：按 market_regime 提高开仓门槛（震荡/高波/反转时要求更高置信度）
+	RegimeAdjustEnabled    *bool          `json:"regime_adjust_enabled,omitempty"`    // 是否启用 regime 调节 MinConfidence
+	RegimeMinConfidenceMap map[string]int `json:"regime_min_confidence_map,omitempty"` // 如 "ranging"->75, "high_volatility"->78, "reversal"->80；未列出的 regime 用基础 MinConfidence
+
+	// 额外补强：极端资金费率/多空比时限制开仓或提高置信度
+	ExtremeFundingRule *ExtremeFundingRule `json:"extreme_funding_rule,omitempty"`
+
 	// Dynamic Stop Loss & Take Profit
 	DynamicStopLoss   *DynamicStopLossConfig   `json:"dynamic_stop_loss,omitempty"`
 	DynamicTakeProfit *DynamicTakeProfitConfig `json:"dynamic_take_profit,omitempty"`
+
+	// Realtime price: fetch latest mark before SL/TP check to better grasp P&L (optional)
+	RealtimePrice *RealtimePriceConfig `json:"realtime_price,omitempty"`
+
+	// AI参与仓位与分层止盈止损（系统兜底裁剪）
+	PositionSizeBuckets *PositionSizeBucketsConfig `json:"position_size_buckets,omitempty"` // equity 比例档位
+	TPProfiles          map[string]DynamicTakeProfitConfig `json:"tp_profiles,omitempty"`  // 预设分层止盈模板（按名称选择）
+	SLProfiles          map[string]DynamicStopLossConfig   `json:"sl_profiles,omitempty"`  // 预设止损模板（按名称选择）
+}
+
+// PositionSizeBucketsConfig controls discrete equity-ratio sizing buckets for AI to choose.
+// AI must choose bucket name; system maps it to ratio and enforces hard caps (position value ratio, margin, min size).
+type PositionSizeBucketsConfig struct {
+	Enabled             bool               `json:"enabled"`
+	DefaultBucket       string             `json:"default_bucket,omitempty"`        // fallback bucket when AI missing/invalid
+	MinBucketConfidence int                `json:"min_bucket_confidence,omitempty"` // when opening: if AI confidence < this, force DefaultBucket
+	Buckets             map[string]float64 `json:"buckets,omitempty"`               // e.g. {"low":0.003,"medium":0.007,"high":0.012}
+	MaxBucket           string             `json:"max_bucket,omitempty"`            // optional: cap AI bucket at this (e.g. during drawdown)
+}
+
+// ExtremeFundingRule 极端资金费率与多空比时的开仓约束（补强）
+type ExtremeFundingRule struct {
+	Enabled bool `json:"enabled"`
+
+	// 资金费率绝对值超过此阈值（小数，如 0.001 = 0.1%）视为极端
+	FundingThresholdPct float64 `json:"funding_threshold_pct,omitempty"`
+	// 多空比 > LongShortRatioHigh 视为多头过热；< LongShortRatioLow 视为空头过热（如 1.4 与 0.714）
+	LongShortRatioHigh float64 `json:"long_short_ratio_high,omitempty"`
+	LongShortRatioLow  float64 `json:"long_short_ratio_low,omitempty"`
+
+	// 多头过热时是否禁止开多（否则仅提高置信度）
+	BlockOpenLongWhenExcessiveLongs bool `json:"block_open_long_when_excessive_longs,omitempty"`
+	// 空头过热时是否禁止开空
+	BlockOpenShortWhenExcessiveShorts bool `json:"block_open_short_when_excessive_shorts,omitempty"`
+	// 不禁止时：在基础/regime 置信度上再提高的数值（如 10）
+	RaiseConfidenceBy int `json:"raise_confidence_by,omitempty"`
+	// 极端时的最低置信度（如 80），与 RaiseConfidenceBy 取更严
+	MinConfidenceWhenExtreme int `json:"min_confidence_when_extreme,omitempty"`
 }
 
 // DynamicStopLossConfig dynamic stop loss configuration
@@ -260,7 +416,9 @@ type DynamicStopLossConfig struct {
 
 	// Trailing Stop - Tiered Mode
 	TrailingEnabled *bool                `json:"trailing_enabled,omitempty"` // enable trailing stop
-	TrailingLevels  []TrailingStopLevel  `json:"trailing_levels,omitempty"`  // trailing stop levels
+	TrailingLevels  []TrailingStopLevel  `json:"trailing_levels,omitempty"`
+	// TrailingStopOnlyAfterFirstScaledTP 为 true 时，仅当该仓位已触发过至少一档分层止盈后才启用追踪止损，避免尚未兑现止盈就被追踪平仓
+	TrailingStopOnlyAfterFirstScaledTP *bool `json:"trailing_stop_only_after_first_scaled_tp,omitempty"`  // trailing stop levels
 
 	// ATR Stop - Dynamic Range Mode
 	ATREnabled        *bool    `json:"atr_enabled,omitempty"`          // enable ATR stop
@@ -281,6 +439,9 @@ type DynamicStopLossConfig struct {
 	// ATR tolerance: in high volatility use wider stop / extra confirm cycle so we don't stop on noise
 	ATRToleranceEnabled *bool    `json:"atr_tolerance_enabled,omitempty"` // when true, high vol => more tolerant
 	ATRHighMultiplier   *float64 `json:"atr_high_multiplier,omitempty"`   // current ATR > long-term ATR * this = high vol (default 1.2)
+
+	// ScenarioAdjustEnabled: 当 AI 的 scenario= \"reversal\" 时，是否在 ConfirmCycles 基础上额外减少一次确认（加快真反转止损）；false 或空 = 不使用 scenario 影响确认次数
+	ScenarioAdjustEnabled *bool `json:"scenario_adjust_enabled,omitempty"`
 
 	// KlinesTimeframe: timeframe for klines used in SL (ATR, S/R, trailing extremes, adverse exit). "15m" (default) or "1h". 1h reduces 15m noise.
 	KlinesTimeframe string `json:"klines_timeframe,omitempty"` // "15m", "1h"
@@ -365,54 +526,12 @@ func (s *StrategyStore) initTables() error {
 }
 
 func (s *StrategyStore) initDefaultData() error {
-	// 确保存在系统默认策略，且每次启动时用当前代码预设刷新其 config，便于云服务器重新部署后策略自动更新
-	lang := "zh"
-	var existing Strategy
-	err := s.db.Where("is_default = ?", true).First(&existing).Error
-	if err == nil {
-		// 已存在默认策略：用当前预设刷新 config/name/description
-		cfg := GetDefaultStrategyConfig(lang)
-		configJSON, jerr := json.Marshal(cfg)
-		if jerr != nil {
-			return fmt.Errorf("marshal default strategy config: %w", jerr)
-		}
-		existing.Config = string(configJSON)
-		existing.Name = "默认策略"
-		existing.Description = "系统预设（2.5%/6%/10% 分批止盈、AI 仅开仓、15m 主周期），每次部署时自动更新为当前预设"
-		if uerr := s.db.Model(&Strategy{}).Where("id = ? AND is_default = ?", existing.ID, true).
-			Updates(map[string]interface{}{
-				"config":      existing.Config,
-				"name":        existing.Name,
-				"description": existing.Description,
-				"updated_at":  time.Now().UTC(),
-			}).Error; uerr != nil {
-			return fmt.Errorf("update default strategy: %w", uerr)
-		}
-		logger.Infof("✅ 系统默认策略已刷新为当前预设（2.5%%/6%%/10%% 分批止盈、AI 仅开仓、15m 主周期）")
-		return nil
-	}
-	if err != gorm.ErrRecordNotFound {
-		return err
-	}
-	// 不存在则创建系统默认策略
-	cfg := GetDefaultStrategyConfig(lang)
-	configJSON, jerr := json.Marshal(cfg)
-	if jerr != nil {
-		return fmt.Errorf("marshal default strategy config: %w", jerr)
-	}
-	st := &Strategy{
-		ID:          uuid.New().String(),
-		UserID:      "",
-		Name:        "默认策略",
-		Description: "系统预设（2.5%/6%/10% 分批止盈、AI 仅开仓、15m 主周期），每次部署时自动更新为当前预设",
-		IsActive:    false,
-		IsDefault:   true,
-		Config:      string(configJSON),
-	}
-	return s.db.Create(st).Error
+	// 不再自动创建/刷新「默认策略」：用户可删除任意策略，通过「一键生成」用当前代码预设创建新策略（全部参数为预设值）
+	return nil
 }
 
-// GetDefaultStrategyConfig returns the default strategy configuration (preset v3.0) for the given language
+// GetDefaultStrategyConfig returns the default strategy configuration (preset v3.0) for the given language.
+// 用于「一键生成」与「应用预设」：所有参数与勾选项的默认值。
 func GetDefaultStrategyConfig(lang string) StrategyConfig {
 	// Normalize language to "zh" or "en"
 	normalizedLang := "en"
@@ -421,8 +540,9 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 	}
 
 	config := StrategyConfig{
-		Version:  "3.0",
-		Language: normalizedLang,
+		Version:      "3.0",
+		StrategyType: "ai_trading",
+		Language:     normalizedLang,
 		CoinSource: CoinSourceConfig{
 			SourceType: "ai500",
 			UseAI500:   true,
@@ -435,13 +555,15 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 		Indicators: IndicatorConfig{
 			Klines: KlineConfig{
 				PrimaryTimeframe:     "15m",                      // 与「先 4h/1h 定方向再 15m 找入场」一致；建议扫描间隔 5m 或 15m
-				PrimaryCount:         30,
+				PrimaryCount:         60, // 中短期波段：加厚窗口，减少被短时抖动误导
 				LongerTimeframe:      "4h",
 				LongerCount:          10,
 				EnableMultiTimeframe: true,
 				SelectedTimeframes:   []string{"15m", "1h", "4h"},
 				MaxCoinsInPrompt:     8, // 候选写入 prompt 上限，0 时 kernel 用 8
 			},
+			// 多周期非主周期（1h/4h）默认用 compact 输出，避免加厚窗口后 prompt 体量暴涨
+			CompactNonPrimaryTimeframe: true,
 			EnableRawKlines:   true, // Required - raw OHLCV data for AI analysis
 			EnableEMA:         true, // 趋势/结构（EMA20）供 4h/1h 方向与入场判断
 			EnableMACD:        true,
@@ -473,6 +595,22 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 			EnablePriceRanking:   true,
 			PriceRankingDuration: "1h,4h,24h",
 			PriceRankingLimit:    10,
+			// 币安衍生数据（可选，以币安为主增强市场判断）
+			EnableBinanceLongShortRatio: false,
+			BinanceLongShortPeriod:      "15m",
+			EnableBinanceFundingHistory: false,
+			EnableBinanceTakerVolume:    false,
+			BinanceTakerPeriod:          "15m",
+			EnableBinanceFundingRateHistory: false,
+			EnableBasis:                     false,
+			EnableBTCDominance:              false,
+			EnableBinanceWSForceOrder:       false,
+			EnableCoinAnkLiquidation:        false,
+			EnableCoinglassData:             false,
+			CoinglassProxyURL:               "https://www.keystore.com.cn/api/v1/proxy/coinglass/v4",
+			CoinglassAPIKey:                 "",
+			CoinglassRateLimitPerMin:        10,  // 中转站常见限制 10/分钟；0 表示使用默认 10
+			EnableCoinglassWSS:              false,
 		},
 		RiskControl: RiskControlConfig{
 			MaxPositions:                    3,   // Max 3 coins simultaneously (CODE ENFORCED)
@@ -485,6 +623,48 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 			MinRiskRewardRatio:              3.0, // Min 3:1 profit/loss ratio (execution enforced)
 			MinConfidence:                   70,  // Min 70% confidence (AI guided)，平衡机会与质量
 			AIOnlyEntry:                     true, // 平仓由策略 SL/TP 执行；AI 仅开仓 + 持仓 trend_view 区分
+			SystemExecutesEntry:             false, // 默认：由 AI 建议开仓（或用户改为 true 则由方向池系统开仓）
+			AIPredictOnly:                   false, // 默认：关闭；为 true 时 AI 只输出预测，开平仓由系统根据预测+pipeline 执行
+			AllowAIClose:                    false, // 默认：不执行 AI 平仓建议，仅 SL/TP 平仓
+			MinConfidenceForAIClose:          70,    // 启用 AI 平仓时，仅当 confidence≥此值才执行
+			RequireExitReasonForAIClose:     true,  // 启用 AI 平仓时，要求 exit_reason 为 take_profit|stop_loss|prediction_mismatch
+			// 额外补强：regime 调节与极端资金费率/多空比（预设开启：震荡/高波/反转时提高开仓置信度）
+			RegimeAdjustEnabled:    boolPtr(true),
+			RegimeMinConfidenceMap: map[string]int{"ranging": 75, "high_volatility": 78, "reversal": 80},
+			ExtremeFundingRule: &ExtremeFundingRule{
+				Enabled: false, FundingThresholdPct: 0.001, LongShortRatioHigh: 1.4, LongShortRatioLow: 0.714,
+				BlockOpenLongWhenExcessiveLongs: false, BlockOpenShortWhenExcessiveShorts: false,
+				RaiseConfidenceBy: 10, MinConfidenceWhenExtreme: 80,
+			},
+			RealtimePrice: nil, // 默认不启用；启用时设 FetchBeforeSLTPCheck 等
+			PositionSizeBuckets: &PositionSizeBucketsConfig{
+				Enabled:             false, // 默认关闭：由 AI 通过 position_size_usd 设置仓位
+				DefaultBucket:       "medium",
+				MinBucketConfidence: 70,
+				Buckets:             map[string]float64{"low": 0.003, "medium": 0.007, "high": 0.012},
+				MaxBucket:           "high",
+			},
+			TPProfiles: map[string]DynamicTakeProfitConfig{
+				"tp_conservative": {Enabled: true, MinHoldMinutes: 10, ScaledEnabled: boolPtr(true), ScaledLevels: []ScaledTakeProfitLevel{
+					{ProfitPercent: 3.0, ClosePercent: 50, MoveStopToBreakeven: boolPtr(true)},
+					{ProfitPercent: 6.0, ClosePercent: 100, MoveStopToBreakeven: boolPtr(false)},
+				}},
+				"tp_balanced": {Enabled: true, MinHoldMinutes: 10, ScaledEnabled: boolPtr(true), ScaledLevels: []ScaledTakeProfitLevel{
+					{ProfitPercent: 2.5, ClosePercent: 25, MoveStopToBreakeven: boolPtr(false)},
+					{ProfitPercent: 6.0, ClosePercent: 25, MoveStopToBreakeven: boolPtr(true)},
+					{ProfitPercent: 10.0, ClosePercent: 100, MoveStopToBreakeven: boolPtr(false)},
+				}},
+				"tp_aggressive": {Enabled: true, MinHoldMinutes: 10, ScaledEnabled: boolPtr(true), ScaledLevels: []ScaledTakeProfitLevel{
+					{ProfitPercent: 1.5, ClosePercent: 30, MoveStopToBreakeven: boolPtr(false)},
+					{ProfitPercent: 3.5, ClosePercent: 30, MoveStopToBreakeven: boolPtr(true)},
+					{ProfitPercent: 10.0, ClosePercent: 100, MoveStopToBreakeven: boolPtr(false)},
+				}},
+			},
+			SLProfiles: map[string]DynamicStopLossConfig{
+				"sl_tight":  {Enabled: true, TriggerLogic: "any", MinHoldMinutes: 10, InitialStopPercent: 0, TrailingEnabled: boolPtr(true), TrailingLevels: []TrailingStopLevel{{ProfitThreshold: 2.0, TrailingPercent: 1.2}, {ProfitThreshold: 5.0, TrailingPercent: 2.0}}, ATREnabled: boolPtr(true), ATRMultiplierMin: float64Ptr(1.2), ATRMultiplierMax: float64Ptr(2.0), ConfirmCycles: 1, ATRToleranceEnabled: boolPtr(true), ATRHighMultiplier: float64Ptr(1.2), KlinesTimeframe: "15m", TrailingStopOnlyAfterFirstScaledTP: boolPtr(true), AdverseExitWhenNeverProfitATR: float64Ptr(1.2)},
+				"sl_normal": {Enabled: true, TriggerLogic: "any", MinHoldMinutes: 10, InitialStopPercent: 0, TrailingEnabled: boolPtr(true), TrailingLevels: []TrailingStopLevel{{ProfitThreshold: 2.5, TrailingPercent: 1.5}, {ProfitThreshold: 6.0, TrailingPercent: 2.5}}, ATREnabled: boolPtr(true), ATRMultiplierMin: float64Ptr(1.5), ATRMultiplierMax: float64Ptr(2.5), ConfirmCycles: 2, ATRToleranceEnabled: boolPtr(true), ATRHighMultiplier: float64Ptr(1.2), KlinesTimeframe: "15m", TrailingStopOnlyAfterFirstScaledTP: boolPtr(true), AdverseExitWhenNeverProfitATR: float64Ptr(1.5)},
+				"sl_loose":  {Enabled: true, TriggerLogic: "any", MinHoldMinutes: 10, InitialStopPercent: 0, TrailingEnabled: boolPtr(true), TrailingLevels: []TrailingStopLevel{{ProfitThreshold: 3.0, TrailingPercent: 2.0}, {ProfitThreshold: 7.0, TrailingPercent: 3.0}}, ATREnabled: boolPtr(true), ATRMultiplierMin: float64Ptr(2.0), ATRMultiplierMax: float64Ptr(3.2), ConfirmCycles: 2, ATRToleranceEnabled: boolPtr(true), ATRHighMultiplier: float64Ptr(1.25), KlinesTimeframe: "15m", TrailingStopOnlyAfterFirstScaledTP: boolPtr(true), AdverseExitWhenNeverProfitATR: float64Ptr(1.8)},
+			},
 			// 预设：动态止损/止盈（略放宽），最小持仓时间，与回测一致
 			DynamicStopLoss: &DynamicStopLossConfig{
 				Enabled:              true,
@@ -496,44 +676,89 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 					{ProfitThreshold: 2.5, TrailingPercent: 1.5},
 					{ProfitThreshold: 6.0, TrailingPercent: 2.5},
 				},
-				ATREnabled:         boolPtr(true),
-				ATRMultiplierMin:   float64Ptr(1.5),
-				ATRMultiplierMax:   float64Ptr(2.5),
-				ATRPeriodBTCETH:    intPtr(20),
-				ATRPeriodAltcoin:   intPtr(14),
-				ConfirmCycles:      2,                    // 连续2周期满足才执行，减少单K线假跌破
-				ConfirmMinutes:     0,                    // 0=按周期数确认；>0 按真实分钟数
-				ATRToleranceEnabled: boolPtr(true),      // 高波动时更宽容
-				ATRHighMultiplier:   float64Ptr(1.2),   // 当前ATR>长期ATR*1.2 视为高波动
-				KlinesTimeframe:    "15m",               // 止损用K线周期，1h 可减毛刺
+				ATREnabled:                   boolPtr(true),
+				ATRMultiplierMin:             float64Ptr(1.5),
+				ATRMultiplierMax:             float64Ptr(2.5),
+				ATRPeriodBTCETH:              intPtr(20),
+				ATRPeriodAltcoin:             intPtr(14),
+				SupportResistanceEnabled:     boolPtr(false), // 默认关闭
+				ConfirmCycles:                2,             // 连续2周期满足才执行，减少单K线假跌破
+				ConfirmMinutes:              0,             // 0=按周期数确认；>0 按真实分钟数
+				ATRToleranceEnabled:          boolPtr(true), // 高波动时更宽容
+				ATRHighMultiplier:            float64Ptr(1.2),
+				ScenarioAdjustEnabled:       boolPtr(false), // 默认关闭；开启时 scenario=reversal 再减 1 确认周期
+				KlinesTimeframe:              "15m",
+				TrailingStopOnlyAfterFirstScaledTP: boolPtr(true),
+				AdverseExitWhenNeverProfitATR:      float64Ptr(1.5),
 			},
 			DynamicTakeProfit: &DynamicTakeProfitConfig{
-				Enabled:                    true,
-				MinHoldMinutes:             10,                 // 与止损一致，主周期 15m 下更稳
-				MinProfitPercentToAllowTP: nil,                // 0=不限制；设 >0 可避免极低盈利即止盈
-				ScaledEnabled:              boolPtr(true),
+				Enabled:                     true,
+				MinHoldMinutes:              10,
+				MinProfitPercentToAllowTP:   nil,
+				FixedEnabled:                boolPtr(false),
+				ScaledEnabled:               boolPtr(true),
 				ScaledLevels: []ScaledTakeProfitLevel{
-					{ProfitPercent: 2.5, ClosePercent: 25, MoveStopToBreakeven: boolPtr(false)}, // 2.5% 第一档：进一步降低，更多单先触发分层再被追踪
+					{ProfitPercent: 2.5, ClosePercent: 25, MoveStopToBreakeven: boolPtr(false)},
 					{ProfitPercent: 6.0, ClosePercent: 25, MoveStopToBreakeven: boolPtr(true)},
 					{ProfitPercent: 10.0, ClosePercent: 100, MoveStopToBreakeven: boolPtr(false)},
 				},
-				ATREnabled:                 boolPtr(true),
-				ATRMultiplierMin:            float64Ptr(2.5),
-				ATRMultiplierMax:            float64Ptr(4.0),
-				ATRUseMaxInHighVolatility:   boolPtr(true),   // 高波动时用 Max 倍数，与止损宽容一致
-				ATRHighVolatilityThreshold:  float64Ptr(1.2), // atr ≥ atrLong*1.2 视为高波动
+				ATREnabled:                  boolPtr(true),
+				ATRMultiplierMin:             float64Ptr(2.5),
+				ATRMultiplierMax:             float64Ptr(4.0),
+				ATRUseMaxInHighVolatility:   boolPtr(true),
+				ATRHighVolatilityThreshold:  float64Ptr(1.2),
 				ATRPeriodBTCETH:             intPtr(20),
 				ATRPeriodAltcoin:            intPtr(14),
-				LockProfitPercent:           float64Ptr(2.5), // 2.5%：略提高，锁本更稳
-				// TrailingTP* 与 Altcoin 未设则用 kernel 内默认或主参数
+				ResistanceEnabled:           boolPtr(false),
+				TrailingTPEnabled:           nil,
+				LockProfitPercent:           float64Ptr(2.5),
 			},
 		},
 	}
+	// 多层过滤与方向池（挂单流程信息）：默认启用，与用户分享策略一致
+	config.StrategyMode = "multilayer_filter"
+	config.MultilayerFilter = &MultilayerFilterConfig{
+		Enabled: true,
+		Layer1: &Layer1Config{
+			RequiredAll:               true,
+			MinItemsToPass:            12, // 至少通过 12 项即过 Layer1（放宽）；0 则需全部通过
+			MinPeriodsAligned:         2,  // 多周期至少两周期一致（4h/1h/短）
+			MaxSignalAgeMinutes:       5,
+			FailClosedWhenDataMissing: false,
+			Items: []Layer1Item{
+				{ID: "entry_timing", Enabled: true, Allowed: []string{"now", "soon"}},
+				{ID: "volume_ok", Enabled: true},
+				{ID: "oi_ok", Enabled: true},
+				{ID: "long_tf_aligned", Enabled: true},
+				{ID: "multi_period_aligned", Enabled: true},
+				{ID: "flow_aligned", Enabled: true},
+				{ID: "price_ranking_aligned", Enabled: true},
+				{ID: "reliability_min", Enabled: true, Value: 0.4},
+				{ID: "short_tf_aligned", Enabled: true},
+				{ID: "whale_direction_aligned", Enabled: true},
+				{ID: "market_direction_aligned", Enabled: false},
+				{ID: "trend_strength", Enabled: true},
+				{ID: "rsi_zone", Enabled: true},
+				{ID: "macd_signal", Enabled: true},
+				{ID: "volume_trend", Enabled: false},
+				{ID: "oi_trend", Enabled: false},
+				{ID: "funding_ok", Enabled: true},
+			},
+		},
+		Layer2: &Layer2Config{MinFactors: 4, ReliabilityThreshold: 0.55, EntryConfidenceThresholdPct: 25}, // 放宽：4 因子、0.55 可靠度、25% 入场信心
+		Layer3: &Layer3Config{MaxSignalAgeMinutes: 5, OIAlignedRequired: false, EntryTimingStrengthMin: 0},
+		DirectionPool: &DirectionPoolConfig{
+			MinStrengthPct:        50,  // 进池最低强度 50%，减少弱趋势进池
+			MinStrengthPctToOpen: 55,  // 开仓最低强度 55%，三条件共振后仅高强度标的开仓，减少方向选错
+			SingleSideOnly:       true, SortByStrength: true, FilterPoolByLayer2: true,
+			EnableStrengthSmoothing: true, StrengthSmoothingWeight: 0.7, StrengthBonusCap: 10, ReliBonusCap: 8,
+		},
+	}
 
-	// Enhanced prompt sections for optimized strategy
+	// Enhanced prompt sections for default strategy
 	if lang == "zh" {
 		config.PromptSections = PromptSectionsConfig{
-			RoleDefinition: `# 你是一个专业的加密货币交易AI（优化版 v3.0）
+			RoleDefinition: `# 你是一个专业的加密货币交易AI（默认 v3.0）
 
 你的任务是根据提供的市场数据做出交易决策。你是一个经验丰富的量化交易员，擅长：
 - 多时间框架技术分析（15m/1h/4h）
@@ -850,8 +1075,9 @@ func GetOptimizedStrategyConfig(lang string) StrategyConfig {
 	intPtr := func(i int) *int { return &i }
 
 	config := StrategyConfig{
-		Version:  "3.0",
-		Language: normalizedLang,
+		Version:      "3.0",
+		StrategyType: "ai_trading",
+		Language:     normalizedLang,
 		CoinSource: CoinSourceConfig{
 			SourceType: "ai500",
 			UseAI500:   true,
@@ -902,6 +1128,21 @@ func GetOptimizedStrategyConfig(lang string) StrategyConfig {
 			EnablePriceRanking:   true,
 			PriceRankingDuration: "1h,4h,24h",
 			PriceRankingLimit:    10,
+			EnableBinanceLongShortRatio: true,  // 预设开启：以币安为主增强市场判断
+			BinanceLongShortPeriod:      "15m",
+			EnableBinanceFundingHistory: true,
+			EnableBinanceTakerVolume:    true,
+			BinanceTakerPeriod:          "15m",
+			EnableBinanceFundingRateHistory: true,
+			EnableBasis:                     true,
+			EnableBTCDominance:              true,
+			EnableBinanceWSForceOrder:       true,
+			EnableCoinAnkLiquidation:        false, // 需 CoinAnk API Key 且套餐1 含清算统计
+			EnableCoinglassData:             false,
+			CoinglassProxyURL:               "https://www.keystore.com.cn/api/v1/proxy/coinglass/v4",
+			CoinglassAPIKey:                 "",
+			CoinglassRateLimitPerMin:        10,
+			EnableCoinglassWSS:              false,
 		},
 		RiskControl: RiskControlConfig{
 			MaxPositions:                    3,    // Max 3 coins simultaneously (CODE ENFORCED)
@@ -914,6 +1155,44 @@ func GetOptimizedStrategyConfig(lang string) StrategyConfig {
 			MinRiskRewardRatio:              3.0,  // Min 3:1 profit/loss ratio (execution enforced)
 			MinConfidence:                   70,   // 与默认预设一致，平衡机会与质量
 			AIOnlyEntry:                     true, // 与默认预设一致：平仓由策略 SL/TP 执行，AI 仅开仓 + trend_view
+			RegimeAdjustEnabled:             boolPtr(true), // 优化预设开启：按 market_regime 提高开仓门槛
+			RegimeMinConfidenceMap:          map[string]int{"ranging": 75, "high_volatility": 78, "reversal": 80},
+			ExtremeFundingRule: &ExtremeFundingRule{
+				Enabled: true, FundingThresholdPct: 0.001, LongShortRatioHigh: 1.4, LongShortRatioLow: 0.714,
+				BlockOpenLongWhenExcessiveLongs: false, BlockOpenShortWhenExcessiveShorts: false,
+				RaiseConfidenceBy: 10, MinConfidenceWhenExtreme: 80,
+			},
+			AllowAIClose:                false,
+			MinConfidenceForAIClose:     72,
+			RequireExitReasonForAIClose: true,
+			PositionSizeBuckets: &PositionSizeBucketsConfig{
+				Enabled:             false, // 关闭档位时由 AI 通过 position_size_usd 设置仓位
+				DefaultBucket:       "low",
+				MinBucketConfidence: 75,
+				Buckets:             map[string]float64{"low": 0.003, "medium": 0.006, "high": 0.010},
+				MaxBucket:           "medium", // 优化预设默认封顶到 medium，减少极端行情过度加仓
+			},
+			TPProfiles: map[string]DynamicTakeProfitConfig{
+				"tp_conservative": {Enabled: true, MinHoldMinutes: 10, ScaledEnabled: boolPtr(true), ScaledLevels: []ScaledTakeProfitLevel{
+					{ProfitPercent: 3.0, ClosePercent: 50, MoveStopToBreakeven: boolPtr(true)},
+					{ProfitPercent: 7.0, ClosePercent: 100, MoveStopToBreakeven: boolPtr(false)},
+				}},
+				"tp_balanced": {Enabled: true, MinHoldMinutes: 10, ScaledEnabled: boolPtr(true), ScaledLevels: []ScaledTakeProfitLevel{
+					{ProfitPercent: 2.5, ClosePercent: 25, MoveStopToBreakeven: boolPtr(false)},
+					{ProfitPercent: 6.0, ClosePercent: 25, MoveStopToBreakeven: boolPtr(true)},
+					{ProfitPercent: 10.0, ClosePercent: 100, MoveStopToBreakeven: boolPtr(false)},
+				}},
+				"tp_aggressive": {Enabled: true, MinHoldMinutes: 10, ScaledEnabled: boolPtr(true), ScaledLevels: []ScaledTakeProfitLevel{
+					{ProfitPercent: 2.0, ClosePercent: 30, MoveStopToBreakeven: boolPtr(false)},
+					{ProfitPercent: 5.0, ClosePercent: 30, MoveStopToBreakeven: boolPtr(true)},
+					{ProfitPercent: 12.0, ClosePercent: 100, MoveStopToBreakeven: boolPtr(false)},
+				}},
+			},
+			SLProfiles: map[string]DynamicStopLossConfig{
+				"sl_tight":  {Enabled: true, TriggerLogic: "any", MinHoldMinutes: 10, InitialStopPercent: 0, TrailingEnabled: boolPtr(true), TrailingLevels: []TrailingStopLevel{{ProfitThreshold: 2.0, TrailingPercent: 1.2}, {ProfitThreshold: 5.0, TrailingPercent: 2.0}}, ATREnabled: boolPtr(true), ATRMultiplierMin: float64Ptr(1.2), ATRMultiplierMax: float64Ptr(2.0), ConfirmCycles: 1, ATRToleranceEnabled: boolPtr(true), ATRHighMultiplier: float64Ptr(1.2), KlinesTimeframe: "15m", TrailingStopOnlyAfterFirstScaledTP: boolPtr(true), AdverseExitWhenNeverProfitATR: float64Ptr(1.2)},
+				"sl_normal": {Enabled: true, TriggerLogic: "any", MinHoldMinutes: 10, InitialStopPercent: 0, TrailingEnabled: boolPtr(true), TrailingLevels: []TrailingStopLevel{{ProfitThreshold: 2.5, TrailingPercent: 1.5}, {ProfitThreshold: 6.0, TrailingPercent: 2.5}}, ATREnabled: boolPtr(true), ATRMultiplierMin: float64Ptr(1.5), ATRMultiplierMax: float64Ptr(2.5), ConfirmCycles: 2, ATRToleranceEnabled: boolPtr(true), ATRHighMultiplier: float64Ptr(1.2), KlinesTimeframe: "15m", TrailingStopOnlyAfterFirstScaledTP: boolPtr(true), AdverseExitWhenNeverProfitATR: float64Ptr(1.5)},
+				"sl_loose":  {Enabled: true, TriggerLogic: "any", MinHoldMinutes: 10, InitialStopPercent: 0, TrailingEnabled: boolPtr(true), TrailingLevels: []TrailingStopLevel{{ProfitThreshold: 3.0, TrailingPercent: 2.0}, {ProfitThreshold: 7.0, TrailingPercent: 3.0}}, ATREnabled: boolPtr(true), ATRMultiplierMin: float64Ptr(2.0), ATRMultiplierMax: float64Ptr(3.2), ConfirmCycles: 2, ATRToleranceEnabled: boolPtr(true), ATRHighMultiplier: float64Ptr(1.25), KlinesTimeframe: "15m", TrailingStopOnlyAfterFirstScaledTP: boolPtr(true), AdverseExitWhenNeverProfitATR: float64Ptr(1.8)},
+			},
 			// Dynamic Stop Loss Configuration（与默认预设对齐）
 			DynamicStopLoss: &DynamicStopLossConfig{
 				Enabled:                   true,
@@ -937,6 +1216,8 @@ func GetOptimizedStrategyConfig(lang string) StrategyConfig {
 				ATRToleranceEnabled:       boolPtr(true),
 				ATRHighMultiplier:         float64Ptr(1.2),
 				KlinesTimeframe:           "15m",
+				TrailingStopOnlyAfterFirstScaledTP: boolPtr(true),
+				AdverseExitWhenNeverProfitATR:      float64Ptr(1.5),
 			},
 			// Dynamic Take Profit Configuration（与回测一致，按建议微调）
 			DynamicTakeProfit: &DynamicTakeProfitConfig{
@@ -961,6 +1242,39 @@ func GetOptimizedStrategyConfig(lang string) StrategyConfig {
 				LockProfitPercent:          float64Ptr(2.5),
 			},
 		},
+	}
+	config.StrategyMode = "multilayer_filter"
+	config.MultilayerFilter = &MultilayerFilterConfig{
+		Enabled: true,
+		Layer1: &Layer1Config{
+			RequiredAll:               true,
+			MinItemsToPass:            12, // 至少通过 12 项即过（与默认预设一致，放宽过滤）
+			MinPeriodsAligned:         2,  // 多周期至少两周期一致
+			MaxSignalAgeMinutes:       5,
+			FailClosedWhenDataMissing: false,
+			Items: []Layer1Item{
+				{ID: "entry_timing", Enabled: true, Allowed: []string{"now", "soon"}},
+				{ID: "volume_ok", Enabled: true},
+				{ID: "oi_ok", Enabled: true},
+				{ID: "long_tf_aligned", Enabled: true},
+				{ID: "multi_period_aligned", Enabled: true},
+				{ID: "flow_aligned", Enabled: true},
+				{ID: "price_ranking_aligned", Enabled: true},
+				{ID: "reliability_min", Enabled: true, Value: 0.4},
+				{ID: "short_tf_aligned", Enabled: true},
+				{ID: "whale_direction_aligned", Enabled: true},
+				{ID: "market_direction_aligned", Enabled: false},
+				{ID: "trend_strength", Enabled: true},
+				{ID: "rsi_zone", Enabled: true},
+				{ID: "macd_signal", Enabled: true},
+				{ID: "volume_trend", Enabled: false},
+				{ID: "oi_trend", Enabled: false},
+				{ID: "funding_ok", Enabled: true},
+			},
+		},
+		Layer2: &Layer2Config{MinFactors: 4, ReliabilityThreshold: 0.55, EntryConfidenceThresholdPct: 25}, // 放宽，与默认预设一致
+		Layer3: &Layer3Config{MaxSignalAgeMinutes: 5, OIAlignedRequired: false, EntryTimingStrengthMin: 50},  // 略放宽 OI 与强度要求
+		DirectionPool: &DirectionPoolConfig{SortByStrength: true}, // 优化预设：按强度降序，优先开高强度标的
 	}
 
 	if lang == "zh" {
@@ -1531,15 +1845,10 @@ func (s *StrategyStore) Update(strategy *Strategy) error {
 		}).Error
 }
 
-// Delete delete a strategy
+// Delete delete a strategy (including former system default; preset is available via one-click generate)
 func (s *StrategyStore) Delete(userID, id string) error {
-	// do not allow deleting system default strategy
-	var st Strategy
-	if err := s.db.Where("id = ?", id).First(&st).Error; err == nil && st.IsDefault {
-		return fmt.Errorf("cannot delete system default strategy")
-	}
-
-	return s.db.Where("id = ? AND user_id = ?", id, userID).Delete(&Strategy{}).Error
+	// Allow deleting any strategy: default strategy can be removed; user uses "一键生成" to create preset.
+	return s.db.Where("id = ? AND (user_id = ? OR is_default = ?)", id, userID, true).Delete(&Strategy{}).Error
 }
 
 // List get user's strategy list

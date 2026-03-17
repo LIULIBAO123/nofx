@@ -1,0 +1,45 @@
+# 从本地备份镜像恢复 nofx（不使用 ghcr.io 拉取）
+# 使用前请先执行: docker load -i <备份的 .tar 文件>
+# 然后根据 load 输出的镜像名调整下面 image（若与 nofx-nofx / nofx-nofx-frontend 不同）
+services:
+  nofx:
+    image: nofx-nofx:latest
+    container_name: nofx-trading
+    ports:
+      - "${NOFX_BACKEND_PORT:-8080}:8080"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./keys:/app/keys
+    env_file:
+      - .env
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+      - JWT_SECRET=${JWT_SECRET}
+      - DATA_ENCRYPTION_KEY=${DATA_ENCRYPTION_KEY}
+      - RSA_PRIVATE_KEY_PATH=/app/keys/private.pem
+      - RSA_PUBLIC_KEY_PATH=/app/keys/public.pem
+      - AI_MAX_TOKENS=${AI_MAX_TOKENS:-8000}
+      - AI_TIMEOUT_SECONDS=${AI_TIMEOUT_SECONDS:-300}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  nofx-frontend:
+    image: nofx-nofx-frontend:latest
+    container_name: nofx-frontend
+    ports:
+      - "${NOFX_FRONTEND_PORT:-3000}:80"
+    depends_on:
+      - nofx
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:80"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s

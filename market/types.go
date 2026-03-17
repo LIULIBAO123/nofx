@@ -8,6 +8,8 @@ type Data struct {
 	CurrentPrice      float64
 	PriceChange1h     float64 // 1-hour price change percentage
 	PriceChange4h     float64 // 4-hour price change percentage
+	PriceChange24h    float64 // 24-hour price change percentage (from longer TF klines, token-safe)
+	PriceChange7d     float64 // 7-day price change percentage (from longer TF klines, token-safe)
 	CurrentEMA20      float64
 	CurrentMACD       float64
 	CurrentRSI7       float64

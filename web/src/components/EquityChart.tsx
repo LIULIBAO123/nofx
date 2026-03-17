@@ -439,6 +439,7 @@ export function EquityChart({ traderId, embedded = false, isSimulation = false }
         <div
           className="p-2 rounded transition-all hover:bg-opacity-50"
           style={{ background: 'rgba(240, 185, 11, 0.05)' }}
+          title={t('historicalCyclesTooltip', language)}
         >
           <div
             className="text-xs mb-1 uppercase tracking-wider"

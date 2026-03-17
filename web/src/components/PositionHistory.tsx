@@ -9,6 +9,7 @@ import type {
   TraderStats,
   SymbolStats,
   DirectionStats,
+  CloseEventItem,
 } from '../types'
 
 interface PositionHistoryProps {
@@ -608,13 +609,15 @@ export function PositionHistory({ traderId }: PositionHistoryProps) {
       {/* Overall Stats - Row 1: Core Metrics */}
       {stats && (
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
-          <StatCard
-            icon="📊"
-            title={t('positionHistory.totalTrades', language)}
-            value={stats.total_trades || 0}
-            subtitle={t('positionHistory.winLoss', language, { win: stats.win_trades || 0, loss: stats.loss_trades || 0 })}
-            language={language}
-          />
+          <div title={t('positionHistory.totalTradesTooltip', language)} className="cursor-help">
+            <StatCard
+              icon="📊"
+              title={t('positionHistory.totalTrades', language)}
+              value={stats.total_trades || 0}
+              subtitle={t('positionHistory.winLoss', language, { win: stats.win_trades || 0, loss: stats.loss_trades || 0 })}
+              language={language}
+            />
+          </div>
           <StatCard
             icon="🎯"
             title={t('positionHistory.winRate', language)}
@@ -938,6 +941,14 @@ export function PositionHistory({ traderId }: PositionHistoryProps) {
                             : inferred
                               ? (language === 'zh' ? '根据同期决策记录推断' : 'Inferred from decision record')
                               : type
+                          let triggerDetail: { trigger?: string; type?: string; reason?: string; trigger_price?: number; trail_aggressiveness?: string; atr_mult_sl?: number; lock_profit_pct?: number; advice?: string; phase_label?: string; invalidation_level?: string; invalidation_strength?: number; exit_bias?: string; rationale?: string } | null = null
+                          if (position.close_reason_ai_adjusted && position.close_reason_trigger_detail) {
+                            try {
+                              triggerDetail = JSON.parse(position.close_reason_trigger_detail) as typeof triggerDetail
+                            } catch {
+                              triggerDetail = null
+                            }
+                          }
                           return (
                             <>
                               <div className="flex items-center gap-1">
@@ -948,10 +959,110 @@ export function PositionHistory({ traderId }: PositionHistoryProps) {
                                 <span style={{ color: '#848E9C' }}>{language === 'zh' ? '平仓类型' : 'Close type'}</span>
                                 <span style={{ color: inferred ? '#94a3b8' : '#B7BDC6' }} title={position.inferred_close_reason_detail}>{displayType}</span>
                               </div>
+                              {triggerDetail && (
+                                <>
+                                  <div className="flex items-center gap-1 col-span-2" style={{ marginTop: 4 }}>
+                                    <span style={{ color: '#60a5fa', fontWeight: 600, fontSize: '11px' }}>
+                                      {language === 'zh' ? '由 AI 调节参数触发' : 'Triggered by AI-adjusted params'}
+                                    </span>
+                                  </div>
+                                  <div className="flex flex-wrap gap-x-3 gap-y-0.5 col-span-2 text-[10px]" style={{ color: '#94a3b8' }}>
+                                    {triggerDetail.trigger_price != null && (
+                                      <span>{language === 'zh' ? '触发价' : 'Trigger price'}: ${formatFull(triggerDetail.trigger_price)}</span>
+                                    )}
+                                    {triggerDetail.trail_aggressiveness && (
+                                      <span>{language === 'zh' ? '追踪' : 'Trail'}: {triggerDetail.trail_aggressiveness}</span>
+                                    )}
+                                    {triggerDetail.atr_mult_sl != null && triggerDetail.atr_mult_sl > 0 && (
+                                      <span>ATR×SL: {triggerDetail.atr_mult_sl}</span>
+                                    )}
+                                    {triggerDetail.lock_profit_pct != null && triggerDetail.lock_profit_pct > 0 && (
+                                      <span>{language === 'zh' ? '锁利%' : 'Lock%'}: {triggerDetail.lock_profit_pct}</span>
+                                    )}
+                                    {triggerDetail.advice && (
+                                      <span>{language === 'zh' ? '建议' : 'Advice'}: {triggerDetail.advice}</span>
+                                    )}
+                                    {triggerDetail.phase_label && (
+                                      <span>{language === 'zh' ? '阶段' : 'Phase'}: {triggerDetail.phase_label}</span>
+                                    )}
+                                    {triggerDetail.invalidation_strength != null && triggerDetail.invalidation_strength > 0 && (
+                                      <span>{language === 'zh' ? '证伪强度' : 'Strength'}: {triggerDetail.invalidation_strength}</span>
+                                    )}
+                                    {triggerDetail.invalidation_level && (
+                                      <span>{language === 'zh' ? '证伪位' : 'Invalidation'}: {triggerDetail.invalidation_level}</span>
+                                    )}
+                                    {triggerDetail.exit_bias && (
+                                      <span>{language === 'zh' ? '退场倾向' : 'Exit bias'}: {triggerDetail.exit_bias}</span>
+                                    )}
+                                    {triggerDetail.rationale && (
+                                      <span title={triggerDetail.rationale}>{language === 'zh' ? '理由' : 'Rationale'}: {triggerDetail.rationale.slice(0, 40)}{triggerDetail.rationale.length > 40 ? '…' : ''}</span>
+                                    )}
+                                  </div>
+                                </>
+                              )}
                             </>
                           )
                         })()}
                       </div>
+                      {/* 平仓明细：根据实际平仓原因显示标题，避免亏损单误标为「分层止盈」 */}
+                      {(() => {
+                        const raw = position.close_events
+                        if (!raw || typeof raw !== 'string') return null
+                        let events: CloseEventItem[] = []
+                        try {
+                          events = JSON.parse(raw) as CloseEventItem[]
+                        } catch {
+                          return null
+                        }
+                        if (!Array.isArray(events) || events.length === 0) return null
+                        const entryQty = position.entry_quantity || position.quantity || 1
+                        const closeReason = position.close_reason || ''
+                        const isSL = closeReason.startsWith('system:sl:')
+                        const isTP = closeReason.startsWith('system:tp:')
+                        const isTPScaled = isTP && (closeReason.includes('scaled') || closeReason === 'system:tp:scaled')
+                        let sectionTitleZh = '平仓明细'
+                        let sectionTitleEn = 'Close events'
+                        if (isSL) {
+                          sectionTitleZh = '平仓明细（动态止损）'
+                          sectionTitleEn = 'Close events (stop loss)'
+                        } else if (isTP) {
+                          sectionTitleZh = isTPScaled ? '平仓明细（分层止盈）' : '平仓明细（止盈）'
+                          sectionTitleEn = isTPScaled ? 'Close events (scaled TP)' : 'Close events (take profit)'
+                        }
+                        const realizedPnl = position.realized_pnl ?? 0
+                        const isLossWithTPReason = realizedPnl < 0 && isTP
+                        return (
+                          <div className="mt-2 rounded-lg px-2.5 py-2" style={{ background: 'rgba(43,49,57,0.3)', border: '1px solid rgba(43,49,57,0.5)' }}>
+                            <div className="text-[11px] font-semibold mb-1.5" style={{ color: '#848E9C' }}>
+                              {language === 'zh' ? sectionTitleZh : sectionTitleEn}
+                            </div>
+                            {isLossWithTPReason && (
+                              <div className="text-[10px] mb-1.5" style={{ color: '#F6465D' }}>
+                                {language === 'zh' ? '触发条件为止盈，实际成交为亏损（可能因滑点或延迟）。' : 'Trigger was take profit; filled at a loss (slippage or delay).'}
+                              </div>
+                            )}
+                            <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-[11px] font-mono">
+                              {events.map((ev, idx) => {
+                                const pct = entryQty > 0 ? ((ev.closed_qty / entryQty) * 100).toFixed(1) : '—'
+                                const timeStr = ev.exit_time_ms ? new Date(ev.exit_time_ms).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—'
+                                const pnlColor = (ev.realized_pnl || 0) >= 0 ? '#0ECB81' : '#F6465D'
+                                const label = ev.is_partial
+                                  ? (language === 'zh' ? `第${idx + 1}档 部分平仓 ${pct}%` : `#${idx + 1} partial ${pct}%`)
+                                  : (language === 'zh' ? `全平 ${pct}%` : `full close ${pct}%`)
+                                return (
+                                  <div key={idx} className="flex items-center gap-2 flex-wrap">
+                                    <span style={{ color: '#EAECEF' }}>{label}</span>
+                                    <span style={{ color: '#848E9C' }}>@ {formatPrice(ev.exit_price)}</span>
+                                    <span style={{ color: pnlColor }}>{(ev.realized_pnl ?? 0) >= 0 ? '+' : ''}{formatNumber(ev.realized_pnl ?? 0)}</span>
+                                    {timeStr !== '—' && <span style={{ color: '#848E9C', fontSize: '10px' }}>{timeStr}</span>}
+                                    {ev.close_reason && <span style={{ color: '#848E9C', fontSize: '10px' }} title={ev.close_reason}>{ev.close_reason.replace(/^system:(sl|tp):/, '').slice(0, 20)}</span>}
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        )
+                      })()}
                       <div className="text-[10px] mt-1" style={{ color: '#848E9C' }}>{language === 'zh' ? '参数在开仓时写入持仓记录，平仓后在此显示；平仓方式/类型由系统或AI记录。' : 'Params saved at open; close method/type from system or AI.'}</div>
                     </td>
                   </tr>
