@@ -11,6 +11,9 @@ jobs:
     name: Backend Tests
     runs-on: ubuntu-latest
     continue-on-error: true  # Don't block PRs
+    env:
+      # 仓库内存在 vendor/ 时，Go 1.14+ 可能默认走 vendor 模式；vendor 不完整会导致 CI 无法下载依赖而失败
+      GOFLAGS: -mod=mod
 
     steps:
       - name: Checkout code
@@ -29,12 +32,12 @@ jobs:
       - name: Run tests
         env:
           GOTOOLCHAIN: auto
-        run: go test -v ./api/... ./backtest/... ./config/... ./crypto/... ./hook/... ./kernel/... ./logger/... ./market/... ./mcp/... ./store/... ./trader/... ./manager/... ./provider/coinank/coinank_api/... ./provider/hyperliquid/... ./security/...
+        run: go test -mod=mod -v ./api/... ./backtest/... ./config/... ./crypto/... ./hook/... ./kernel/... ./logger/... ./market/... ./mcp/... ./store/... ./trader/... ./manager/... ./provider/coinank/coinank_api/... ./provider/hyperliquid/... ./security/...
 
       - name: Generate coverage
         env:
           GOTOOLCHAIN: auto
-        run: go test -coverprofile=coverage.out -covermode=count ./api/... ./backtest/... ./config/... ./crypto/... ./hook/... ./kernel/... ./logger/... ./market/... ./mcp/... ./store/... ./trader/... ./manager/... ./provider/coinank/coinank_api/... ./provider/hyperliquid/... ./security/...
+        run: go test -mod=mod -coverprofile=coverage.out -covermode=count ./api/... ./backtest/... ./config/... ./crypto/... ./hook/... ./kernel/... ./logger/... ./market/... ./mcp/... ./store/... ./trader/... ./manager/... ./provider/coinank/coinank_api/... ./provider/hyperliquid/... ./security/...
         continue-on-error: true
 
   frontend-tests:

@@ -23,6 +23,9 @@ jobs:
   backend-checks:
     name: Backend Checks
     runs-on: ubuntu-latest
+    env:
+      # vendor/ 存在时避免默认进入 vendor 模式导致缺依赖
+      GOFLAGS: -mod=mod
     steps:
       - uses: actions/checkout@v4
 
@@ -65,7 +68,7 @@ jobs:
         id: go-test
         continue-on-error: true
         run: |
-          if go test ./... -v 2>&1 | tee test-output.txt; then
+          if go test -mod=mod ./... -v 2>&1 | tee test-output.txt; then
             echo "status=✅ Passed" >> $GITHUB_OUTPUT
           else
             echo "status=⚠️ Failed" >> $GITHUB_OUTPUT

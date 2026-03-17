@@ -22,6 +22,9 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+    env:
+      # vendor/ 存在时避免默认进入 vendor 模式导致缺依赖
+      GOFLAGS: -mod=mod
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -56,7 +59,7 @@ jobs:
           DATA_ENCRYPTION_KEY: "test-encryption-key-for-ci-only-not-production"
           GOTOOLCHAIN: auto
         run: |
-          go test -v -race -coverprofile=coverage.out -covermode=atomic ./api/... ./backtest/... ./config/... ./crypto/... ./hook/... ./kernel/... ./logger/... ./market/... ./mcp/... ./store/... ./trader/... ./manager/... ./provider/coinank/coinank_api/... ./provider/hyperliquid/... ./security/... > test-output.txt 2>&1; TEST_EXIT=$?; cat test-output.txt; exit $TEST_EXIT
+          go test -mod=mod -v -race -coverprofile=coverage.out -covermode=atomic ./api/... ./backtest/... ./config/... ./crypto/... ./hook/... ./kernel/... ./logger/... ./market/... ./mcp/... ./store/... ./trader/... ./manager/... ./provider/coinank/coinank_api/... ./provider/hyperliquid/... ./security/... > test-output.txt 2>&1; TEST_EXIT=$?; cat test-output.txt; exit $TEST_EXIT
 
       - name: Upload test log on failure
         if: failure()

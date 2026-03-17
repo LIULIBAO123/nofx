@@ -61,7 +61,7 @@ RUN sed -i 's/\r$$//' go.mod go.sum 2>/dev/null || true && \
 
 # 再复制其余代码并构建
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o nofx .
+RUN CGO_ENABLED=0 GOOS=linux go build -mod=mod -trimpath -ldflags="-s -w" -o nofx .
 
 # ──────────────────────────────────────────────────────────────
 # Runtime Stage (Minimal Executable Environment)
