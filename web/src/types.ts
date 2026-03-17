@@ -872,6 +872,9 @@ export interface RiskControlConfig {
   dynamic_stop_loss?: DynamicStopLossConfig;
   dynamic_take_profit?: DynamicTakeProfitConfig;
 
+  /** 部分平仓冷却时间（秒）；0/未填使用默认值（45 秒） */
+  partial_close_cooldown_seconds?: number;
+
   /** AI 参与仓位与分层止盈止损：离散档位与模板（系统兜底裁剪） */
   position_size_buckets?: PositionSizeBucketsConfig;
   tp_profiles?: Record<string, DynamicTakeProfitConfig>;

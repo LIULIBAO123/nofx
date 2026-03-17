@@ -364,6 +364,10 @@ type RiskControlConfig struct {
 	DynamicStopLoss   *DynamicStopLossConfig   `json:"dynamic_stop_loss,omitempty"`
 	DynamicTakeProfit *DynamicTakeProfitConfig `json:"dynamic_take_profit,omitempty"`
 
+	// PartialCloseCooldownSeconds: 部分平仓冷却时间（秒），用于避免短时间重复部分平仓（如信号减仓/分层止盈等）。
+	// 0 表示使用系统默认值（45 秒）。
+	PartialCloseCooldownSeconds int `json:"partial_close_cooldown_seconds,omitempty"`
+
 	// Realtime price: fetch latest mark before SL/TP check to better grasp P&L (optional)
 	RealtimePrice *RealtimePriceConfig `json:"realtime_price,omitempty"`
 

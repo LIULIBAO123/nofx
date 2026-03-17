@@ -92,6 +92,8 @@ export function RiskControlEditor({
       trailingLevels: { zh: '追踪止损档位', en: 'Trailing levels' },
       trailingProfit: { zh: '触发盈利(%)', en: 'Profit threshold(%)' },
       trailingPct: { zh: '追踪回撤(%)', en: 'Trailing percent(%)' },
+      partialCloseCooldown: { zh: '部分平仓冷却(秒)', en: 'Partial close cooldown (sec)' },
+      partialCloseCooldownDesc: { zh: '避免短时间重复部分平仓（信号减仓/分层止盈等）。0/留空=默认 45 秒；范围 5~600 秒。', en: 'Avoid duplicate partial closes in short window (signal scale-out / scaled TP). 0/empty = default 45s; range 5~600.' },
     }
     return translations[key]?.[language] || key
   }
@@ -1143,6 +1145,35 @@ export function RiskControlEditor({
           disabled={disabled}
           language={language}
         />
+      </div>
+
+      {/* Partial close cooldown */}
+      <div>
+        <div className="flex items-center gap-2 mb-4">
+          <Shield className="w-5 h-5" style={{ color: '#F0B90B' }} />
+          <h3 className="font-medium" style={{ color: '#EAECEF' }}>
+            {t('partialCloseCooldown')}
+          </h3>
+        </div>
+        <div className="rounded-xl p-4" style={{ background: '#0B0E11', border: '1px solid #2B3139' }}>
+          <div className="text-xs mb-3" style={{ color: '#848E9C' }}>
+            {t('partialCloseCooldownDesc')}
+          </div>
+          <div className="flex items-center gap-3">
+            <input
+              type="number"
+              min={0}
+              max={600}
+              step={1}
+              value={config.partial_close_cooldown_seconds ?? 0}
+              onChange={(e) => updateField('partial_close_cooldown_seconds', Number(e.target.value))}
+              disabled={disabled}
+              className="w-28 px-3 py-2 rounded-lg text-sm"
+              style={{ background: '#1E2329', border: '1px solid #2B3139', color: '#EAECEF' }}
+            />
+            <span className="text-xs" style={{ color: '#848E9C' }}>sec</span>
+          </div>
+        </div>
       </div>
     </div>
   )

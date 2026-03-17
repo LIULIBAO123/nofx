@@ -546,17 +546,31 @@ func NewAutoTrader(config AutoTraderConfig, st *store.Store, userID string) (*Au
 	}, nil
 }
 
-const partialCloseCooldownMs = int64(45 * 1000) // 45s cooldown for partial closes (signal scale_out / layered TP)
-
 func (at *AutoTrader) shouldCooldownPartialClose(posKey, kind string) bool {
 	if posKey == "" || kind == "" {
 		return false
 	}
 	key := posKey + "|" + kind
 	now := time.Now().UnixMilli()
+
+	cooldownMs := int64(45 * 1000) // default 45s
+	if at.strategyEngine != nil && at.strategyEngine.GetConfig() != nil {
+		rc := at.strategyEngine.GetConfig().RiskControl
+		if rc.PartialCloseCooldownSeconds > 0 {
+			secs := rc.PartialCloseCooldownSeconds
+			if secs < 5 {
+				secs = 5
+			}
+			if secs > 600 {
+				secs = 600
+			}
+			cooldownMs = int64(secs) * 1000
+		}
+	}
+
 	at.partialCloseCooldownMu.Lock()
 	defer at.partialCloseCooldownMu.Unlock()
-	if last, ok := at.partialCloseCooldown[key]; ok && now-last < partialCloseCooldownMs {
+	if last, ok := at.partialCloseCooldown[key]; ok && now-last < cooldownMs {
 		return true
 	}
 	at.partialCloseCooldown[key] = now
