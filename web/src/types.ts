@@ -874,6 +874,18 @@ export interface RiskControlConfig {
 
   /** 部分平仓冷却时间（秒）；0/未填使用默认值（45 秒） */
   partial_close_cooldown_seconds?: number;
+  /** 部分平仓最小比例（%）；0/未填默认 2 */
+  partial_close_min_percent?: number;
+  /** 结构化退场状态机 TTL（分钟）；0/未填默认 60 */
+  sltp_exit_state_ttl_minutes?: number;
+  /** 结构化信号 exit 绕过 MinHold 的最小持仓秒数；0=立刻允许 */
+  signal_exit_min_hold_seconds?: number;
+  /** true=先止损后止盈；默认 false */
+  sltp_prefer_stop_loss_over_take_profit?: boolean;
+  /** scale_out 后阻断 scaled TP 窗口（秒）；0/未填默认 600 */
+  scale_out_blocks_scaled_tp_seconds?: number;
+  /** scaled TP 后阻断 scale_out 窗口（秒）；0/未填默认 600 */
+  scaled_tp_blocks_scale_out_seconds?: number;
 
   /** AI 参与仓位与分层止盈止损：离散档位与模板（系统兜底裁剪） */
   position_size_buckets?: PositionSizeBucketsConfig;
@@ -936,6 +948,10 @@ export interface DynamicStopLossConfig {
   // 连续确认再止损：减少单K线假跌破
   confirm_cycles?: number;               // 连续 N 周期满足条件才执行止损，1=立即，2+=延迟确认
   confirm_minutes?: number;              // >0 时按真实时间确认：条件需持续满足此分钟数；0=用 confirm_cycles
+  /** 确认模式：auto | minutes | cycles | minutes_then_samples */
+  confirm_mode?: string;
+  /** minutes_then_samples 下的最少采样次数（主周期计数）；0 默认 2 */
+  confirm_min_samples?: number;
 
   // 高波动宽容：ATR 高时更宽容
   atr_tolerance_enabled?: boolean;      // 高波动时多要求 1 个确认周期 / 放宽 ATR 止损

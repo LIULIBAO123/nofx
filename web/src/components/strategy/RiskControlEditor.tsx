@@ -94,6 +94,16 @@ export function RiskControlEditor({
       trailingPct: { zh: '追踪回撤(%)', en: 'Trailing percent(%)' },
       partialCloseCooldown: { zh: '部分平仓冷却(秒)', en: 'Partial close cooldown (sec)' },
       partialCloseCooldownDesc: { zh: '避免短时间重复部分平仓（信号减仓/分层止盈等）。0/留空=默认 45 秒；范围 5~600 秒。', en: 'Avoid duplicate partial closes in short window (signal scale-out / scaled TP). 0/empty = default 45s; range 5~600.' },
+      partialCloseMinPercent: { zh: '部分平仓最小比例(%)', en: 'Min partial close (%)' },
+      partialCloseMinPercentDesc: { zh: '部分平仓比例过小会跳过，避免噪声或最小下单量问题。0/留空=默认 2%。', en: 'Skip too-small partial closes to avoid noise/min-order issues. 0/empty = default 2%.' },
+      sltpExitStateTtl: { zh: '结构化退场状态TTL(分钟)', en: 'Exit state TTL (min)' },
+      sltpExitStateTtlDesc: { zh: '结构化退场状态机超过该时间未更新则过期忽略。0/留空=默认 60。', en: 'Expire stale structural exit state after this time. 0/empty = default 60.' },
+      signalExitMinHold: { zh: '信号exit最小持仓(秒)', en: 'Signal exit min-hold (sec)' },
+      signalExitMinHoldDesc: { zh: '结构化信号 exit 绕过 MinHold 的最低持仓时间；0/留空=立刻允许。', en: 'Minimum hold time before structural exit can bypass MinHold. 0/empty = immediate.' },
+      sltpPriority: { zh: 'SL/TP 优先级（先止损）', en: 'SL/TP priority (SL first)' },
+      sltpPriorityDesc: { zh: '默认先止盈再止损；开启后先止损再止盈。', en: 'Default TP-first; enable to check SL first.' },
+      scaleoutBlocksScaledtp: { zh: 'scale_out 阻断 scaled TP(秒)', en: 'scale_out blocks scaled TP (sec)' },
+      scaledtpBlocksScaleout: { zh: 'scaled TP 阻断 scale_out(秒)', en: 'scaled TP blocks scale_out (sec)' },
     }
     return translations[key]?.[language] || key
   }
@@ -1172,6 +1182,117 @@ export function RiskControlEditor({
               style={{ background: '#1E2329', border: '1px solid #2B3139', color: '#EAECEF' }}
             />
             <span className="text-xs" style={{ color: '#848E9C' }}>sec</span>
+          </div>
+        </div>
+      </div>
+
+      {/* SLTP execution knobs */}
+      <div>
+        <div className="flex items-center gap-2 mb-4">
+          <Shield className="w-5 h-5" style={{ color: '#F0B90B' }} />
+          <h3 className="font-medium" style={{ color: '#EAECEF' }}>
+            SL/TP 执行参数
+          </h3>
+        </div>
+        <div className="rounded-xl p-4 space-y-4" style={{ background: '#0B0E11', border: '1px solid #2B3139' }}>
+          <div>
+            <div className="text-xs mb-2" style={{ color: '#848E9C' }}>{t('partialCloseMinPercentDesc')}</div>
+            <div className="flex items-center gap-3">
+              <input
+                type="number"
+                min={0}
+                max={50}
+                step={0.1}
+                value={config.partial_close_min_percent ?? 0}
+                onChange={(e) => updateField('partial_close_min_percent', Number(e.target.value))}
+                disabled={disabled}
+                className="w-28 px-3 py-2 rounded-lg text-sm"
+                style={{ background: '#1E2329', border: '1px solid #2B3139', color: '#EAECEF' }}
+              />
+              <span className="text-xs" style={{ color: '#848E9C' }}>%</span>
+              <span className="text-xs" style={{ color: '#EAECEF' }}>{t('partialCloseMinPercent')}</span>
+            </div>
+          </div>
+
+          <div>
+            <div className="text-xs mb-2" style={{ color: '#848E9C' }}>{t('sltpExitStateTtlDesc')}</div>
+            <div className="flex items-center gap-3">
+              <input
+                type="number"
+                min={0}
+                max={1440}
+                step={1}
+                value={config.sltp_exit_state_ttl_minutes ?? 0}
+                onChange={(e) => updateField('sltp_exit_state_ttl_minutes', Number(e.target.value))}
+                disabled={disabled}
+                className="w-28 px-3 py-2 rounded-lg text-sm"
+                style={{ background: '#1E2329', border: '1px solid #2B3139', color: '#EAECEF' }}
+              />
+              <span className="text-xs" style={{ color: '#848E9C' }}>min</span>
+              <span className="text-xs" style={{ color: '#EAECEF' }}>{t('sltpExitStateTtl')}</span>
+            </div>
+          </div>
+
+          <div>
+            <div className="text-xs mb-2" style={{ color: '#848E9C' }}>{t('signalExitMinHoldDesc')}</div>
+            <div className="flex items-center gap-3">
+              <input
+                type="number"
+                min={0}
+                max={86400}
+                step={1}
+                value={config.signal_exit_min_hold_seconds ?? 0}
+                onChange={(e) => updateField('signal_exit_min_hold_seconds', Number(e.target.value))}
+                disabled={disabled}
+                className="w-28 px-3 py-2 rounded-lg text-sm"
+                style={{ background: '#1E2329', border: '1px solid #2B3139', color: '#EAECEF' }}
+              />
+              <span className="text-xs" style={{ color: '#848E9C' }}>sec</span>
+              <span className="text-xs" style={{ color: '#EAECEF' }}>{t('signalExitMinHold')}</span>
+            </div>
+          </div>
+
+          <label className="flex items-center gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={config.sltp_prefer_stop_loss_over_take_profit ?? false}
+              onChange={(e) => updateField('sltp_prefer_stop_loss_over_take_profit', e.target.checked)}
+              disabled={disabled}
+              className="w-5 h-5 accent-red-500 rounded"
+            />
+            <span className="text-sm" style={{ color: '#EAECEF' }}>{t('sltpPriority')}</span>
+            <span className="text-[10px]" style={{ color: '#848E9C' }}>{t('sltpPriorityDesc')}</span>
+          </label>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <div className="text-xs mb-2" style={{ color: '#848E9C' }}>{t('scaleoutBlocksScaledtp')}</div>
+              <input
+                type="number"
+                min={-1}
+                max={3600}
+                step={1}
+                value={config.scale_out_blocks_scaled_tp_seconds ?? 0}
+                onChange={(e) => updateField('scale_out_blocks_scaled_tp_seconds', Number(e.target.value))}
+                disabled={disabled}
+                className="w-full px-3 py-2 rounded-lg text-sm"
+                style={{ background: '#1E2329', border: '1px solid #2B3139', color: '#EAECEF' }}
+              />
+            </div>
+            <div>
+              <div className="text-xs mb-2" style={{ color: '#848E9C' }}>{t('scaledtpBlocksScaleout')}</div>
+              <input
+                type="number"
+                min={-1}
+                max={3600}
+                step={1}
+                value={config.scaled_tp_blocks_scale_out_seconds ?? 0}
+                onChange={(e) => updateField('scaled_tp_blocks_scale_out_seconds', Number(e.target.value))}
+                disabled={disabled}
+                className="w-full px-3 py-2 rounded-lg text-sm"
+                style={{ background: '#1E2329', border: '1px solid #2B3139', color: '#EAECEF' }}
+              />
+            </div>
           </div>
         </div>
       </div>

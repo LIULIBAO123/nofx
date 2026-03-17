@@ -368,6 +368,19 @@ type RiskControlConfig struct {
 	// 0 表示使用系统默认值（45 秒）。
 	PartialCloseCooldownSeconds int `json:"partial_close_cooldown_seconds,omitempty"`
 
+	// PartialCloseMinPercent: 部分平仓最小比例（% of position），低于该比例将跳过（避免噪声/最小下单量问题）。0=默认 2。
+	PartialCloseMinPercent float64 `json:"partial_close_min_percent,omitempty"`
+	// SLTPExitStateTTLMinutes: 结构化退场状态机 TTL（分钟）；超过该时间未更新则视为过期并忽略。0=默认 60。
+	SLTPExitStateTTLMinutes int `json:"sltp_exit_state_ttl_minutes,omitempty"`
+	// SignalExitMinHoldSeconds: 结构化信号 exit 绕过 MinHold 的最小持仓秒数（0=立刻允许）。
+	SignalExitMinHoldSeconds int `json:"signal_exit_min_hold_seconds,omitempty"`
+	// SLTPPreferStopLossOverTakeProfit: true 时先检查止损再止盈（默认 false=先止盈再止损）。
+	SLTPPreferStopLossOverTakeProfit bool `json:"sltp_prefer_stop_loss_over_take_profit,omitempty"`
+	// ScaleOutBlocksScaledTPSeconds: scale_out 执行后阻断 scaled TP 的窗口秒数（0=默认 600）。
+	ScaleOutBlocksScaledTPSeconds int `json:"scale_out_blocks_scaled_tp_seconds,omitempty"`
+	// ScaledTPBlocksScaleOutSeconds: scaled TP 执行后阻断 scale_out 的窗口秒数（0=默认 600）。
+	ScaledTPBlocksScaleOutSeconds int `json:"scaled_tp_blocks_scale_out_seconds,omitempty"`
+
 	// Realtime price: fetch latest mark before SL/TP check to better grasp P&L (optional)
 	RealtimePrice *RealtimePriceConfig `json:"realtime_price,omitempty"`
 
@@ -439,6 +452,10 @@ type DynamicStopLossConfig struct {
 	ConfirmCycles int `json:"confirm_cycles,omitempty"` // 1=immediate; 2+ = delay execute until condition holds N cycles
 	// ConfirmMinutes: when > 0, require SL condition to hold for this many minutes (real time) instead of ConfirmCycles; 0 = use ConfirmCycles
 	ConfirmMinutes float64 `json:"confirm_minutes,omitempty"`
+	// ConfirmMode: "auto"(default) | "minutes" | "cycles" | "minutes_then_samples"
+	ConfirmMode string `json:"confirm_mode,omitempty"`
+	// ConfirmMinSamples: when ConfirmMode="minutes_then_samples", require at least N triggered samples (AI main cycles) after minutes condition met. 0=default 2.
+	ConfirmMinSamples int `json:"confirm_min_samples,omitempty"`
 
 	// ATR tolerance: in high volatility use wider stop / extra confirm cycle so we don't stop on noise
 	ATRToleranceEnabled *bool    `json:"atr_tolerance_enabled,omitempty"` // when true, high vol => more tolerant

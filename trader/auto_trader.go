@@ -243,6 +243,10 @@ type AutoTrader struct {
 	// Partial-close cooldown (per posKey + kind) to avoid duplicate partial closes in short window
 	partialCloseCooldownMu sync.Mutex
 	partialCloseCooldown   map[string]int64 // key=posKey+"|"+kind -> lastExecUnixMs
+	partialCloseIdemMu     sync.Mutex
+	partialCloseIdem       map[string]int64 // key=posKey+"|"+idemKey -> lastExecUnixMs
+	partialCloseBlockMu    sync.Mutex
+	partialCloseBlock      map[string]int64 // key=posKey+"|"+blockKind -> lastExecUnixMs
 	// AI-selected per-position profiles (system-enforced, stored by posKey)
 	positionProfileMu    sync.RWMutex
 	positionRiskBucket   map[string]string // posKey -> low/medium/high
@@ -532,6 +536,8 @@ func NewAutoTrader(config AutoTraderConfig, st *store.Store, userID string) (*Au
 		scaledLevelsTaken:     make(map[string][]float64),
 		scaledLevelsTakenMu:   sync.RWMutex{},
 		partialCloseCooldown:  make(map[string]int64),
+		partialCloseIdem:      make(map[string]int64),
+		partialCloseBlock:     make(map[string]int64),
 		positionRiskBucket:    make(map[string]string),
 		positionTPProfile:     make(map[string]string),
 		positionSLProfile:     make(map[string]string),
@@ -575,6 +581,66 @@ func (at *AutoTrader) shouldCooldownPartialClose(posKey, kind string) bool {
 	}
 	at.partialCloseCooldown[key] = now
 	return false
+}
+
+func (at *AutoTrader) getPartialCloseMinPercent() float64 {
+	minPct := 2.0
+	if at.strategyEngine != nil && at.strategyEngine.GetConfig() != nil {
+		rc := at.strategyEngine.GetConfig().RiskControl
+		if rc.PartialCloseMinPercent > 0 {
+			minPct = rc.PartialCloseMinPercent
+		}
+	}
+	if minPct < 0.1 {
+		minPct = 0.1
+	}
+	if minPct > 50 {
+		minPct = 50
+	}
+	return minPct
+}
+
+func (at *AutoTrader) shouldIdemPartialClose(posKey, idemKey string, windowMs int64) bool {
+	if posKey == "" || idemKey == "" || windowMs <= 0 {
+		return false
+	}
+	key := posKey + "|" + idemKey
+	now := time.Now().UnixMilli()
+	at.partialCloseIdemMu.Lock()
+	defer at.partialCloseIdemMu.Unlock()
+	if last, ok := at.partialCloseIdem[key]; ok && now-last < windowMs {
+		return true
+	}
+	at.partialCloseIdem[key] = now
+	return false
+}
+
+func (at *AutoTrader) recordPartialCloseBlock(posKey, blockKind string) {
+	if posKey == "" || blockKind == "" {
+		return
+	}
+	key := posKey + "|" + blockKind
+	at.partialCloseBlockMu.Lock()
+	at.partialCloseBlock[key] = time.Now().UnixMilli()
+	at.partialCloseBlockMu.Unlock()
+}
+
+func (at *AutoTrader) isBlockedByRecentPartialClose(posKey, blockKind string, windowSeconds int) bool {
+	if posKey == "" || blockKind == "" {
+		return false
+	}
+	if windowSeconds == 0 {
+		windowSeconds = 600
+	}
+	if windowSeconds < 0 {
+		return false
+	}
+	key := posKey + "|" + blockKind
+	now := time.Now().UnixMilli()
+	at.partialCloseBlockMu.Lock()
+	last := at.partialCloseBlock[key]
+	at.partialCloseBlockMu.Unlock()
+	return last > 0 && now-last < int64(windowSeconds)*1000
 }
 
 // Run runs the automatic trading main loop.
@@ -5036,6 +5102,25 @@ func (at *AutoTrader) checkDynamicStopLossTakeProfit(trendViewByPosKey map[strin
 	baseStopLossConfig := riskConfig.DynamicStopLoss
 	baseTakeProfitConfig := riskConfig.DynamicTakeProfit
 
+	// SL/TP execution knobs (risk_control)
+	preferSLFirst := riskConfig.SLTPPreferStopLossOverTakeProfit
+	exitMinHoldSec := riskConfig.SignalExitMinHoldSeconds
+	if exitMinHoldSec < 0 {
+		exitMinHoldSec = 0
+	}
+	scaleOutBlockScaledTP := riskConfig.ScaleOutBlocksScaledTPSeconds
+	if scaleOutBlockScaledTP == 0 {
+		scaleOutBlockScaledTP = 600
+	}
+	scaledTPBlockScaleOut := riskConfig.ScaledTPBlocksScaleOutSeconds
+	if scaledTPBlockScaleOut == 0 {
+		scaledTPBlockScaleOut = 600
+	}
+	exitStateTTLMin := riskConfig.SLTPExitStateTTLMinutes
+	if exitStateTTLMin == 0 {
+		exitStateTTLMin = 60
+	}
+
 	// Skip if both are disabled
 	if (baseStopLossConfig == nil || !baseStopLossConfig.Enabled) && (baseTakeProfitConfig == nil || !baseTakeProfitConfig.Enabled) {
 		return nil
@@ -5091,6 +5176,9 @@ func (at *AutoTrader) checkDynamicStopLossTakeProfit(trendViewByPosKey map[strin
 	boolPtr := func(v bool) *bool { return &v }
 
 	currentPositionKeys := make(map[string]bool) // for cleaning slConfirmCount when position is closed
+	// Cache klines per symbol+tf for this check call to reduce duplicate fetches.
+	klinesCache := make(map[string][]market.Kline)
+	klinesErr := make(map[string]error)
 	// Check each position (use getPosStr/getPosFloat so paper and exchange formats both work)
 	for _, pos := range positions {
 		symbol := getPosStr(pos, "symbol", "")
@@ -5284,7 +5372,7 @@ func (at *AutoTrader) checkDynamicStopLossTakeProfit(trendViewByPosKey map[strin
 		if minHoldMs > 0 && float64(holdDurationMs) < minHoldMs {
 			// Allow emergency exit (signal level=3) to bypass MinHold; other actions remain blocked.
 			actionLevel, lastExecutedLevel := at.getSLTPExitState(posKey)
-			if hasAdj && actionLevel >= 3 && lastExecutedLevel < 3 {
+			if hasAdj && actionLevel >= 3 && lastExecutedLevel < 3 && holdDurationMs >= int64(exitMinHoldSec)*1000 {
 				closeReason := "system:signal:exit"
 				signalReason := fmt.Sprintf("Structural exit signal bypass MinHold: %s (level %d)", closeReason, actionLevel)
 				triggerDetail := buildSignalExitDetail(signalReason, &adj)
@@ -5360,6 +5448,30 @@ func (at *AutoTrader) checkDynamicStopLossTakeProfit(trendViewByPosKey map[strin
 		// 结构化退场信号：若状态机给出 scale_out(2) 或 exit(3)，且尚未执行到该等级，则执行减仓/全平并写交易历史
 		actionLevel, lastExecutedLevel := at.getSLTPExitState(posKey)
 		if hasAdj && actionLevel >= 2 && lastExecutedLevel < actionLevel {
+			// Expire stale state (TTL)
+			if at.store != nil && exitStateTTLMin > 0 {
+				parts := strings.SplitN(posKey, "_", 2)
+				if len(parts) == 2 {
+					dbPos, _ := at.store.Position().GetOpenPositionBySymbol(at.id, parts[0], strings.ToUpper(parts[1]))
+					if dbPos != nil && dbPos.SLTPExitSignalAt > 0 {
+						ageMin := float64(time.Now().UTC().UnixMilli()-dbPos.SLTPExitSignalAt) / 60000.0
+						if ageMin > float64(exitStateTTLMin) {
+							logger.Infof("⏳ TP/SL: stale signal state expired for %s %s (age=%.1fmin > ttl=%dmin)", symbol, side, ageMin, exitStateTTLMin)
+							_ = at.store.Position().SetSLTPExitSignalStateAndTimeBySymbol(at.id, parts[0], strings.ToUpper(parts[1]), "", time.Now().UTC().UnixMilli())
+							at.sltpExitSignalStateMu.Lock()
+							delete(at.sltpExitSignalState, posKey)
+							at.sltpExitSignalStateMu.Unlock()
+							actionLevel = 0
+							lastExecutedLevel = 0
+						}
+					}
+				}
+			}
+			if actionLevel == 2 && at.isBlockedByRecentPartialClose(posKey, "scaled_tp", scaledTPBlockScaleOut) {
+				logger.Infof("⏳ TP/SL: skip scale_out due to recent scaled TP block for %s %s", symbol, side)
+				// keep state; wait next cycle
+				goto afterSignalExit
+			}
 			if actionLevel == 2 && at.shouldCooldownPartialClose(posKey, "signal_scale_out") {
 				logger.Infof("⏳ TP/SL: skip scale_out due to cooldown for %s %s", symbol, side)
 			} else {
@@ -5404,6 +5516,9 @@ func (at *AutoTrader) checkDynamicStopLossTakeProfit(trendViewByPosKey map[strin
 				logger.Infof("❌ Failed to execute signal exit for %s (level %d): %v", symbol, actionLevel, err)
 			} else {
 				at.setSLTPExitExecutedLevel(posKey, actionLevel)
+				if actionLevel == 2 {
+					at.recordPartialCloseBlock(posKey, "scale_out")
+				}
 				at.recordStrategyTriggeredClose(kernel.StrategyTriggeredClose{
 					Symbol: symbol, Side: side, Reason: signalReason, Price: markPrice,
 				})
@@ -5412,6 +5527,7 @@ func (at *AutoTrader) checkDynamicStopLossTakeProfit(trendViewByPosKey map[strin
 			}
 			}
 		}
+	afterSignalExit:
 
 		// Get market data for ATR and support/resistance calculations (timeframe from config, default 15m)
 		tf := "15m"
@@ -5421,7 +5537,17 @@ func (at *AutoTrader) checkDynamicStopLossTakeProfit(trendViewByPosKey map[strin
 				tf = "15m"
 			}
 		}
-		klines, err := at.marketClient.GetKlines(symbol, tf, 50)
+		cacheKey := market.Normalize(symbol) + "|" + tf
+		klines, ok := klinesCache[cacheKey]
+		err, hasErr := klinesErr[cacheKey]
+		if !ok && !hasErr {
+			klines, err = at.marketClient.GetKlines(symbol, tf, 50)
+			if err != nil {
+				klinesErr[cacheKey] = err
+			} else {
+				klinesCache[cacheKey] = klines
+			}
+		}
 		if err != nil {
 			logger.Infof("⚠️  Failed to get klines for %s: %v", symbol, err)
 			continue
@@ -5494,8 +5620,10 @@ func (at *AutoTrader) checkDynamicStopLossTakeProfit(trendViewByPosKey map[strin
 			}
 		}
 
-		// 先检查止盈、再检查止损：同一价位同时满足时优先兑现利润，避免「本可止盈却被追踪止损平仓」
-		if takeProfitChecker != nil {
+		runTP := func() bool {
+			if takeProfitChecker == nil {
+				return false
+			}
 			scaledTaken := at.getScaledLevelsTaken(posKey)
 			logger.Infof("📋 TP check %s %s: pnl=%.2f%%, entry=%.4f mark=%.4f, scaled_levels_taken=%d",
 				symbol, side, pnlPct, entryPrice, markPrice, len(scaledTaken))
@@ -5515,13 +5643,13 @@ func (at *AutoTrader) checkDynamicStopLossTakeProfit(trendViewByPosKey map[strin
 					if !ok {
 						at.tpTrailingFirstTriggeredAt[posKey] = time.Now().UTC().UnixMilli()
 						at.tpTrailingFirstTriggeredAtMu.Unlock()
-						continue
+						return false
 					}
 					elapsedMs := time.Now().UTC().UnixMilli() - firstAt
 					requiredMs := int64(takeProfitConfig.TrailingTPConfirmMinutes * 60 * 1000)
 					at.tpTrailingFirstTriggeredAtMu.Unlock()
 					if elapsedMs < requiredMs {
-						continue
+						return false
 					}
 					at.tpTrailingFirstTriggeredAtMu.Lock()
 					delete(at.tpTrailingFirstTriggeredAt, posKey)
@@ -5535,14 +5663,17 @@ func (at *AutoTrader) checkDynamicStopLossTakeProfit(trendViewByPosKey map[strin
 				if err := at.executeTakeProfit(&positionInfo, signal, hasAdj, tpDetail); err != nil {
 					logger.Infof("❌ Failed to execute take profit for %s: %v", symbol, err)
 				}
-				continue
+				return true
 			}
+			return false
 		}
 
-		// Check stop loss
+		runSL := func() bool {
+			if stopLossChecker == nil {
+				return false
+			}
 		// Long: use supportLevel (stop below support)
 		// Short: use resistanceLevel (stop above resistance)
-		if stopLossChecker != nil {
 			slLevel := supportLevel
 			if side == "short" {
 				slLevel = resistanceLevel
@@ -5559,8 +5690,16 @@ func (at *AutoTrader) checkDynamicStopLossTakeProfit(trendViewByPosKey map[strin
 			}
 			if signal.Triggered {
 				confirmMinutes := 0.0
-				if stopLossConfig.ConfirmMinutes > 0 {
+				mode := strings.TrimSpace(strings.ToLower(stopLossConfig.ConfirmMode))
+				switch mode {
+				case "cycles":
+					confirmMinutes = 0
+				case "minutes", "minutes_then_samples":
 					confirmMinutes = stopLossConfig.ConfirmMinutes
+				default: // auto
+					if stopLossConfig.ConfirmMinutes > 0 {
+						confirmMinutes = stopLossConfig.ConfirmMinutes
+					}
 				}
 				if confirmMinutes > 0 {
 					// Confirm by real time: require condition to hold for ConfirmMinutes
@@ -5574,6 +5713,28 @@ func (at *AutoTrader) checkDynamicStopLossTakeProfit(trendViewByPosKey map[strin
 					elapsedMin := float64(nowMs-firstMs) / 60000.0
 					at.slFirstTriggeredAtMu.Unlock()
 					if elapsedMin >= confirmMinutes {
+						// optional min samples after minutes confirm
+						if strings.TrimSpace(strings.ToLower(stopLossConfig.ConfirmMode)) == "minutes_then_samples" {
+							minSamples := stopLossConfig.ConfirmMinSamples
+							if minSamples <= 0 {
+								minSamples = 2
+							}
+							if trendViewByPosKey == nil {
+								// samples count only in AI cycle; system cycle waits
+								return false
+							}
+							at.slConfirmCountMu.Lock()
+							at.slConfirmCount[posKey]++
+							samples := at.slConfirmCount[posKey]
+							at.slConfirmCountMu.Unlock()
+							if samples < minSamples {
+								logger.Infof("⏳ SL minutes confirmed; waiting samples %s %s samples=%d/%d (%s)", symbol, side, samples, minSamples, signal.Reason)
+								return false
+							}
+							at.slConfirmCountMu.Lock()
+							delete(at.slConfirmCount, posKey)
+							at.slConfirmCountMu.Unlock()
+						}
 						kernel.LogStopLossCheck(symbol, signal)
 						var slDetail string
 						if hasAdj {
@@ -5585,9 +5746,9 @@ func (at *AutoTrader) checkDynamicStopLossTakeProfit(trendViewByPosKey map[strin
 						at.slFirstTriggeredAtMu.Lock()
 						delete(at.slFirstTriggeredAt, posKey)
 						at.slFirstTriggeredAtMu.Unlock()
-						continue
+						return true
 					}
-					continue
+					return false
 				}
 				// Confirm by cycles: execute only after N consecutive cycles with SL condition met
 				requiredCycles := 1
@@ -5636,7 +5797,7 @@ func (at *AutoTrader) checkDynamicStopLossTakeProfit(trendViewByPosKey map[strin
 				}
 				// ConfirmCycles counts only in AI main cycle to avoid double-counting; system cycle is expected to use ConfirmMinutes.
 				if trendViewByPosKey == nil {
-					continue
+					return false
 				}
 				at.slConfirmCountMu.Lock()
 				at.slConfirmCount[posKey]++
@@ -5654,9 +5815,9 @@ func (at *AutoTrader) checkDynamicStopLossTakeProfit(trendViewByPosKey map[strin
 					at.slConfirmCountMu.Lock()
 					delete(at.slConfirmCount, posKey)
 					at.slConfirmCountMu.Unlock()
-					continue
+					return true
 				}
-				continue
+				return false
 			}
 			// Condition not triggered: reset consecutive count and first-trigger time
 			at.slConfirmCountMu.Lock()
@@ -5665,6 +5826,24 @@ func (at *AutoTrader) checkDynamicStopLossTakeProfit(trendViewByPosKey map[strin
 			at.slFirstTriggeredAtMu.Lock()
 			delete(at.slFirstTriggeredAt, posKey)
 			at.slFirstTriggeredAtMu.Unlock()
+			return false
+		}
+
+		// Priority: TP-first (default) vs SL-first (config)
+		if preferSLFirst {
+			if runSL() {
+				continue
+			}
+			if runTP() {
+				continue
+			}
+		} else {
+			if runTP() {
+				continue
+			}
+			if runSL() {
+				continue
+			}
 		}
 	}
 
@@ -5841,6 +6020,29 @@ func (at *AutoTrader) executeTakeProfit(position *kernel.PositionInfo, signal *k
 	// Cooldown for partial closes to avoid duplicate partial executions in short window (e.g., fast cycles / delayed sync).
 	posKey := market.Normalize(position.Symbol) + "_" + strings.ToLower(position.Side)
 	if decision.CloseQuantity > 0 && decision.CloseQuantity < position.Quantity {
+		minPct := at.getPartialCloseMinPercent()
+		if position.Quantity > 0 && (decision.CloseQuantity/position.Quantity*100) < minPct {
+			logger.Infof("⏳ TP: skip partial close too small for %s %s (pct=%.2f%% < min=%.2f%%)", position.Symbol, position.Side, decision.CloseQuantity/position.Quantity*100, minPct)
+			return nil
+		}
+		idemKey := fmt.Sprintf("tp|%s|%.1f|%.4f", signal.Type, signal.PartialPercent, signal.Price)
+		if at.shouldIdemPartialClose(posKey, idemKey, 2*60*1000) {
+			logger.Infof("⏳ TP: skip partial close due to idempotency for %s %s (%s)", position.Symbol, position.Side, idemKey)
+			return nil
+		}
+		if signal.Type == "scaled" {
+			blockWin := 600
+			if at.strategyEngine != nil && at.strategyEngine.GetConfig() != nil {
+				v := at.strategyEngine.GetConfig().RiskControl.ScaleOutBlocksScaledTPSeconds
+				if v != 0 {
+					blockWin = v
+				}
+			}
+			if at.isBlockedByRecentPartialClose(posKey, "scale_out", blockWin) {
+				logger.Infof("⏳ TP: skip scaled TP due to recent scale_out block for %s %s", position.Symbol, position.Side)
+				return nil
+			}
+		}
 		if at.shouldCooldownPartialClose(posKey, "tp_partial") {
 			logger.Infof("⏳ TP: skip partial close due to cooldown for %s %s", position.Symbol, position.Side)
 			return nil
@@ -5872,6 +6074,9 @@ func (at *AutoTrader) executeTakeProfit(position *kernel.PositionInfo, signal *k
 
 	if err := at.executeDecisionWithRecord(&decision, &actionRecord, 0); err != nil {
 		return fmt.Errorf("failed to close position: %w", err)
+	}
+	if signal.Type == "scaled" && decision.CloseQuantity > 0 && decision.CloseQuantity < position.Quantity {
+		at.recordPartialCloseBlock(posKey, "scaled_tp")
 	}
 
 	at.recordStrategyTriggeredClose(kernel.StrategyTriggeredClose{

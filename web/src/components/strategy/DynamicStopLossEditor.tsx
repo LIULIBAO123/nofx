@@ -61,6 +61,10 @@ export function DynamicStopLossEditor({
       confirmCyclesDesc: { zh: '止损条件连续满足 N 个周期后才执行，减少单 K 线假跌破。1=立即执行', en: 'Execute stop only after condition holds N consecutive cycles; 1=immediate' },
       confirmMinutes: { zh: '确认时长（分钟）', en: 'Confirm duration (min)' },
       confirmMinutesDesc: { zh: '>0 时按真实时间：条件需持续满足此分钟数才执行；0=使用上方周期数', en: 'When >0: require condition to hold this many minutes; 0=use cycles above' },
+      confirmMode: { zh: '确认模式', en: 'Confirm mode' },
+      confirmModeDesc: { zh: 'auto=分钟优先；minutes=强制按分钟；cycles=强制按周期；minutes_then_samples=先分钟确认再要求最少采样次数', en: 'auto=prefer minutes; minutes=minutes only; cycles=cycles only; minutes_then_samples=minutes then min samples' },
+      confirmMinSamples: { zh: '最少采样次数', en: 'Min samples' },
+      confirmMinSamplesDesc: { zh: '仅 minutes_then_samples 生效：分钟确认达成后，仍需主周期触发 N 次才执行（0=默认 2）', en: 'Only for minutes_then_samples: after minutes satisfied, still require N AI-cycle samples (0=default 2)' },
       klinesTimeframe: { zh: '止损K线周期', en: 'SL klines timeframe' },
       klinesTimeframeDesc: { zh: 'ATR、支撑阻力、逆势早退等使用的K线周期；1h 可减少 15m 毛刺', en: 'Timeframe for ATR, S/R, adverse exit; 1h reduces 15m noise' },
       srUseEma20: { zh: '支撑/阻力用 EMA20', en: 'S/R use EMA20' },
@@ -106,6 +110,8 @@ export function DynamicStopLossEditor({
     support_resistance_buffer: 0.5,
     confirm_cycles: 2,            // 连续 2 周期确认，减少单 K 线假跌破
     confirm_minutes: 0,           // 0=按周期数确认；>0 则按真实分钟数
+    confirm_mode: 'auto',
+    confirm_min_samples: 2,
     atr_tolerance_enabled: true,
     atr_high_multiplier: 1.2,     // 当前 ATR > 长期×1.2 视为高波动
     klines_timeframe: '15m',      // 15m 响应快；1h 可减毛刺
@@ -287,6 +293,36 @@ export function DynamicStopLossEditor({
                   style={{ background: '#1E2329', border: '1px solid #2B3139', color: '#EAECEF' }}
                 />
                 <span className="text-[10px] ml-2" style={{ color: '#5E6673' }}>{t('confirmMinutesDesc')}</span>
+              </div>
+              <div>
+                <label className="text-xs block mb-1" style={{ color: '#848E9C' }}>{t('confirmMode')}</label>
+                <select
+                  value={currentConfig.confirm_mode || 'auto'}
+                  onChange={(e) => updateField('confirm_mode', e.target.value)}
+                  disabled={disabled}
+                  className="rounded px-2 py-1 text-sm"
+                  style={{ background: '#1E2329', border: '1px solid #2B3139', color: '#EAECEF' }}
+                >
+                  <option value="auto">auto</option>
+                  <option value="minutes">minutes</option>
+                  <option value="cycles">cycles</option>
+                  <option value="minutes_then_samples">minutes_then_samples</option>
+                </select>
+                <span className="text-[10px] ml-2" style={{ color: '#5E6673' }}>{t('confirmModeDesc')}</span>
+              </div>
+              <div>
+                <label className="text-xs block mb-1" style={{ color: '#848E9C' }}>{t('confirmMinSamples')}</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={10}
+                  value={currentConfig.confirm_min_samples ?? 2}
+                  onChange={(e) => updateField('confirm_min_samples', Math.max(0, parseInt(e.target.value, 10) || 0))}
+                  disabled={disabled}
+                  className="w-16 rounded px-2 py-1 text-sm"
+                  style={{ background: '#1E2329', border: '1px solid #2B3139', color: '#EAECEF' }}
+                />
+                <span className="text-[10px] ml-2" style={{ color: '#5E6673' }}>{t('confirmMinSamplesDesc')}</span>
               </div>
               <div>
                 <label className="text-xs block mb-1" style={{ color: '#848E9C' }}>{t('klinesTimeframe')}</label>
