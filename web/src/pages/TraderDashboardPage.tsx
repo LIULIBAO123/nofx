@@ -21,6 +21,9 @@ import type {
     Statistics,
     TraderInfo,
     Exchange,
+    LatestAnalysisResponse,
+    DirectionPoolResponse,
+    PositionSLTPAdjustmentItem,
 } from '../types'
 
 // --- Helper Functions ---
@@ -95,6 +98,7 @@ function truncateAddress(address: string, startLen = 6, endLen = 4): string {
 
 // --- Components ---
 
+/** 实盘与实盘模拟共用同一看板：同一组件、同一 API、同一展示逻辑；仅 isSimulation 控制标签/入口差异。 */
 interface TraderDashboardPageProps {
     selectedTrader?: TraderInfo
     traders?: TraderInfo[]
@@ -116,6 +120,10 @@ interface TraderDashboardPageProps {
     isSimulation?: boolean
     /** 手动刷新看板数据（状态/账户/持仓/决策等） */
     onRefresh?: () => void
+    /** 最新 AI 分析（市况、场景、预测、止盈止损调整） */
+    latestAnalysis?: LatestAnalysisResponse
+    /** 方向池（实时多空方向） */
+    directionPool?: DirectionPoolResponse
 }
 
 export function TraderDashboardPage({
@@ -136,6 +144,8 @@ export function TraderDashboardPage({
     exchanges,
     isSimulation,
     onRefresh,
+    latestAnalysis,
+    directionPool,
 }: TraderDashboardPageProps) {
     const [closingPosition, setClosingPosition] = useState<string | null>(null)
     const [selectedChartSymbol, setSelectedChartSymbol] = useState<string | undefined>(undefined)
@@ -147,6 +157,9 @@ export function TraderDashboardPage({
     // Current positions pagination
     const [positionsPageSize, setPositionsPageSize] = useState<number>(20)
     const [positionsCurrentPage, setPositionsCurrentPage] = useState<number>(1)
+
+    // 系统周期/止盈止损周期「查看输出」弹层：'system' | 'sltp' | null
+    const [cycleOutputView, setCycleOutputView] = useState<'system' | 'sltp' | null>(null)
 
     // Calculate paginated positions
     const totalPositions = positions?.length || 0
@@ -357,14 +370,10 @@ export function TraderDashboardPage({
     return (
         <DeepVoidBackground className="min-h-screen pb-12" disableAnimation>
             <GrainOverlay />
-            <div className="w-full px-5 lg:px-10 xl:px-14 py-6 lg:py-8 relative z-10 flex flex-col gap-5">
+            <main className="w-full px-5 lg:px-10 xl:px-14 py-6 lg:py-8 relative z-10 flex flex-col gap-5">
                 {/* Trader Header */}
-                        <div
-                            className="rounded-2xl p-5 lg:p-6 animate-scale-in modern-card group"
-                    style={{
-                        background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.6) 0%, rgba(15, 23, 42, 0.4) 100%)',
-                    }}
-                >
+                <div className="trader-header-block">
+                <div className="rounded-2xl p-5 lg:p-6 animate-scale-in modern-card group" style={{ background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.6) 0%, rgba(15, 23, 42, 0.4) 100%)' }}>
                     <div className="flex items-start justify-between mb-4">
                         <h2 className="text-2xl font-bold flex items-center gap-4 text-white">
                             <div className="relative">
@@ -520,8 +529,8 @@ export function TraderDashboardPage({
                             </div>
                         )}
                     </div>
+                    </div>
                 </div>
-
                 {/* 模拟交易隔离标识：明确标注当前为模拟交易看板 */}
                 {isSimulation && (
                     <div className="mb-4 px-4 py-2 rounded-lg border border-amber-500/30 bg-amber-500/10 flex items-center gap-2">
@@ -606,10 +615,10 @@ export function TraderDashboardPage({
                     </div>
                 )}
 
-                {/* Main Content Area - 模板: 区块间距 gap-5 */}
+                {/* Main Content Area - 账户净值与 AI 决策 50-50 等宽；当前持仓/历史仓位全宽同宽 */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-                    {/* Left Column: Charts + Positions */}
-                    <div className="space-y-6">
+                    {/* Left Cell: 账户净值曲线 */}
+                    <div className="min-w-0">
                         {/* Chart Tabs (Equity / K-line) */}
                         <div
                             ref={chartSectionRef}
@@ -627,39 +636,183 @@ export function TraderDashboardPage({
                                 isSimulation={isSimulation}
                             />
                         </div>
+                    </div>
 
-                        {/* Current Positions */}
-                        <div
-                            className="nofx-glass rounded-2xl p-5 lg:p-6 animate-slide-in relative overflow-hidden group"
-                            style={{ animationDelay: '0.15s' }}
-                        >
-                            <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity">
-                                <div className="w-24 h-24 rounded-full bg-blue-500 blur-3xl" />
+                    {/* Right Column: AI 决策/分析 */}
+                    <div
+                        className="nofx-glass p-6 animate-slide-in h-fit lg:sticky lg:top-24 lg:max-h-[calc(100vh-120px)] flex flex-col min-w-0"
+                        style={{ animationDelay: '0.2s' }}
+                    >
+                        {/* Header */}
+                        <div className="flex items-center gap-3 mb-5 pb-4 border-b border-white/5 shrink-0">
+                            <div
+                                className="w-10 h-10 rounded-xl flex items-center justify-center text-xl shadow-[0_4px_14px_rgba(99,102,241,0.4)]"
+                                style={{
+                                    background: 'linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%)',
+                                }}
+                            >
+                                🧠
                             </div>
-                            <div className="flex items-center justify-between mb-5 relative z-10 flex-wrap gap-2">
-                                <h2 className="text-lg font-bold flex items-center gap-2 text-nofx-text-main uppercase tracking-wide">
-                                    <span className="text-blue-500">◈</span> {t('currentPositions', language)}
+                            <div className="flex-1">
+                                <h2 className="text-xl font-bold text-nofx-text-main">
+                                    {language === 'zh' ? 'AI 决策 / 分析' : 'AI Decisions / Analysis'}
                                 </h2>
-                                {positions && positions.length > 0 && (
-                                    <div className="flex items-center gap-3 flex-wrap">
-                                        <div className="text-xs px-2 py-1 rounded bg-nofx-gold/10 text-nofx-gold border border-nofx-gold/20 font-mono shadow-[0_0_10px_rgba(240,185,11,0.1)]">
-                                            {positions.length} {t('active', language)}
+                                <div className="text-xs text-nofx-text-muted mt-0.5">
+                                    {language === 'zh' ? '与回测实验室一致的思维链与决策记录' : 'Same as Backtest Lab: chain-of-thought and decision log'}
+                                </div>
+                                {decisions && decisions.length > 0 && (
+                                    <>
+                                        <div className="text-xs text-nofx-text-muted mt-0.5">
+                                            {t('lastCycles', language, { count: decisions.length })}
                                         </div>
-                                        <div className="flex items-center gap-3 text-xs font-mono">
-                                            <span className="text-nofx-text-muted">
-                                                {language === 'zh' ? '保证金' : 'Margin'}: ${(positions.reduce((s, p) => s + (p.margin_used ?? 0), 0)).toFixed(2)}
-                                            </span>
-                                            <span className={`font-semibold ${positions.reduce((s, p) => s + p.unrealized_pnl, 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                                                {language === 'zh' ? '浮盈' : 'uPnL'}: {positions.reduce((s, p) => s + p.unrealized_pnl, 0) >= 0 ? '+' : ''}{positions.reduce((s, p) => s + p.unrealized_pnl, 0).toFixed(2)}
-                                            </span>
+                                        <div className="text-[11px] text-nofx-text-muted mt-1 opacity-90">
+                                            {t('decisionListHint', language)}
                                         </div>
-                                    </div>
+                                        <div className="text-[11px] text-nofx-text-muted mt-0.5 opacity-75">
+                                            {t('decisionCycleNote', language)}
+                                        </div>
+                                    </>
                                 )}
                             </div>
-                            {positions && positions.length > 0 ? (
-                                <div>
-                                    <div className="overflow-x-auto">
-                                        <table className="w-full text-xs">
+                            {/* Limit Selector */}
+                            <select
+                                value={decisionsLimit}
+                                onChange={(e) => onDecisionsLimitChange(Number(e.target.value))}
+                                className="px-3 py-1.5 rounded-lg text-sm font-medium cursor-pointer transition-all bg-black/40 text-nofx-text-main border border-white/10 hover:border-nofx-accent focus:outline-none"
+                            >
+                                <option value={5}>5</option>
+                                <option value={10}>10</option>
+                                <option value={20}>20</option>
+                                <option value={50}>50</option>
+                                <option value={100}>100</option>
+                            </select>
+                        </div>
+
+                        {/* 系统周期 / 止盈止损周期：独立板块，视觉隔离 */}
+                        {status && (
+                            <div className="mb-4 p-4 rounded-xl border border-white/15 bg-white/[0.03]">
+                                <div className="text-[11px] text-nofx-text-muted uppercase tracking-wide mb-3">
+                                    {language === 'zh' ? '本会话周期统计' : 'Session cycle stats'}
+                                </div>
+                                <div className="flex flex-wrap gap-3">
+                                    <div
+                                        role="button"
+                                        tabIndex={0}
+                                        onClick={() => setCycleOutputView('system')}
+                                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setCycleOutputView('system') }}
+                                        className="px-3 py-2 rounded-lg bg-white/[0.06] border border-white/10 min-w-0 flex-1 basis-24 cursor-pointer hover:border-white/20 hover:bg-white/[0.08] transition-colors"
+                                        title={language === 'zh' ? '本会话系统周期执行次数（点击查看思维链历史）' : 'System cycles this session (click to view chain history)'}
+                                    >
+                                        <div className="text-[11px] text-nofx-text-muted uppercase tracking-wide">
+                                            {t('systemCycleLabel', language)}
+                                        </div>
+                                        <div className="text-sm font-semibold text-nofx-text-main tabular-nums">
+                                            {typeof status.system_cycle_count === 'number' ? status.system_cycle_count : '–'}
+                                        </div>
+                                        <div className="text-[10px] text-nofx-text-muted mt-0.5 opacity-80">
+                                            {language === 'zh' ? '点击查看思维链' : 'View chain'}
+                                        </div>
+                                    </div>
+                                    <div
+                                        role="button"
+                                        tabIndex={0}
+                                        onClick={() => setCycleOutputView('sltp')}
+                                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setCycleOutputView('sltp') }}
+                                        className="px-3 py-2 rounded-lg bg-white/[0.06] border border-white/10 min-w-0 flex-1 basis-24 cursor-pointer hover:border-white/20 hover:bg-white/[0.08] transition-colors"
+                                        title={language === 'zh' ? '本会话止盈止损分析周期执行次数（点击查看思维链历史）' : 'SL/TP analysis cycles (click to view chain history)'}
+                                    >
+                                        <div className="text-[11px] text-nofx-text-muted uppercase tracking-wide">
+                                            {t('sltpAnalysisCycleLabel', language)}
+                                        </div>
+                                        <div className="text-sm font-semibold text-nofx-text-main tabular-nums">
+                                            {typeof status.sltp_analysis_cycle_count === 'number' ? status.sltp_analysis_cycle_count : '–'}
+                                        </div>
+                                        <div className="text-[10px] text-nofx-text-muted mt-0.5 opacity-80">
+                                            {language === 'zh' ? '点击查看思维链' : 'View chain'}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Token 用量 */}
+                        <div className="mb-4 shrink-0">
+                            <AIUsageCard language={language} traderId={selectedTraderId} />
+                        </div>
+
+                        {/* Decisions List - Scrollable */}
+                        <div
+                            className="space-y-4 overflow-y-auto pr-2 custom-scrollbar"
+                            style={{ maxHeight: 'calc(100vh - 380px)' }}
+                        >
+                            {decisions && decisions.length > 0 ? (
+                                decisions.map((decision, i) => {
+                                    // AI 思维链只展示 wait/hold；开平仓由系统执行，见「系统周期」
+                                    const onlyHoldWait = {
+                                        ...decision,
+                                        decisions: (decision.decisions || []).filter(
+                                            (a) => a.action === 'hold' || a.action === 'wait'
+                                        )
+                                    }
+                                    return (
+                                        <DecisionCard
+                                            key={i}
+                                            decision={onlyHoldWait}
+                                            language={language}
+                                            onSymbolClick={handleSymbolClick}
+                                            systemExecutionHint
+                                        />
+                                    )
+                                })
+                            ) : (
+                                <div className="py-16 text-center text-nofx-text-muted opacity-60">
+                                    <div className="text-6xl mb-4 opacity-30 grayscale">🧠</div>
+                                    <div className="text-lg font-semibold mb-2 text-nofx-text-main">
+                                        {t('noDecisionsYet', language)}
+                                    </div>
+                                    <div className="text-sm">
+                                        {t('aiDecisionsWillAppear', language)}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+
+                {/* Full-width: 当前持仓（与历史仓位同宽） */}
+                <div className="full-width-positions-section">
+                <div className="space-y-6 mt-5">
+                    <div
+                        className="nofx-glass rounded-2xl p-5 lg:p-6 animate-slide-in relative overflow-hidden group"
+                        style={{ animationDelay: '0.15s' }}
+                    >
+                        <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity">
+                            <div className="w-24 h-24 rounded-full bg-blue-500 blur-3xl" />
+                        </div>
+                        <div className="flex items-center justify-between mb-5 relative z-10 flex-wrap gap-2">
+                            <h2 className="text-lg font-bold flex items-center gap-2 text-nofx-text-main uppercase tracking-wide">
+                                <span className="text-blue-500">◈</span> {t('currentPositions', language)}
+                            </h2>
+                            {positions && positions.length > 0 && (
+                                <div className="flex items-center gap-3 flex-wrap">
+                                    <div className="text-xs px-2 py-1 rounded bg-nofx-gold/10 text-nofx-gold border border-nofx-gold/20 font-mono shadow-[0_0_10px_rgba(240,185,11,0.1)]">
+                                        {positions.length} {t('active', language)}
+                                    </div>
+                                    <div className="flex items-center gap-3 text-xs font-mono">
+                                        <span className="text-nofx-text-muted">
+                                            {language === 'zh' ? '保证金' : 'Margin'}: ${(positions.reduce((s, p) => s + (p.margin_used ?? 0), 0)).toFixed(2)}
+                                        </span>
+                                        <span className={`font-semibold ${positions.reduce((s, p) => s + p.unrealized_pnl, 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                            {language === 'zh' ? '浮盈' : 'uPnL'}: {positions.reduce((s, p) => s + p.unrealized_pnl, 0) >= 0 ? '+' : ''}{positions.reduce((s, p) => s + p.unrealized_pnl, 0).toFixed(2)}
+                                        </span>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                        {positions && positions.length > 0 ? (
+                            <div>
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-xs">
                                             <thead className="text-left border-b border-white/5">
                                                 <tr>
                                                     <th className="p-4 text-[11px] font-semibold text-nofx-text-muted whitespace-nowrap text-left uppercase tracking-[0.08em]">{t('symbol', language)}</th>
@@ -736,18 +889,34 @@ export function TraderDashboardPage({
                                                     </tr>
                                                     {(() => {
                                                         const hasLive = pos.distance_to_sl_pct != null || pos.distance_to_tp_pct != null || pos.trailing_enabled || pos.scaled_tp_enabled || pos.support_resistance_enabled || pos.resistance_enabled
+                                                        const adj = latestAnalysis?.position_sl_tp_adjustments?.find(
+                                                            (a) => (a.symbol || '').toUpperCase() === (pos.symbol || '').toUpperCase() && (a.side || '').toLowerCase() === (pos.side || '').toLowerCase()
+                                                        )
                                                         return (
                                                         <tr className="border-b border-white/5 bg-white/[0.02]">
                                                             <td colSpan={10} className="px-2 py-2 text-[11px]">
                                                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 font-mono">
-                                                                    {/* 固定实时参数：始终显示，有值显示数值否则显示 — */}
-                                                                    <div className="rounded-lg px-2.5 py-2 grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-0.5 text-[11px] font-mono" style={{ background: 'rgba(43,49,57,0.4)', border: '1px solid rgba(43,49,57,0.6)' }}>
-                                                                        <div className="flex items-center gap-1.5"><span className="text-nofx-text-muted shrink-0">{language === 'zh' ? '止损价' : 'SL'}</span><span className={(pos.stop_loss != null && pos.stop_loss > 0) ? 'text-red-400 font-medium' : 'text-nofx-text-muted'}>{(pos.stop_loss != null && pos.stop_loss > 0) ? '$' + formatFull(pos.stop_loss) : '—'}</span></div>
-                                                                        <div className="flex items-center gap-1.5"><span className="text-nofx-text-muted shrink-0">{language === 'zh' ? '止盈价' : 'TP'}</span><span className={(pos.take_profit != null && pos.take_profit > 0) ? 'text-emerald-400 font-medium' : 'text-nofx-text-muted'}>{(pos.take_profit != null && pos.take_profit > 0) ? '$' + formatFull(pos.take_profit) : '—'}</span></div>
-                                                                        <div className="flex items-center gap-1.5"><span className="text-nofx-text-muted shrink-0">ATR ×</span><span className="text-nofx-text-main">{((pos.atr_multiple_sl != null && pos.atr_multiple_sl > 0) || (pos.atr_multiple_tp != null && pos.atr_multiple_tp > 0)) ? (pos.atr_multiple_sl != null && pos.atr_multiple_sl > 0 ? formatFull(pos.atr_multiple_sl, 2) + '×' : '—') + ((pos.atr_multiple_sl != null && pos.atr_multiple_sl > 0) && (pos.atr_multiple_tp != null && pos.atr_multiple_tp > 0) ? ' / ' : '') + (pos.atr_multiple_tp != null && pos.atr_multiple_tp > 0 ? formatFull(pos.atr_multiple_tp, 2) + '×' : '') : '—'}</span></div>
-                                                                        <div className="flex items-center gap-1.5"><span className="text-nofx-text-muted shrink-0">ATR {language === 'zh' ? '数值' : 'value'}</span><span className="text-nofx-text-main">{(pos.atr_at_open != null && pos.atr_at_open > 0) ? '$' + formatFull(pos.atr_at_open, 6) : '—'}</span></div>
-                                                                        <div className="flex items-center gap-1.5"><span className="text-nofx-text-muted shrink-0">ATR {language === 'zh' ? '周期' : 'period'}</span><span className="text-nofx-text-muted">{(pos.atr_period != null && pos.atr_period > 0) ? String(pos.atr_period) : '—'}</span></div>
-                                                                        <div className="col-span-2 sm:col-span-3 text-[10px] mt-0.5" style={{ color: '#848E9C' }}>{language === 'zh' ? '参数在开仓时写入并持久保存，随刷新实时显示；距止损/距止盈随行情更新。无记录时显示 —' : 'Params saved at open and shown on each refresh; distance to SL/TP updates with price. No record = —'}</div>
+                                                                    <div className="space-y-2">
+                                                                        {/* 固定实时参数：始终显示，有值显示数值否则显示 — */}
+                                                                        <div className="rounded-lg px-2.5 py-2 grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-0.5 text-[11px] font-mono" style={{ background: 'rgba(43,49,57,0.4)', border: '1px solid rgba(43,49,57,0.6)' }}>
+                                                                            <div className="flex items-center gap-1.5"><span className="text-nofx-text-muted shrink-0">{language === 'zh' ? '止损价' : 'SL'}</span><span className={(pos.stop_loss != null && pos.stop_loss > 0) ? 'text-red-400 font-medium' : 'text-nofx-text-muted'}>{(pos.stop_loss != null && pos.stop_loss > 0) ? '$' + formatFull(pos.stop_loss) : '—'}</span></div>
+                                                                            <div className="flex items-center gap-1.5"><span className="text-nofx-text-muted shrink-0">{language === 'zh' ? '止盈价' : 'TP'}</span><span className={(pos.take_profit != null && pos.take_profit > 0) ? 'text-emerald-400 font-medium' : 'text-nofx-text-muted'}>{(pos.take_profit != null && pos.take_profit > 0) ? '$' + formatFull(pos.take_profit) : '—'}</span></div>
+                                                                            <div className="flex items-center gap-1.5"><span className="text-nofx-text-muted shrink-0">ATR ×</span><span className="text-nofx-text-main">{((pos.atr_multiple_sl != null && pos.atr_multiple_sl > 0) || (pos.atr_multiple_tp != null && pos.atr_multiple_tp > 0)) ? (pos.atr_multiple_sl != null && pos.atr_multiple_sl > 0 ? formatFull(pos.atr_multiple_sl, 2) + '×' : '—') + ((pos.atr_multiple_sl != null && pos.atr_multiple_sl > 0) && (pos.atr_multiple_tp != null && pos.atr_multiple_tp > 0) ? ' / ' : '') + (pos.atr_multiple_tp != null && pos.atr_multiple_tp > 0 ? formatFull(pos.atr_multiple_tp, 2) + '×' : '') : '—'}</span></div>
+                                                                            <div className="flex items-center gap-1.5"><span className="text-nofx-text-muted shrink-0">ATR {language === 'zh' ? '数值' : 'value'}</span><span className="text-nofx-text-main">{(pos.atr_at_open != null && pos.atr_at_open > 0) ? '$' + formatFull(pos.atr_at_open, 6) : '—'}</span></div>
+                                                                            <div className="flex items-center gap-1.5"><span className="text-nofx-text-muted shrink-0">ATR {language === 'zh' ? '周期' : 'period'}</span><span className="text-nofx-text-muted">{(pos.atr_period != null && pos.atr_period > 0) ? String(pos.atr_period) : '—'}</span></div>
+                                                                            <div className="col-span-2 sm:col-span-3 text-[10px] mt-0.5" style={{ color: '#848E9C' }}>{language === 'zh' ? '参数在开仓时写入并持久保存，随刷新实时显示；距止损/距止盈随行情更新。无记录时显示 —' : 'Params saved at open and shown on each refresh; distance to SL/TP updates with price. No record = —'}</div>
+                                                                        </div>
+                                                                        {/* AI 调节（当前生效）：与下方「止盈止损调整」同源，便于在当前持仓直接看到该仓位的调整后参数 */}
+                                                                        {adj && (
+                                                                            <div className="rounded-lg px-2.5 py-2 grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-0.5 text-[11px] font-mono" style={{ background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.25)' }} title={language === 'zh' ? 'AI 止盈止损调节，系统在边界内应用' : 'AI SL/TP adjustment applied within bounds'}>
+                                                                                <div className="col-span-2 sm:col-span-3 text-[10px] font-semibold text-blue-400/90 mb-0.5">{language === 'zh' ? 'AI 调节（当前生效）' : 'AI adjustment (active)'}</div>
+                                                                                <div className="flex items-center gap-1.5"><span className="text-nofx-text-muted shrink-0">{language === 'zh' ? '建议' : 'Advice'}</span><span className="text-nofx-text-main">{adj.advice ?? '—'}</span></div>
+                                                                                <div className="flex items-center gap-1.5"><span className="text-nofx-text-muted shrink-0">{language === 'zh' ? '追踪' : 'Trail'}</span><span className="text-nofx-text-main">{adj.trail_aggressiveness ?? '—'}</span></div>
+                                                                                <div className="flex items-center gap-1.5"><span className="text-nofx-text-muted shrink-0">ATR×SL</span><span className="text-nofx-text-main">{adj.atr_mult_sl != null ? String(adj.atr_mult_sl) : '—'}</span></div>
+                                                                                <div className="flex items-center gap-1.5"><span className="text-nofx-text-muted shrink-0">{language === 'zh' ? '锁利%' : 'Lock%'}</span><span className="text-nofx-text-main">{adj.lock_profit_pct != null ? String(adj.lock_profit_pct) : '—'}</span></div>
+                                                                                <div className="flex items-center gap-1.5"><span className="text-nofx-text-muted shrink-0">ΔCycles</span><span className="text-nofx-text-main">{adj.confirm_cycles_delta != null ? String(adj.confirm_cycles_delta) : '—'}</span></div>
+                                                                            </div>
+                                                                        )}
                                                                     </div>
                                                                     {hasLive && (
                                                                         <div className="rounded-lg px-2.5 py-2 grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-0.5 text-[11px] font-mono" style={{ background: 'rgba(30,35,41,0.6)', border: '1px solid #2B3139' }}>
@@ -840,79 +1009,193 @@ export function TraderDashboardPage({
                             )}
                         </div>
                     </div>
+                </div>
 
-                    {/* Right Column: Recent Decisions */}
-                    <div
-                        className="nofx-glass p-6 animate-slide-in h-fit lg:sticky lg:top-24 lg:max-h-[calc(100vh-120px)] flex flex-col"
-                        style={{ animationDelay: '0.2s' }}
-                    >
-                        {/* Header */}
-                        <div className="flex items-center gap-3 mb-5 pb-4 border-b border-white/5 shrink-0">
-                            <div
-                                className="w-10 h-10 rounded-xl flex items-center justify-center text-xl shadow-[0_4px_14px_rgba(99,102,241,0.4)]"
-                                style={{
-                                    background: 'linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%)',
-                                }}
-                            >
-                                🧠
-                            </div>
-                            <div className="flex-1">
-                                <h2 className="text-xl font-bold text-nofx-text-main">
-                                    {language === 'zh' ? 'AI 决策 / 分析' : 'AI Decisions / Analysis'}
-                                </h2>
-                                <div className="text-xs text-nofx-text-muted mt-0.5">
-                                    {language === 'zh' ? '与回测实验室一致的思维链与决策记录' : 'Same as Backtest Lab: chain-of-thought and decision log'}
+                {/* 持仓 · AI 实时+预测 · 止盈止损调整 汇总板块 */}
+                <div className="mt-6 nofx-glass rounded-2xl p-5 lg:p-6 border border-white/10 overflow-hidden">
+                    <h2 className="text-lg font-bold flex items-center gap-2 text-nofx-text-main mb-4 uppercase tracking-wide">
+                        <span className="text-amber-500/90">◇</span>
+                        {language === 'zh' ? '持仓 · AI 实时+预测 · 止盈止损' : 'Positions · AI real-time+prediction · SL/TP'}
+                    </h2>
+                    <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+                        {/* 1. 持仓信息 */}
+                        <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+                            <h3 className="text-sm font-semibold text-nofx-text-main mb-3 flex items-center gap-2">
+                                <span className="text-[10px] uppercase tracking-wider text-nofx-text-muted">{language === 'zh' ? '持仓信息' : 'Positions'}</span>
+                            </h3>
+                            {positions && positions.length > 0 ? (
+                                <div className="overflow-x-auto -mx-1">
+                                    <table className="w-full text-xs">
+                                        <thead>
+                                            <tr className="text-left text-nofx-text-muted border-b border-white/10">
+                                                <th className="py-1.5 pr-2">{t('symbol', language)}</th>
+                                                <th className="py-1.5 pr-2">{t('side', language)}</th>
+                                                <th className="py-1.5 pr-2 text-right">{language === 'zh' ? '入场' : 'Entry'}</th>
+                                                <th className="py-1.5 pr-2 text-right">{language === 'zh' ? '标记' : 'Mark'}</th>
+                                                <th className="py-1.5 pr-2 text-right">{language === 'zh' ? 'uPnL' : 'uPnL'}</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {positions.slice(0, 8).map((pos, i) => (
+                                                <tr key={i} className="border-b border-white/5 text-nofx-text-main">
+                                                    <td className="py-1.5 pr-2 font-mono">{pos.symbol}</td>
+                                                    <td className="py-1.5 pr-2">
+                                                        <span className={pos.side === 'long' ? 'text-fin-gain' : 'text-fin-loss'}>
+                                                            {pos.side === 'long' ? 'L' : 'S'}
+                                                        </span>
+                                                    </td>
+                                                    <td className="py-1.5 pr-2 text-right font-mono">{formatPrice(pos.entry_price)}</td>
+                                                    <td className="py-1.5 pr-2 text-right font-mono">{formatPrice(pos.mark_price)}</td>
+                                                    <td className={`py-1.5 pr-2 text-right font-medium ${pos.unrealized_pnl >= 0 ? 'text-fin-gain' : 'text-fin-loss'}`}>
+                                                        {pos.unrealized_pnl >= 0 ? '+' : ''}{pos.unrealized_pnl.toFixed(2)}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                    {positions.length > 8 && (
+                                        <div className="text-[10px] text-nofx-text-muted mt-1">
+                                            {language === 'zh' ? `共 ${positions.length} 个，仅显示前 8` : `Showing 8 of ${positions.length}`}
+                                        </div>
+                                    )}
                                 </div>
-                                {decisions && decisions.length > 0 && (
-                                    <>
-                                        <div className="text-xs text-nofx-text-muted mt-0.5">
-                                            {t('lastCycles', language, { count: decisions.length })}
+                            ) : (
+                                <p className="text-xs text-nofx-text-muted py-4">{t('noPositions', language)}</p>
+                            )}
+                        </div>
+
+                        {/* 2. AI 实时+预测 */}
+                        <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+                            <h3 className="text-sm font-semibold text-nofx-text-main mb-3 flex items-center gap-2">
+                                <span className="text-[10px] uppercase tracking-wider text-nofx-text-muted">{language === 'zh' ? 'AI 实时+预测' : 'AI real-time + prediction'}</span>
+                            </h3>
+                            <div className="space-y-2 text-xs">
+                                {latestAnalysis?.market_regime && (
+                                    <div><span className="text-nofx-text-muted">{language === 'zh' ? '市况' : 'Regime'}:</span> <span className="text-nofx-text-main">{latestAnalysis.market_regime}</span></div>
+                                )}
+                                {latestAnalysis?.scenario && (
+                                    <div><span className="text-nofx-text-muted">{language === 'zh' ? '场景' : 'Scenario'}:</span> <span className="text-nofx-text-main">{latestAnalysis.scenario}</span></div>
+                                )}
+                                {latestAnalysis?.risk_alert && (
+                                    <div className="text-amber-400 font-medium">{language === 'zh' ? '风险提示' : 'Risk alert'}</div>
+                                )}
+                                {latestAnalysis?.updated_at && (
+                                    <div className="text-nofx-text-muted">{language === 'zh' ? '更新' : 'Updated'}: {latestAnalysis.updated_at}</div>
+                                )}
+                                {(directionPool?.long?.length || directionPool?.short?.length) ? (
+                                    <div className="pt-1 border-t border-white/10">
+                                        <div className="text-[10px] text-nofx-text-muted mb-0.5 uppercase">{language === 'zh' ? '实时方向池' : 'Realtime direction'}</div>
+                                        <div className="flex flex-wrap gap-x-2 gap-y-0.5 text-[10px]">
+                                            {directionPool?.long?.length ? (
+                                                <span><span className="text-fin-gain">L</span>: {(directionPool.long.slice(0, 5).map((i) => i.symbol).join(', '))}{directionPool.long.length > 5 ? ` +${directionPool.long.length - 5}` : ''}</span>
+                                            ) : null}
+                                            {directionPool?.short?.length ? (
+                                                <span><span className="text-fin-loss">S</span>: {(directionPool.short.slice(0, 5).map((i) => i.symbol).join(', '))}{directionPool.short.length > 5 ? ` +${directionPool.short.length - 5}` : ''}</span>
+                                            ) : null}
                                         </div>
-                                        <div className="text-[11px] text-nofx-text-muted mt-1 opacity-90">
-                                            {t('decisionListHint', language)}
+                                    </div>
+                                ) : null}
+                                {latestAnalysis?.symbol_predictions && latestAnalysis.symbol_predictions.length > 0 && (
+                                    <div className="mt-2 pt-2 border-t border-white/10">
+                                        <div className="text-[10px] text-nofx-text-muted mb-1 uppercase">{language === 'zh' ? '预测' : 'Predictions'}</div>
+                                        <div className="flex flex-wrap gap-1.5">
+                                            {latestAnalysis.symbol_predictions.slice(0, 12).map((p, i) => (
+                                                <span key={i} className="px-1.5 py-0.5 rounded bg-white/5 text-nofx-text-main font-mono text-[10px]">
+                                                    {p.symbol} {p.predicted_direction === 'up' ? '↑' : p.predicted_direction === 'down' ? '↓' : '−'} {p.confidence != null ? p.confidence + '%' : ''}
+                                                </span>
+                                            ))}
+                                            {latestAnalysis.symbol_predictions.length > 12 && (
+                                                <span className="text-nofx-text-muted text-[10px]">+{latestAnalysis.symbol_predictions.length - 12}</span>
+                                            )}
                                         </div>
-                                    </>
+                                    </div>
+                                )}
+                                {latestAnalysis?.market_summary && (
+                                    <div className="mt-2 pt-2 border-t border-white/10 text-nofx-text-muted text-[11px] line-clamp-3">
+                                        {latestAnalysis.market_summary}
+                                    </div>
+                                )}
+                                {!latestAnalysis?.market_regime && !latestAnalysis?.scenario && !latestAnalysis?.symbol_predictions?.length && (
+                                    <p className="text-nofx-text-muted py-2">{language === 'zh' ? '暂无 AI 分析数据' : 'No AI analysis yet'}</p>
                                 )}
                             </div>
-                            {/* Limit Selector */}
-                            <select
-                                value={decisionsLimit}
-                                onChange={(e) => onDecisionsLimitChange(Number(e.target.value))}
-                                className="px-3 py-1.5 rounded-lg text-sm font-medium cursor-pointer transition-all bg-black/40 text-nofx-text-main border border-white/10 hover:border-nofx-accent focus:outline-none"
-                            >
-                                <option value={5}>5</option>
-                                <option value={10}>10</option>
-                                <option value={20}>20</option>
-                                <option value={50}>50</option>
-                                <option value={100}>100</option>
-                            </select>
                         </div>
 
-                        {/* Token 用量：按当前交易员隔离，仅显示本交易员的用量 */}
-                        <div className="mb-4 shrink-0">
-                            <AIUsageCard language={language} traderId={selectedTraderId} />
-                        </div>
-
-                        {/* Decisions List - Scrollable */}
-                        <div
-                            className="space-y-4 overflow-y-auto pr-2 custom-scrollbar"
-                            style={{ maxHeight: 'calc(100vh - 380px)' }}
-                        >
-                            {decisions && decisions.length > 0 ? (
-                                decisions.map((decision, i) => (
-                                    <DecisionCard key={i} decision={decision} language={language} onSymbolClick={handleSymbolClick} />
-                                ))
-                            ) : (
-                                <div className="py-16 text-center text-nofx-text-muted opacity-60">
-                                    <div className="text-6xl mb-4 opacity-30 grayscale">🧠</div>
-                                    <div className="text-lg font-semibold mb-2 text-nofx-text-main">
-                                        {t('noDecisionsYet', language)}
+                        {/* 3. 止盈止损调整（展示原始→调整后）；无 latest-analysis 调节时用思维链最近一条补足，与思维链一致 */}
+                        <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+                            <h3 className="text-sm font-semibold text-nofx-text-main mb-3 flex items-center gap-2">
+                                <span className="text-[10px] uppercase tracking-wider text-nofx-text-muted">{language === 'zh' ? '止盈止损调整' : 'SL/TP adjustments'}</span>
+                            </h3>
+                            {(() => {
+                                const fromLatest = latestAnalysis?.position_sl_tp_adjustments?.length ? latestAnalysis.position_sl_tp_adjustments : null
+                                const fromChain = status?.sltp_cycle_output_history?.length
+                                    ? status.sltp_cycle_output_history[status.sltp_cycle_output_history.length - 1].adjustments
+                                    : (status?.last_sltp_cycle_output?.length ? status.last_sltp_cycle_output : null)
+                                const effectiveAdjustments = fromLatest ?? fromChain ?? []
+                                const hasAdjustments = Array.isArray(effectiveAdjustments) && effectiveAdjustments.length > 0
+                                const fromChainHint = hasAdjustments && !fromLatest && fromChain ? (language === 'zh' ? '（来自思维链最近周期）' : ' (from latest cycle in chain)') : ''
+                                return hasAdjustments ? (
+                                    <div className="overflow-x-auto -mx-1">
+                                        {(() => {
+                                            const baselines = latestAnalysis?.position_sl_tp_baselines ?? []
+                                            const getBaseline = (symbol: string, side: string) =>
+                                                baselines.find((b) => (b.symbol || '').toLowerCase() === (symbol || '').toLowerCase() && (b.side || '').toLowerCase() === (side || '').toLowerCase())
+                                            const fmt = (orig: string | number | undefined | null, adj: string | number | undefined | null) => {
+                                                const o = orig != null && orig !== '' ? String(orig) : '–'
+                                                const a = adj != null && adj !== '' ? String(adj) : '–'
+                                                return o === a ? a : `${o} → ${a}`
+                                            }
+                                            return (
+                                                <table className="w-full text-xs">
+                                                    <thead>
+                                                        <tr className="text-left text-nofx-text-muted border-b border-white/10">
+                                                            <th className="py-1.5 pr-2">Symbol</th>
+                                                            <th className="py-1.5 pr-2">Side</th>
+                                                            <th className="py-1.5 pr-2">{language === 'zh' ? '建议' : 'Advice'}</th>
+                                                            <th className="py-1.5 pr-2">{language === 'zh' ? '追踪' : 'Trail'}</th>
+                                                            <th className="py-1.5 pr-2">ATR×SL</th>
+                                                            <th className="py-1.5 pr-2">{language === 'zh' ? '锁利%' : 'Lock%'}</th>
+                                                            <th className="py-1.5 pr-2">ΔCycles</th>
+                                                            <th className="py-1.5 pr-2">{language === 'zh' ? '阶段/退场' : 'Phase/Exit'}</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {effectiveAdjustments.map((row: PositionSLTPAdjustmentItem, i: number) => {
+                                                            const base = getBaseline(row.symbol, row.side)
+                                                            const origTrail = base?.trail_aggressiveness
+                                                            const origAtr = base?.atr_mult_sl
+                                                            const origLock = base?.lock_profit_pct
+                                                            const origCycles = base?.confirm_cycles
+                                                            const adjCycles = origCycles != null && row.confirm_cycles_delta != null ? origCycles + row.confirm_cycles_delta : row.confirm_cycles_delta
+                                                            const phaseExit = [row.phase_label, row.exit_bias].filter(Boolean).join(' / ') || '–'
+                                                            return (
+                                                                <tr key={i} className="border-b border-white/5 text-nofx-text-main">
+                                                                    <td className="py-1.5 pr-2 font-mono">{row.symbol}</td>
+                                                                    <td className="py-1.5 pr-2">{row.side}</td>
+                                                                    <td className="py-1.5 pr-2">{row.advice ?? '–'}</td>
+                                                                    <td className="py-1.5 pr-2" title={language === 'zh' ? '原始 → 调整后' : 'Original → Adjusted'}>{fmt(origTrail, row.trail_aggressiveness)}</td>
+                                                                    <td className="py-1.5 pr-2" title={language === 'zh' ? '原始 → 调整后' : 'Original → Adjusted'}>{fmt(origAtr, row.atr_mult_sl)}</td>
+                                                                    <td className="py-1.5 pr-2" title={language === 'zh' ? '原始 → 调整后' : 'Original → Adjusted'}>{fmt(origLock, row.lock_profit_pct)}</td>
+                                                                    <td className="py-1.5 pr-2" title={language === 'zh' ? '确认周期：原始 → 调整后' : 'Confirm cycles: original → adjusted'}>{fmt(origCycles, adjCycles)}</td>
+                                                                    <td className="py-1.5 pr-2 text-[10px] text-nofx-text-muted" title={[row.invalidation_level, row.rationale].filter(Boolean).join(' | ') || undefined}>{phaseExit}</td>
+                                                                </tr>
+                                                            )
+                                                        })}
+                                                    </tbody>
+                                                </table>
+                                            )
+                                        })()}
+                                        <p className="text-[10px] text-nofx-text-muted mt-1.5">
+                                            {language === 'zh' ? '策略边界已传给 AI，在边界内调整；表中为「原始 → 调整后」。' : 'Strategy bounds passed to AI; values shown as original → adjusted.'}
+                                            {fromChainHint}
+                                        </p>
                                     </div>
-                                    <div className="text-sm">
-                                        {t('aiDecisionsWillAppear', language)}
-                                    </div>
-                                </div>
-                            )}
+                                ) : (
+                                    <p className="text-xs text-nofx-text-muted py-4">
+                                        {language === 'zh' ? '无持仓或尚未有 AI 止盈止损调节' : 'No positions or no AI SL/TP adjustments yet'}
+                                    </p>
+                                )
+                            })()}
                         </div>
                     </div>
                 </div>
@@ -932,7 +1215,157 @@ export function TraderDashboardPage({
                         <PositionHistory traderId={selectedTraderId} />
                     </div>
                 )}
-            </div>
+
+            {/* 系统周期/止盈止损周期 · 思维链式历史输出弹层 */}
+            {cycleOutputView && (
+                <div
+                    className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+                    onClick={() => setCycleOutputView(null)}
+                    role="dialog"
+                    aria-modal="true"
+                    aria-label={language === 'zh' ? '周期输出思维链' : 'Cycle output chain'}
+                >
+                    <div
+                        className="nofx-glass rounded-2xl border border-white/15 max-w-2xl w-full max-h-[85vh] overflow-hidden flex flex-col shadow-xl"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="flex items-center justify-between p-4 border-b border-white/10">
+                            <h3 className="text-lg font-bold text-nofx-text-main">
+                                {cycleOutputView === 'system'
+                                    ? (language === 'zh' ? '系统周期 · 思维链' : 'System cycle · Chain')
+                                    : (language === 'zh' ? '止盈止损周期 · 思维链' : 'SL/TP cycle · Chain')}
+                                {(cycleOutputView === 'system' ? (status?.system_cycle_output_history?.length ?? 0) : (status?.sltp_cycle_output_history?.length ?? 0)) > 0 && (
+                                    <span className="ml-2 text-sm font-normal text-nofx-text-muted">
+                                        {language === 'zh'
+                                            ? `最近 ${cycleOutputView === 'system' ? (status?.system_cycle_output_history?.length ?? 0) : (status?.sltp_cycle_output_history?.length ?? 0)} 条`
+                                            : `Last ${cycleOutputView === 'system' ? (status?.system_cycle_output_history?.length ?? 0) : (status?.sltp_cycle_output_history?.length ?? 0)}`}
+                                    </span>
+                                )}
+                            </h3>
+                            <button
+                                type="button"
+                                onClick={() => setCycleOutputView(null)}
+                                className="p-2 rounded-lg hover:bg-white/10 text-nofx-text-muted hover:text-white transition-colors"
+                                aria-label={language === 'zh' ? '关闭' : 'Close'}
+                            >
+                                ×
+                            </button>
+                        </div>
+                        <div className="p-4 overflow-y-auto flex-1 text-sm space-y-4">
+                            {cycleOutputView === 'system' && (() => {
+                                const history = status?.system_cycle_output_history && status.system_cycle_output_history.length > 0
+                                    ? status.system_cycle_output_history
+                                    : (status?.last_system_cycle_summary
+                                        ? [{ at: '', cycle_number: status.system_cycle_count ?? 0, summary: status.last_system_cycle_summary }]
+                                        : [])
+                                if (history.length === 0) {
+                                    return <p className="text-nofx-text-muted">{language === 'zh' ? '暂无输出' : 'No output yet'}</p>
+                                }
+                                return (
+                                    <ul className="space-y-3 list-none">
+                                        {history.map((entry, idx) => (
+                                            <li key={idx} className="rounded-lg border border-white/10 bg-white/[0.04] p-3">
+                                                <div className="flex items-center gap-2 mb-2 text-nofx-text-muted text-xs">
+                                                    {entry.at && <span>{new Date(entry.at).toLocaleString()}</span>}
+                                                    <span>{language === 'zh' ? `周期 #${entry.cycle_number}` : `Cycle #${entry.cycle_number}`}</span>
+                                                </div>
+                                                <pre className="whitespace-pre-wrap font-sans text-nofx-text-main text-sm">{entry.summary}</pre>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                )
+                            })()}
+                            {cycleOutputView === 'sltp' && (() => {
+                                const history = status?.sltp_cycle_output_history && status.sltp_cycle_output_history.length > 0
+                                    ? status.sltp_cycle_output_history
+                                    : (status?.last_sltp_cycle_output && status.last_sltp_cycle_output.length > 0
+                                        ? [{ at: '', cycle_number: status.sltp_analysis_cycle_count ?? 0, adjustments: status.last_sltp_cycle_output, raw_output: '' }]
+                                        : [])
+                                if (history.length === 0) {
+                                    return <p className="text-nofx-text-muted">{language === 'zh' ? '暂无输出（无持仓或尚未执行止盈止损分析周期）' : 'No output (no positions or SL/TP cycle not run yet)'}</p>
+                                }
+                                return (
+                                    <ul className="space-y-4 list-none">
+                                        {history.map((entry, idx) => (
+                                            <li key={idx} className="rounded-lg border border-white/10 bg-white/[0.04] p-3">
+                                                <details className="group">
+                                                    <summary className="flex items-center justify-between cursor-pointer select-none list-none">
+                                                        <div className="flex items-center gap-2 text-nofx-text-muted text-xs">
+                                                            {entry.at && (
+                                                                <span title={entry.scheduled_at ? `${language === 'zh' ? '计划:' : 'Scheduled:'} ${new Date(entry.scheduled_at).toLocaleString()}` : undefined}>
+                                                                    {new Date(entry.at).toLocaleString()}
+                                                                </span>
+                                                            )}
+                                                            <span>{language === 'zh' ? `周期 #${entry.cycle_number}` : `Cycle #${entry.cycle_number}`}</span>
+                                                            {entry.adjustments && entry.adjustments.length > 0 ? (
+                                                                <span className="ml-2 text-nofx-text-main/80">
+                                                                    {language === 'zh' ? `调节 ${entry.adjustments.length} 项` : `${entry.adjustments.length} adjustments`}
+                                                                </span>
+                                                            ) : (
+                                                                <span className="ml-2 text-nofx-text-muted/80">
+                                                                    {language === 'zh' ? '无调节' : 'No adjustments'}
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        <span className="text-nofx-text-muted group-open:rotate-180 transition-transform">▾</span>
+                                                    </summary>
+                                                    <div className="mt-3 space-y-3">
+                                                        {entry.raw_output ? (
+                                                            <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                                                                <div className="text-xs text-nofx-text-muted mb-2">
+                                                                    {language === 'zh' ? 'AI 原始输出' : 'AI raw output'}
+                                                                </div>
+                                                                <pre className="whitespace-pre-wrap font-mono text-xs text-nofx-text-main max-h-[260px] overflow-auto">
+                                                                    {entry.raw_output}
+                                                                </pre>
+                                                            </div>
+                                                        ) : (
+                                                            <p className="text-nofx-text-muted text-xs">
+                                                                {language === 'zh' ? '本周期未记录 AI 原始输出' : 'AI raw output not recorded for this cycle'}
+                                                            </p>
+                                                        )}
+                                                        {entry.adjustments && entry.adjustments.length > 0 ? (
+                                                            <div className="overflow-x-auto">
+                                                                <table className="w-full text-left border-collapse text-xs">
+                                                                    <thead>
+                                                                        <tr className="border-b border-white/10 text-nofx-text-muted uppercase">
+                                                                            <th className="py-1.5 pr-2">Symbol</th>
+                                                                            <th className="py-1.5 pr-2">Side</th>
+                                                                            <th className="py-1.5 pr-2">{language === 'zh' ? '建议' : 'Advice'}</th>
+                                                                            <th className="py-1.5 pr-2">{language === 'zh' ? '追踪' : 'Trail'}</th>
+                                                                            <th className="py-1.5 pr-2">ATR×SL</th>
+                                                                            <th className="py-1.5 pr-2">{language === 'zh' ? '锁利%' : 'Lock%'}</th>
+                                                                            <th className="py-1.5 pr-2">ΔCycles</th>
+                                                                        </tr>
+                                                                    </thead>
+                                                                    <tbody>
+                                                                        {entry.adjustments.map((row, i) => (
+                                                                            <tr key={i} className="border-b border-white/5 text-nofx-text-main">
+                                                                                <td className="py-1 pr-2 font-mono">{row.symbol}</td>
+                                                                                <td className="py-1 pr-2">{row.side}</td>
+                                                                                <td className="py-1 pr-2">{row.advice ?? '–'}</td>
+                                                                                <td className="py-1 pr-2">{row.trail_aggressiveness ?? '–'}</td>
+                                                                                <td className="py-1 pr-2">{row.atr_mult_sl != null ? row.atr_mult_sl : '–'}</td>
+                                                                                <td className="py-1 pr-2">{row.lock_profit_pct != null ? row.lock_profit_pct : '–'}</td>
+                                                                                <td className="py-1 pr-2">{row.confirm_cycles_delta != null ? row.confirm_cycles_delta : '–'}</td>
+                                                                            </tr>
+                                                                        ))}
+                                                                    </tbody>
+                                                                </table>
+                                                            </div>
+                                                        ) : null}
+                                                    </div>
+                                                </details>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                )
+                            })()}
+                        </div>
+                    </div>
+                </div>
+            )}
+            </main>
         </DeepVoidBackground>
     )
 }

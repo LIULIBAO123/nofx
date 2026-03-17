@@ -1,3 +1,42 @@
+// 数据统计（按系统机制分类，机制下再按数据源）
+export interface DataCallRecord {
+  source: string
+  data_type: string
+  flow: string
+  trader_id: string
+  success: boolean
+  err_msg: string
+  duration_ms: number
+  at: number
+}
+export interface MechanismDataItem {
+  data_type: string
+  desc: string
+}
+export interface MechanismSourceGroup {
+  source: string
+  items: MechanismDataItem[]
+}
+export interface CatalogByMechanism {
+  mechanism: string
+  sources: MechanismSourceGroup[]
+}
+export interface ByMechanismSource {
+  mechanism: string
+  source: string
+  total_calls: number
+  success_calls: number
+  last_call_at: number
+  last_success: boolean
+  /** 该机制下该数据源调用的数据项（参数/接口 · 说明），与目录整合在统计表中展示 */
+  items?: MechanismDataItem[]
+}
+export interface DataStatsResponse {
+  catalog_by_mechanism: CatalogByMechanism[]
+  by_mechanism_source: ByMechanismSource[]
+  recent_calls: DataCallRecord[]
+}
+
 /** Latest AI token usage from backend (includes prompt cache when supported) */
 export interface AIUsage {
   provider: string
@@ -17,6 +56,18 @@ export interface SystemStatus {
   start_time: string
   runtime_minutes: number
   call_count: number
+  /** 本会话系统周期执行次数（仅用缓存+实时执行，不调 AI） */
+  system_cycle_count?: number
+  /** 本会话止盈止损分析周期执行次数 */
+  sltp_analysis_cycle_count?: number
+  /** 上次系统周期输出摘要（可查看） */
+  last_system_cycle_summary?: string
+  /** 上次止盈止损分析周期输出（可查看） */
+  last_sltp_cycle_output?: PositionSLTPAdjustmentItem[]
+  /** 系统周期输出历史（思维链形式，最近 N 条） */
+  system_cycle_output_history?: SystemCycleOutputEntry[]
+  /** 止盈止损周期输出历史（思维链形式，最近 N 条） */
+  sltp_cycle_output_history?: SLTPCycleOutputEntry[]
   initial_balance: number
   scan_interval: string
   stop_until: string
@@ -203,6 +254,10 @@ export interface CreateTraderRequest {
   strategy_id?: string // 策略ID（新版，使用保存的策略配置）
   initial_balance?: number // 可选：创建时由后端自动获取，编辑时可手动更新；实盘模拟时为必填虚拟初始资金
   scan_interval_minutes?: number
+  /** 系统周期(分钟)；0=与 AI 一致，>0 且 <scan_interval 时分离：系统更频繁、AI 按 scan_interval 省 token */
+  system_interval_minutes?: number
+  /** 持仓止盈止损专用分析周期(分钟)；0=不启用，1~且<scan_interval 时单独跑 SL/TP 轻量分析 */
+  sltp_analysis_interval_minutes?: number
   is_cross_margin?: boolean
   show_in_competition?: boolean // 是否在竞技场显示
   /** 实盘模拟：为 true 时 initial_balance 为自定义虚拟初始资金，不查询交易所 */
@@ -282,6 +337,8 @@ export interface TraderConfigData {
   is_cross_margin: boolean
   show_in_competition: boolean  // 是否在竞技场显示
   scan_interval_minutes: number
+  system_interval_minutes?: number
+  sltp_analysis_interval_minutes?: number
   initial_balance: number
   is_running: boolean
   // 以下为旧版字段（向后兼容）
@@ -554,8 +611,9 @@ export interface PromptSectionsConfig {
 export interface StrategyConfig {
   // Strategy type: "ai_trading" (default) or "grid_trading"
   strategy_type?: 'ai_trading' | 'grid_trading';
+  // Strategy mode: "classic" | "multilayer_filter"
+  strategy_mode?: 'classic' | 'multilayer_filter';
   // Language setting: "zh" for Chinese, "en" for English
-  // Determines the language used for data formatting and prompt generation
   language?: 'zh' | 'en';
   coin_source: CoinSourceConfig;
   indicators: IndicatorConfig;
@@ -564,6 +622,70 @@ export interface StrategyConfig {
   prompt_sections?: PromptSectionsConfig;
   // Grid trading configuration (only used when strategy_type is 'grid_trading')
   grid_config?: GridStrategyConfig;
+  // 多层过滤与方向池（挂单流程）
+  multilayer_filter?: MultilayerFilterConfig;
+}
+
+export interface MultilayerFilterConfig {
+  enabled?: boolean;
+  direction_pool?: DirectionPoolConfig;
+  layer1?: Layer1Config;
+  layer2?: Layer2Config;
+  layer3?: Layer3Config;
+}
+
+/** 方向池可选配置 */
+export interface DirectionPoolConfig {
+  /** 仅将 StrengthPct >= 此值的标的放入方向池；0 表示不过滤 */
+  min_strength_pct?: number;
+  /** 每标的只归入多空池中强度更高的一侧 */
+  single_side_only?: boolean;
+  /** 多/空池按 StrengthPct 降序排列，开仓与展示优先高强度 */
+  sort_by_strength?: boolean;
+  /** 仅 Layer2 达标的标的进入方向池 */
+  filter_pool_by_layer2?: boolean;
+  /** 对 StrengthPct 做短时平滑，减少抖动 */
+  enable_strength_smoothing?: boolean;
+  /** 平滑权重：smoothed = weight*last + (1-weight)*current，建议 0.6~0.8 */
+  strength_smoothing_weight?: number;
+  /** 补强加成对 StrengthPct 的上限（0 表示不设限） */
+  strength_bonus_cap?: number;
+  /** 补强加成对 ReliabilityPct 的上限（0 表示不设限） */
+  reli_bonus_cap?: number;
+  /** 开仓最低强度：三条件共振后仅当方向池中该标的 StrengthPct ≥ 此值才允许开仓；0 表示不额外过滤 */
+  min_strength_pct_to_open?: number;
+}
+
+export interface Layer1Config {
+  required_all?: boolean;
+  /** 0=全部通过才过；>0 时至少通过 N 项即过 Layer1（放宽过滤） */
+  min_items_to_pass?: number;
+  /** 多周期至少一致数：2=三周期(4h/1h/短)至少两周期同向；0=不启用 */
+  min_periods_aligned?: number;
+  items?: Layer1Item[];
+  max_signal_age_minutes?: number;
+  /** 依赖数据缺失时视为不通过（默认 false 为原行为） */
+  fail_closed_when_data_missing?: boolean;
+}
+
+export interface Layer1Item {
+  id: string;
+  enabled: boolean;
+  allowed?: string[];
+  value?: number;
+}
+
+export interface Layer2Config {
+  min_factors?: number;
+  reliability_threshold?: number;
+  entry_confidence_threshold_pct?: number;
+}
+
+export interface Layer3Config {
+  max_signal_age_minutes?: number;
+  oi_aligned_required?: boolean;
+  entry_timing_strength_min?: number;
+  custom_factors_required?: boolean;
 }
 
 // Grid trading specific configuration
@@ -656,6 +778,29 @@ export interface IndicatorConfig {
   price_ranking_duration?: string;  // "1h", "4h", "24h" or "1h,4h,24h"
   price_ranking_limit?: number;
 
+  // 币安衍生数据（多空比、资金费率、Taker）— 以币安为主增强市场判断，无需 API Key
+  enable_binance_long_short_ratio?: boolean;
+  binance_long_short_period?: string;   // 5m, 15m, 1h, 4h
+  enable_binance_funding_history?: boolean;
+  enable_binance_taker_volume?: boolean;
+  binance_taker_period?: string;        // 5m, 15m, 1h
+
+  // 数据补强：资金费率 8h 均值、Basis、BTC 占比、强平聚合、CoinAnk 清算
+  enable_binance_funding_rate_history?: boolean;
+  enable_basis?: boolean;
+  enable_btc_dominance?: boolean;
+  enable_binance_ws_force_order?: boolean;
+  enable_coinank_liquidation?: boolean;
+  coinank_api_key?: string;
+  coinank_url?: string;
+
+  /** Coinglass 中转站（KeyStore）：通过代理获取 OI/资金费率/强平等市场数据 */
+  enable_coinglass_data?: boolean;
+  coinglass_proxy_url?: string;
+  coinglass_api_key?: string;
+  /** 启用 Coinglass WSS 实时推送（融资率/清算/OI/价格），补强 AI 实时与预测 */
+  enable_coinglass_wss?: boolean;
+
   /** 非主周期在 Prompt 中仅输出一行摘要（Close/EMA20/EMA50/ATR14），可显著减少 Token */
   compact_non_primary_timeframe?: boolean;
 }
@@ -704,9 +849,57 @@ export interface RiskControlConfig {
   // AI 仅开仓：true 时不执行 AI 的平仓建议，平仓完全由策略动态 SL/TP 执行（适应震荡市）
   ai_only_entry?: boolean;
 
+  // 系统执行开仓：true 时 AI 仅作辅助分析量化数据，不输出开仓动作；开仓由系统根据多层过滤/方向池执行（需启用 multilayer_filter）
+  system_executes_entry?: boolean;
+
+  /** 允许执行 AI 的平仓建议（需 AIOnlyEntry=false）；false 时仅由动态 SL/TP 平仓 */
+  /** AI 仅预测：为 true 时禁止 AI 输出开平仓，只输出预测信息，系统根据预测+pipeline 执行 */
+  ai_predict_only?: boolean;
+  allow_ai_close?: boolean;
+  /** AI 平仓时最低置信度；0=不额外要求 */
+  min_confidence_for_ai_close?: number;
+  /** 为 true 时仅当 exit_reason 为 take_profit|stop_loss|prediction_mismatch 才执行 AI 平仓 */
+  require_exit_reason_for_ai_close?: boolean;
+
+  /** 额外补强：按 market_regime 提高开仓置信度要求（ranging/high_volatility/reversal） */
+  regime_adjust_enabled?: boolean;
+  regime_min_confidence_map?: Record<string, number>;  // 如 { "ranging": 75, "high_volatility": 78, "reversal": 80 }
+
+  /** 额外补强：极端资金费率/多空比时的开仓约束 */
+  extreme_funding_rule?: ExtremeFundingRule;
+
   // Dynamic Stop Loss & Take Profit
   dynamic_stop_loss?: DynamicStopLossConfig;
   dynamic_take_profit?: DynamicTakeProfitConfig;
+
+  /** AI 参与仓位与分层止盈止损：离散档位与模板（系统兜底裁剪） */
+  position_size_buckets?: PositionSizeBucketsConfig;
+  tp_profiles?: Record<string, DynamicTakeProfitConfig>;
+  sl_profiles?: Record<string, DynamicStopLossConfig>;
+}
+
+export interface PositionSizeBucketsConfig {
+  enabled: boolean;
+  /** fallback bucket when AI missing/invalid */
+  default_bucket?: string; // low/medium/high
+  /** when AI confidence < this, force default bucket */
+  min_bucket_confidence?: number;
+  /** equity ratio map, e.g. { low:0.003, medium:0.007, high:0.012 } */
+  buckets?: Record<string, number>;
+  /** optional cap bucket, e.g. medium */
+  max_bucket?: string;
+}
+
+/** 极端资金费率与多空比时的开仓约束（补强） */
+export interface ExtremeFundingRule {
+  enabled: boolean;
+  funding_threshold_pct?: number;   // 资金费率绝对值阈值，如 0.001 = 0.1%
+  long_short_ratio_high?: number;  // 多空比 > 此值视为多头过热，如 1.4
+  long_short_ratio_low?: number;   // 多空比 < 此值视为空头过热，如 0.714
+  block_open_long_when_excessive_longs?: boolean;
+  block_open_short_when_excessive_shorts?: boolean;
+  raise_confidence_by?: number;    // 不禁止时提高的置信度，如 10
+  min_confidence_when_extreme?: number;  // 极端时最低置信度，如 80
 }
 
 // 动态止损配置
@@ -723,6 +916,8 @@ export interface DynamicStopLossConfig {
   // 追踪止损 (Trailing Stop) - 分层模式
   trailing_enabled?: boolean;      // 是否启用追踪止损
   trailing_levels?: TrailingStopLevel[];  // 追踪止损层级
+  /** 为 true 时仅当已触发过至少一档分层止盈后才启用追踪止损，避免尚未止盈就被追踪平仓 */
+  trailing_stop_only_after_first_scaled_tp?: boolean;
   
   // ATR 止损 - 动态区间模式
   atr_enabled?: boolean;           // 是否启用 ATR 止损
@@ -742,6 +937,9 @@ export interface DynamicStopLossConfig {
   // 高波动宽容：ATR 高时更宽容
   atr_tolerance_enabled?: boolean;      // 高波动时多要求 1 个确认周期 / 放宽 ATR 止损
   atr_high_multiplier?: number;         // 当前 ATR > 长期 ATR * 此倍数视为高波动，默认 1.2
+
+  /** scenario=reversal 时是否再减 1 个 SL 确认周期（加快真反转止损） */
+  scenario_adjust_enabled?: boolean;
 
   // 止损用 K 线周期（ATR、支撑阻力、逆势早退等）"15m" | "1h"，默认 15m
   klines_timeframe?: string;
@@ -814,6 +1012,17 @@ export interface ScaledTakeProfitLevel {
   move_stop_to_breakeven?: boolean; // 是否移动止损到盈亏平衡点
 }
 
+// 单笔平仓记录（部分平仓或全平），与后端 CloseEvent 一致
+export interface CloseEventItem {
+  exit_time_ms: number;
+  closed_qty: number;
+  exit_price: number;
+  realized_pnl: number;
+  close_reason?: string;
+  is_partial: boolean;
+  profit_percent?: number;
+}
+
 // Position History Types
 export interface HistoricalPosition {
   id: number;
@@ -835,6 +1044,12 @@ export interface HistoricalPosition {
   leverage: number;
   status: string;
   close_reason: string;
+  /** 平仓是否由触发了 AI 调节后的止盈/止损参数导致 */
+  close_reason_ai_adjusted?: boolean;
+  /** 触发时的详情 JSON：trigger, type, trigger_price, trail_aggressiveness, atr_mult_sl, lock_profit_pct, advice 等 */
+  close_reason_trigger_detail?: string;
+  /** 平仓明细（分层止盈等）：JSON 字符串，解析为 CloseEventItem[] 展示 */
+  close_events?: string;
   /** 当 close_reason 为空/sync/unknown 时，由同期决策记录推断的平仓原因（系统止盈/系统止损/系统平仓） */
   inferred_close_reason?: string;
   /** 推断依据：同期决策的 Reasoning 文案 */
@@ -923,4 +1138,139 @@ export interface GridRiskInfo {
   // Breakout state
   breakout_level: string
   breakout_direction: string
+}
+
+// --- 多空雷达与挂单流程（与用户分享截图功能对应）---
+
+export interface RadarConfig {
+  allow_long: boolean
+  allow_short: boolean
+  ai_auto_analysis: boolean
+  mode: 'preset' | 'manual' | 'close_auto'
+  heat_score: number
+  atr_pct: number
+  capital_critical_pct: number
+  reliability_gate_pct: number
+  direction_quantile: number
+  direction_query: number
+  exclude_held: boolean
+  exclude_pending: boolean
+  pending_order_cap_pct: number
+  long_pool_auto_issue: boolean
+  long_pool_auto_cancel: boolean
+  short_pool_auto_issue: boolean
+  short_pool_auto_cancel: boolean
+  pool_quantile_pct: number
+}
+
+export interface OrderFlowPipeline {
+  pool_long: number
+  pool_short: number
+  after_layer1: number
+  after_layer2: number
+  to_submit: number
+  flow_label: string
+}
+
+export interface Layer1FailureStat {
+  condition: string
+  count: number
+}
+
+export interface PerCoinFailure {
+  symbol: string
+  reasons: string[]
+}
+
+export interface OrderFlowInfo {
+  updated_at: string
+  process_stage: string
+  pipeline: OrderFlowPipeline
+  layer1_failure_stats: Layer1FailureStat[]
+  per_coin_failures: PerCoinFailure[]
+  pipeline_description: string
+}
+
+export interface DirectionPoolItem {
+  symbol: string
+  strength_pct: number
+  score: number
+  market_condition: string
+  reliability_pct: number
+  timing: string
+  volume_price_pct: number
+  from_ai?: boolean
+}
+
+export interface DirectionPoolResponse {
+  long: DirectionPoolItem[]
+  short: DirectionPoolItem[]
+}
+
+/** 最新周期 AI 分析快照（雷达页「实时数据+AI预测」展示） */
+/** AI 对单笔持仓的止盈/止损参数调节建议（展示用）；含结构化退场信号 */
+export interface PositionSLTPAdjustmentItem {
+  symbol: string
+  side: string
+  advice?: string
+  trail_aggressiveness?: string
+  atr_mult_sl?: number
+  lock_profit_pct?: number
+  confirm_cycles_delta?: number
+  /** 阶段标签（如 trend_exhaustion） */
+  phase_label?: string
+  /** 证伪价位/级别 */
+  invalidation_level?: string
+  /** 证伪强度 0–100 */
+  invalidation_strength?: number
+  /** 退场倾向：tighten / scale_out / exit */
+  exit_bias?: string
+  /** 简要理由 */
+  rationale?: string
+}
+
+/** 单条系统周期输出（思维链一条） */
+export interface SystemCycleOutputEntry {
+  at: string
+  cycle_number: number
+  summary: string
+}
+
+/** 单条止盈止损周期输出（思维链一条） */
+export interface SLTPCycleOutputEntry {
+  at: string
+  scheduled_at?: string
+  cycle_number: number
+  adjustments: PositionSLTPAdjustmentItem[]
+  raw_output?: string
+}
+
+/** 止盈止损调节前策略基线（用于展示「原始→调整后」） */
+export interface PositionSLTPBaselineItem {
+  symbol: string
+  side: string
+  trail_aggressiveness?: string
+  atr_mult_sl?: number
+  lock_profit_pct?: number
+  confirm_cycles?: number
+}
+
+export interface LatestAnalysisResponse {
+  market_regime?: string
+  scenario?: string
+  market_summary?: string
+  risk_alert?: boolean
+  symbol_predictions?: SymbolPredictionItem[]
+  position_sl_tp_adjustments?: PositionSLTPAdjustmentItem[]
+  position_sl_tp_baselines?: PositionSLTPBaselineItem[]
+  updated_at?: string
+}
+
+export interface SymbolPredictionItem {
+  symbol: string
+  predicted_direction?: string
+  confidence?: number
+  suggest_exit?: boolean
+  /** 是否建议本周期开仓；与实时方向、AI预测方向三条件共振才开仓 */
+  suggest_open?: boolean
 }
