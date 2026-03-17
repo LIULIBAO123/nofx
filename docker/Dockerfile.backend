@@ -54,10 +54,14 @@ WORKDIR /app
 ARG GOPROXY=https://proxy.golang.org,direct
 ENV GOPROXY=${GOPROXY}
 ENV GOTOOLCHAIN=auto
+# 先复制 go.mod/go.sum 以提升缓存命中率
+COPY go.mod go.sum ./
+RUN sed -i 's/\r$$//' go.mod go.sum 2>/dev/null || true && \
+    go mod download
+
+# 再复制其余代码并构建
 COPY . .
-RUN sed -i 's/\r$$//' go.mod go.sum 2>/dev/null || true
-# Use vendor if present (run "go mod vendor" locally first to avoid network in Docker)
-RUN CGO_ENABLED=0 GOOS=linux go build -mod=vendor -trimpath -ldflags="-s -w" -o nofx .
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o nofx .
 
 # ──────────────────────────────────────────────────────────────
 # Runtime Stage (Minimal Executable Environment)
