@@ -113,6 +113,9 @@ type TraderPosition struct {
 	CloseReasonAIAdjusted    bool    `gorm:"column:close_reason_ai_adjusted;default:false" json:"close_reason_ai_adjusted"`
 	CloseReasonTriggerDetail string  `gorm:"column:close_reason_trigger_detail;default:''" json:"close_reason_trigger_detail"` // JSON: 触发时生效的 AI 调节参数或触发的价格等
 	CloseEvents              string  `gorm:"column:close_events;default:''" json:"close_events"`                                 // JSON array: 每笔部分平仓/全平记录，供历史展示分层止盈明细
+	// SLTP exit signal state (persisted to survive restarts; JSON blob)
+	SLTPExitSignalState string `gorm:"column:sltp_exit_signal_state;default:''" json:"sltp_exit_signal_state"`
+	SLTPExitSignalAt    int64  `gorm:"column:sltp_exit_signal_at;default:0" json:"sltp_exit_signal_at"` // Unix milliseconds UTC
 	Source                   string  `gorm:"column:source;default:system" json:"source"`
 	// Fixed params at open (for history UI, same as backtest trade params)
 	StopLoss      float64 `gorm:"column:stop_loss;default:0" json:"stop_loss,omitempty"`
@@ -175,6 +178,8 @@ func (s *PositionStore) InitTables() error {
 				`ALTER TABLE trader_positions ADD COLUMN IF NOT EXISTS atr_multiple_sl DOUBLE PRECISION DEFAULT 0`,
 				`ALTER TABLE trader_positions ADD COLUMN IF NOT EXISTS atr_multiple_tp DOUBLE PRECISION DEFAULT 0`,
 				`ALTER TABLE trader_positions ADD COLUMN IF NOT EXISTS atr_period INTEGER DEFAULT 0`,
+				`ALTER TABLE trader_positions ADD COLUMN IF NOT EXISTS sltp_exit_signal_state TEXT DEFAULT ''`,
+				`ALTER TABLE trader_positions ADD COLUMN IF NOT EXISTS sltp_exit_signal_at BIGINT DEFAULT 0`,
 			} {
 				s.db.Exec(q)
 			}
@@ -199,6 +204,37 @@ func (s *PositionStore) InitTables() error {
 		}
 	}
 
+	return nil
+}
+
+// SetSLTPExitSignalStateAndTimeBySymbol persists the per-position SLTP exit signal state (JSON) on an OPEN position.
+func (s *PositionStore) SetSLTPExitSignalStateAndTimeBySymbol(traderID, symbol, side, stateJSON string, atMs int64) error {
+	if traderID == "" || symbol == "" || side == "" {
+		return fmt.Errorf("invalid args")
+	}
+	if atMs <= 0 {
+		atMs = time.Now().UTC().UnixMilli()
+	}
+	upd := map[string]interface{}{
+		"sltp_exit_signal_state": stateJSON,
+		"sltp_exit_signal_at":    atMs,
+	}
+	res := s.db.Model(&TraderPosition{}).
+		Where("trader_id = ? AND symbol = ? AND side = ? AND status = 'OPEN'", traderID, symbol, side).
+		Updates(upd)
+	if res.Error != nil {
+		return res.Error
+	}
+	// Fallback: try base symbol without USDT when no row updated (same behavior as pending close reason helpers)
+	if res.RowsAffected == 0 && strings.HasSuffix(strings.ToUpper(symbol), "USDT") {
+		base := symbol[:len(symbol)-4]
+		res2 := s.db.Model(&TraderPosition{}).
+			Where("trader_id = ? AND symbol = ? AND side = ? AND status = 'OPEN'", traderID, base, side).
+			Updates(upd)
+		if res2.Error != nil {
+			return res2.Error
+		}
+	}
 	return nil
 }
 

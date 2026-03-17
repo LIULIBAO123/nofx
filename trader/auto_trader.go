@@ -240,6 +240,9 @@ type AutoTrader struct {
 	aiCloseConfirmMu      sync.Mutex          // Protects aiCloseConfirmCount
 	scaledLevelsTaken     map[string][]float64 // Scaled TP levels already taken (posKey -> profit percents)
 	scaledLevelsTakenMu   sync.RWMutex        // For layered TP parity with backtest
+	// Partial-close cooldown (per posKey + kind) to avoid duplicate partial closes in short window
+	partialCloseCooldownMu sync.Mutex
+	partialCloseCooldown   map[string]int64 // key=posKey+"|"+kind -> lastExecUnixMs
 	// AI-selected per-position profiles (system-enforced, stored by posKey)
 	positionProfileMu    sync.RWMutex
 	positionRiskBucket   map[string]string // posKey -> low/medium/high
@@ -528,6 +531,7 @@ func NewAutoTrader(config AutoTraderConfig, st *store.Store, userID string) (*Au
 		aiCloseConfirmCount:   make(map[string]int),
 		scaledLevelsTaken:     make(map[string][]float64),
 		scaledLevelsTakenMu:   sync.RWMutex{},
+		partialCloseCooldown:  make(map[string]int64),
 		positionRiskBucket:    make(map[string]string),
 		positionTPProfile:     make(map[string]string),
 		positionSLProfile:     make(map[string]string),
@@ -540,6 +544,23 @@ func NewAutoTrader(config AutoTraderConfig, st *store.Store, userID string) (*Au
 		lastBalanceSyncTime:   time.Now(),
 		userID:                userID,
 	}, nil
+}
+
+const partialCloseCooldownMs = int64(45 * 1000) // 45s cooldown for partial closes (signal scale_out / layered TP)
+
+func (at *AutoTrader) shouldCooldownPartialClose(posKey, kind string) bool {
+	if posKey == "" || kind == "" {
+		return false
+	}
+	key := posKey + "|" + kind
+	now := time.Now().UnixMilli()
+	at.partialCloseCooldownMu.Lock()
+	defer at.partialCloseCooldownMu.Unlock()
+	if last, ok := at.partialCloseCooldown[key]; ok && now-last < partialCloseCooldownMs {
+		return true
+	}
+	at.partialCloseCooldown[key] = now
+	return false
 }
 
 // Run runs the automatic trading main loop.
@@ -4838,8 +4859,11 @@ func (at *AutoTrader) updateSLTPExitSignalState(posKey, phaseLabel, exitBias, in
 		desired = 0
 	}
 
+	var (
+		stCopy sltpExitSignalState
+		doPersist bool
+	)
 	at.sltpExitSignalStateMu.Lock()
-	defer at.sltpExitSignalStateMu.Unlock()
 	st := at.sltpExitSignalState[posKey]
 	if st == nil {
 		st = &sltpExitSignalState{}
@@ -4896,34 +4920,89 @@ func (at *AutoTrader) updateSLTPExitSignalState(posKey, phaseLabel, exitBias, in
 	st.PhaseLabel = strings.TrimSpace(phaseLabel)
 	st.ExitBias = strings.TrimSpace(exitBias)
 	st.LastUpdatedAtUnixSec = nowSec
+	// copy for persistence outside lock
+	stCopy = *st
+	doPersist = true
+	at.sltpExitSignalStateMu.Unlock()
 
 	_ = invalidationLevel
 	_ = rationale
+
+	// Persist state to DB (survive restarts). Best-effort only.
+	if doPersist && at.store != nil && posKey != "" {
+		parts := strings.SplitN(posKey, "_", 2)
+		if len(parts) == 2 {
+			sym := parts[0]
+			side := strings.ToUpper(parts[1])
+			if b, err := json.Marshal(stCopy); err == nil {
+				_ = at.store.Position().SetSLTPExitSignalStateAndTimeBySymbol(at.id, sym, side, string(b), time.Now().UTC().UnixMilli())
+			}
+		}
+	}
 	return st.LastActionLevel, st.StrengthEMA
 }
 
 // getSLTPExitState 返回该仓位的动作等级与已执行等级（供是否触发 scale_out/exit 判断）
 func (at *AutoTrader) getSLTPExitState(posKey string) (actionLevel, lastExecutedLevel int) {
+	// Fast path: memory
 	at.sltpExitSignalStateMu.Lock()
-	defer at.sltpExitSignalStateMu.Unlock()
 	st := at.sltpExitSignalState[posKey]
-	if st == nil {
-		return 0, 0
+	at.sltpExitSignalStateMu.Unlock()
+	if st != nil {
+		return st.LastActionLevel, st.LastExecutedLevel
 	}
-	return st.LastActionLevel, st.LastExecutedLevel
+	// Lazy load from DB (best-effort)
+	if at.store != nil && posKey != "" {
+		parts := strings.SplitN(posKey, "_", 2)
+		if len(parts) == 2 {
+			sym := parts[0]
+			side := strings.ToUpper(parts[1])
+			dbPos, err := at.store.Position().GetOpenPositionBySymbol(at.id, sym, side)
+			if err == nil && dbPos != nil && dbPos.SLTPExitSignalState != "" {
+				var loaded sltpExitSignalState
+				if json.Unmarshal([]byte(dbPos.SLTPExitSignalState), &loaded) == nil {
+					at.sltpExitSignalStateMu.Lock()
+					at.sltpExitSignalState[posKey] = &loaded
+					at.sltpExitSignalStateMu.Unlock()
+					return loaded.LastActionLevel, loaded.LastExecutedLevel
+				}
+			}
+		}
+	}
+	return 0, 0
 }
 
 // setSLTPExitExecutedLevel 在成功执行 scale_out/exit 后更新已执行等级；level=3 时清除该仓位状态便于下次开仓重新累计
 func (at *AutoTrader) setSLTPExitExecutedLevel(posKey string, level int) {
+	var (
+		stateJSON string
+		sym       string
+		side      string
+	)
 	at.sltpExitSignalStateMu.Lock()
-	defer at.sltpExitSignalStateMu.Unlock()
 	st := at.sltpExitSignalState[posKey]
-	if st == nil {
-		return
+	if st != nil {
+		st.LastExecutedLevel = level
+		if level >= 3 {
+			delete(at.sltpExitSignalState, posKey)
+		} else if b, err := json.Marshal(*st); err == nil {
+			stateJSON = string(b)
+		}
 	}
-	st.LastExecutedLevel = level
-	if level >= 3 {
-		delete(at.sltpExitSignalState, posKey)
+	at.sltpExitSignalStateMu.Unlock()
+
+	// Persist executed level update (best-effort)
+	if at.store != nil && posKey != "" {
+		parts := strings.SplitN(posKey, "_", 2)
+		if len(parts) == 2 {
+			sym = parts[0]
+			side = strings.ToUpper(parts[1])
+			if level >= 3 {
+				_ = at.store.Position().SetSLTPExitSignalStateAndTimeBySymbol(at.id, sym, side, "", time.Now().UTC().UnixMilli())
+			} else if stateJSON != "" {
+				_ = at.store.Position().SetSLTPExitSignalStateAndTimeBySymbol(at.id, sym, side, stateJSON, time.Now().UTC().UnixMilli())
+			}
+		}
 	}
 }
 
@@ -5189,6 +5268,43 @@ func (at *AutoTrader) checkDynamicStopLossTakeProfit(trendViewByPosKey map[strin
 			}
 		}
 		if minHoldMs > 0 && float64(holdDurationMs) < minHoldMs {
+			// Allow emergency exit (signal level=3) to bypass MinHold; other actions remain blocked.
+			actionLevel, lastExecutedLevel := at.getSLTPExitState(posKey)
+			if hasAdj && actionLevel >= 3 && lastExecutedLevel < 3 {
+				closeReason := "system:signal:exit"
+				signalReason := fmt.Sprintf("Structural exit signal bypass MinHold: %s (level %d)", closeReason, actionLevel)
+				triggerDetail := buildSignalExitDetail(signalReason, &adj)
+				at.setPendingCloseReason(closeReason)
+				if at.store != nil {
+					normalizedSymbol := market.Normalize(symbol)
+					sideStr := strings.ToUpper(side)
+					if err := at.store.Position().SetPendingCloseReasonAndDetailBySymbol(at.id, normalizedSymbol, sideStr, closeReason, true, triggerDetail); err != nil {
+						logger.Infof("  ⚠️ Failed to pre-set close reason (signal bypass minhold): %v", err)
+					}
+				}
+				action := "close_long"
+				if side == "short" {
+					action = "close_short"
+				}
+				decision := kernel.Decision{Symbol: symbol, Action: action, Reasoning: signalReason}
+				actionRecord := store.DecisionAction{
+					Action:    action,
+					Symbol:    symbol,
+					Reasoning: decision.Reasoning,
+					Timestamp: time.Now().UTC(),
+					Success:   false,
+				}
+				if err := at.executeDecisionWithRecord(&decision, &actionRecord, 0); err != nil {
+					logger.Infof("❌ Failed to execute signal exit (bypass MinHold) for %s: %v", symbol, err)
+				} else {
+					at.setSLTPExitExecutedLevel(posKey, 3)
+					at.recordStrategyTriggeredClose(kernel.StrategyTriggeredClose{
+						Symbol: symbol, Side: side, Reason: signalReason, Price: markPrice,
+					})
+					logger.Infof("✓ Signal exit executed (bypass MinHold) for %s %s", symbol, side)
+					continue
+				}
+			}
 			logger.Infof("📋 TP/SL: skip %s %s due to min hold: holdDurationMs=%d, minHoldMs=%.0f (%.1f min left)", symbol, side, holdDurationMs, minHoldMs, (minHoldMs-float64(holdDurationMs))/60000)
 			continue
 		}
@@ -5230,6 +5346,9 @@ func (at *AutoTrader) checkDynamicStopLossTakeProfit(trendViewByPosKey map[strin
 		// 结构化退场信号：若状态机给出 scale_out(2) 或 exit(3)，且尚未执行到该等级，则执行减仓/全平并写交易历史
 		actionLevel, lastExecutedLevel := at.getSLTPExitState(posKey)
 		if hasAdj && actionLevel >= 2 && lastExecutedLevel < actionLevel {
+			if actionLevel == 2 && at.shouldCooldownPartialClose(posKey, "signal_scale_out") {
+				logger.Infof("⏳ TP/SL: skip scale_out due to cooldown for %s %s", symbol, side)
+			} else {
 			closeReason := "system:signal:scale_out"
 			if actionLevel >= 3 {
 				closeReason = "system:signal:exit"
@@ -5276,6 +5395,7 @@ func (at *AutoTrader) checkDynamicStopLossTakeProfit(trendViewByPosKey map[strin
 				})
 				logger.Infof("✓ Signal exit executed for %s %s: %s", symbol, side, closeReason)
 				continue
+			}
 			}
 		}
 
@@ -5500,6 +5620,10 @@ func (at *AutoTrader) checkDynamicStopLossTakeProfit(trendViewByPosKey map[strin
 						logger.Infof("📋 SL confirm: %s %s scenario=reversal → requiredCycles %d", symbol, side, requiredCycles)
 					}
 				}
+				// ConfirmCycles counts only in AI main cycle to avoid double-counting; system cycle is expected to use ConfirmMinutes.
+				if trendViewByPosKey == nil {
+					continue
+				}
 				at.slConfirmCountMu.Lock()
 				at.slConfirmCount[posKey]++
 				count := at.slConfirmCount[posKey]
@@ -5700,6 +5824,15 @@ func (at *AutoTrader) executeTakeProfit(position *kernel.PositionInfo, signal *k
 		}
 	}
 
+	// Cooldown for partial closes to avoid duplicate partial executions in short window (e.g., fast cycles / delayed sync).
+	posKey := market.Normalize(position.Symbol) + "_" + strings.ToLower(position.Side)
+	if decision.CloseQuantity > 0 && decision.CloseQuantity < position.Quantity {
+		if at.shouldCooldownPartialClose(posKey, "tp_partial") {
+			logger.Infof("⏳ TP: skip partial close due to cooldown for %s %s", position.Symbol, position.Side)
+			return nil
+		}
+	}
+
 	actionRecord := store.DecisionAction{
 		Action:    action,
 		Symbol:    position.Symbol,
@@ -5730,7 +5863,6 @@ func (at *AutoTrader) executeTakeProfit(position *kernel.PositionInfo, signal *k
 	at.recordStrategyTriggeredClose(kernel.StrategyTriggeredClose{
 		Symbol: position.Symbol, Side: position.Side, Reason: signal.Reason, Price: signal.Price,
 	})
-	posKey := position.Symbol + "_" + position.Side
 	if signal.PartialPercent >= 100 {
 		at.clearScaledLevelsTakenForPosition(posKey)
 	} else if signal.Type == "scaled" && signal.PartialPercent > 0 {
