@@ -381,6 +381,13 @@ type RiskControlConfig struct {
 	// ScaledTPBlocksScaleOutSeconds: scaled TP 执行后阻断 scale_out 的窗口秒数（0=默认 600）。
 	ScaledTPBlocksScaleOutSeconds int `json:"scaled_tp_blocks_scale_out_seconds,omitempty"`
 
+	// StructuralExitEscalation: 当 AI 给出 tighten/hold 但 phase=late_trend/reversal_risk 且强度持续较高时，系统可升级到 scale_out/exit。
+	// 0 值表示使用默认：scale_out_strength=70, exit_strength=85, scale_out_confirm=3, exit_confirm=2。
+	StructExitScaleOutStrength int `json:"struct_exit_scale_out_strength,omitempty"`
+	StructExitExitStrength     int `json:"struct_exit_exit_strength,omitempty"`
+	StructExitScaleOutConfirm  int `json:"struct_exit_scale_out_confirm,omitempty"`
+	StructExitExitConfirm      int `json:"struct_exit_exit_confirm,omitempty"`
+
 	// Realtime price: fetch latest mark before SL/TP check to better grasp P&L (optional)
 	RealtimePrice *RealtimePriceConfig `json:"realtime_price,omitempty"`
 
@@ -502,6 +509,10 @@ type DynamicTakeProfitConfig struct {
 	// Scaled Take Profit
 	ScaledEnabled *bool                   `json:"scaled_enabled,omitempty"` // enable scaled take profit
 	ScaledLevels  []ScaledTakeProfitLevel `json:"scaled_levels,omitempty"`
+	// ScaledProfitPercentMode: 分层止盈盈利阈值口径。
+	// - "price" (default): 以价格相对入场价的涨跌幅%触发（不含杠杆）
+	// - "roe": 以保证金收益率 ROE% 触发（近似 = 价格涨跌幅% × leverage）
+	ScaledProfitPercentMode string `json:"scaled_profit_percent_mode,omitempty"`
 
 	// ATR Take Profit - Dynamic Range Mode
 	ATREnabled                 *bool    `json:"atr_enabled,omitempty"`                   // enable ATR take profit
@@ -649,6 +660,11 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 			AllowAIClose:                    false, // 默认：不执行 AI 平仓建议，仅 SL/TP 平仓
 			MinConfidenceForAIClose:          70,    // 启用 AI 平仓时，仅当 confidence≥此值才执行
 			RequireExitReasonForAIClose:     true,  // 启用 AI 平仓时，要求 exit_reason 为 take_profit|stop_loss|prediction_mismatch
+			// 结构化退场升级默认值（也可在前端改）：phase=late_trend/reversal_risk 且强度持续满足时，允许升级到 scale_out/exit
+			StructExitScaleOutStrength: 70,
+			StructExitExitStrength:     85,
+			StructExitScaleOutConfirm:  3,
+			StructExitExitConfirm:      2,
 			// 额外补强：regime 调节与极端资金费率/多空比（预设开启：震荡/高波/反转时提高开仓置信度）
 			RegimeAdjustEnabled:    boolPtr(true),
 			RegimeMinConfidenceMap: map[string]int{"ranging": 75, "high_volatility": 78, "reversal": 80},
@@ -669,22 +685,22 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 				"tp_conservative": {Enabled: true, MinHoldMinutes: 10, ScaledEnabled: boolPtr(true), ScaledLevels: []ScaledTakeProfitLevel{
 					{ProfitPercent: 3.0, ClosePercent: 50, MoveStopToBreakeven: boolPtr(true)},
 					{ProfitPercent: 6.0, ClosePercent: 100, MoveStopToBreakeven: boolPtr(false)},
-				}},
+				}, ScaledProfitPercentMode: "roe"},
 				"tp_balanced": {Enabled: true, MinHoldMinutes: 10, ScaledEnabled: boolPtr(true), ScaledLevels: []ScaledTakeProfitLevel{
 					{ProfitPercent: 2.5, ClosePercent: 25, MoveStopToBreakeven: boolPtr(false)},
 					{ProfitPercent: 6.0, ClosePercent: 25, MoveStopToBreakeven: boolPtr(true)},
 					{ProfitPercent: 10.0, ClosePercent: 100, MoveStopToBreakeven: boolPtr(false)},
-				}},
+				}, ScaledProfitPercentMode: "roe"},
 				"tp_aggressive": {Enabled: true, MinHoldMinutes: 10, ScaledEnabled: boolPtr(true), ScaledLevels: []ScaledTakeProfitLevel{
 					{ProfitPercent: 1.5, ClosePercent: 30, MoveStopToBreakeven: boolPtr(false)},
 					{ProfitPercent: 3.5, ClosePercent: 30, MoveStopToBreakeven: boolPtr(true)},
 					{ProfitPercent: 10.0, ClosePercent: 100, MoveStopToBreakeven: boolPtr(false)},
-				}},
+				}, ScaledProfitPercentMode: "roe"},
 			},
 			SLProfiles: map[string]DynamicStopLossConfig{
-				"sl_tight":  {Enabled: true, TriggerLogic: "any", MinHoldMinutes: 10, InitialStopPercent: 0, TrailingEnabled: boolPtr(true), TrailingLevels: []TrailingStopLevel{{ProfitThreshold: 2.0, TrailingPercent: 1.2}, {ProfitThreshold: 5.0, TrailingPercent: 2.0}}, ATREnabled: boolPtr(true), ATRMultiplierMin: float64Ptr(1.2), ATRMultiplierMax: float64Ptr(2.0), ConfirmCycles: 1, ATRToleranceEnabled: boolPtr(true), ATRHighMultiplier: float64Ptr(1.2), KlinesTimeframe: "15m", TrailingStopOnlyAfterFirstScaledTP: boolPtr(true), AdverseExitWhenNeverProfitATR: float64Ptr(1.2)},
-				"sl_normal": {Enabled: true, TriggerLogic: "any", MinHoldMinutes: 10, InitialStopPercent: 0, TrailingEnabled: boolPtr(true), TrailingLevels: []TrailingStopLevel{{ProfitThreshold: 2.5, TrailingPercent: 1.5}, {ProfitThreshold: 6.0, TrailingPercent: 2.5}}, ATREnabled: boolPtr(true), ATRMultiplierMin: float64Ptr(1.5), ATRMultiplierMax: float64Ptr(2.5), ConfirmCycles: 2, ATRToleranceEnabled: boolPtr(true), ATRHighMultiplier: float64Ptr(1.2), KlinesTimeframe: "15m", TrailingStopOnlyAfterFirstScaledTP: boolPtr(true), AdverseExitWhenNeverProfitATR: float64Ptr(1.5)},
-				"sl_loose":  {Enabled: true, TriggerLogic: "any", MinHoldMinutes: 10, InitialStopPercent: 0, TrailingEnabled: boolPtr(true), TrailingLevels: []TrailingStopLevel{{ProfitThreshold: 3.0, TrailingPercent: 2.0}, {ProfitThreshold: 7.0, TrailingPercent: 3.0}}, ATREnabled: boolPtr(true), ATRMultiplierMin: float64Ptr(2.0), ATRMultiplierMax: float64Ptr(3.2), ConfirmCycles: 2, ATRToleranceEnabled: boolPtr(true), ATRHighMultiplier: float64Ptr(1.25), KlinesTimeframe: "15m", TrailingStopOnlyAfterFirstScaledTP: boolPtr(true), AdverseExitWhenNeverProfitATR: float64Ptr(1.8)},
+				"sl_tight":  {Enabled: true, TriggerLogic: "any", MinHoldMinutes: 10, InitialStopPercent: 0, TrailingEnabled: boolPtr(true), TrailingLevels: []TrailingStopLevel{{ProfitThreshold: 2.0, TrailingPercent: 1.2}, {ProfitThreshold: 5.0, TrailingPercent: 2.0}}, ATREnabled: boolPtr(true), ATRMultiplierMin: float64Ptr(1.2), ATRMultiplierMax: float64Ptr(2.0), ConfirmCycles: 1, ATRToleranceEnabled: boolPtr(true), ATRHighMultiplier: float64Ptr(1.2), KlinesTimeframe: "15m", TrailingStopOnlyAfterFirstScaledTP: boolPtr(false), AdverseExitWhenNeverProfitATR: float64Ptr(1.2)},
+				"sl_normal": {Enabled: true, TriggerLogic: "any", MinHoldMinutes: 10, InitialStopPercent: 0, TrailingEnabled: boolPtr(true), TrailingLevels: []TrailingStopLevel{{ProfitThreshold: 2.5, TrailingPercent: 1.5}, {ProfitThreshold: 6.0, TrailingPercent: 2.5}}, ATREnabled: boolPtr(true), ATRMultiplierMin: float64Ptr(1.5), ATRMultiplierMax: float64Ptr(2.5), ConfirmCycles: 2, ATRToleranceEnabled: boolPtr(true), ATRHighMultiplier: float64Ptr(1.2), KlinesTimeframe: "15m", TrailingStopOnlyAfterFirstScaledTP: boolPtr(false), AdverseExitWhenNeverProfitATR: float64Ptr(1.5)},
+				"sl_loose":  {Enabled: true, TriggerLogic: "any", MinHoldMinutes: 10, InitialStopPercent: 0, TrailingEnabled: boolPtr(true), TrailingLevels: []TrailingStopLevel{{ProfitThreshold: 3.0, TrailingPercent: 2.0}, {ProfitThreshold: 7.0, TrailingPercent: 3.0}}, ATREnabled: boolPtr(true), ATRMultiplierMin: float64Ptr(2.0), ATRMultiplierMax: float64Ptr(3.2), ConfirmCycles: 2, ATRToleranceEnabled: boolPtr(true), ATRHighMultiplier: float64Ptr(1.25), KlinesTimeframe: "15m", TrailingStopOnlyAfterFirstScaledTP: boolPtr(false), AdverseExitWhenNeverProfitATR: float64Ptr(1.8)},
 			},
 			// 预设：动态止损/止盈（略放宽），最小持仓时间，与回测一致
 			DynamicStopLoss: &DynamicStopLossConfig{
@@ -709,7 +725,7 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 				ATRHighMultiplier:            float64Ptr(1.2),
 				ScenarioAdjustEnabled:       boolPtr(false), // 默认关闭；开启时 scenario=reversal 再减 1 确认周期
 				KlinesTimeframe:              "15m",
-				TrailingStopOnlyAfterFirstScaledTP: boolPtr(true),
+				TrailingStopOnlyAfterFirstScaledTP: boolPtr(false),
 				AdverseExitWhenNeverProfitATR:      float64Ptr(1.5),
 			},
 			DynamicTakeProfit: &DynamicTakeProfitConfig{
@@ -723,6 +739,7 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 					{ProfitPercent: 6.0, ClosePercent: 25, MoveStopToBreakeven: boolPtr(true)},
 					{ProfitPercent: 10.0, ClosePercent: 100, MoveStopToBreakeven: boolPtr(false)},
 				},
+				ScaledProfitPercentMode:      "roe",
 				ATREnabled:                  boolPtr(true),
 				ATRMultiplierMin:             float64Ptr(2.5),
 				ATRMultiplierMax:             float64Ptr(4.0),
@@ -1186,6 +1203,11 @@ func GetOptimizedStrategyConfig(lang string) StrategyConfig {
 			AllowAIClose:                false,
 			MinConfidenceForAIClose:     72,
 			RequireExitReasonForAIClose: true,
+			// 结构化退场升级默认值（也可在前端改）：phase=late_trend/reversal_risk 且强度持续满足时，允许升级到 scale_out/exit
+			StructExitScaleOutStrength: 70,
+			StructExitExitStrength:     85,
+			StructExitScaleOutConfirm:  3,
+			StructExitExitConfirm:      2,
 			PositionSizeBuckets: &PositionSizeBucketsConfig{
 				Enabled:             false, // 关闭档位时由 AI 通过 position_size_usd 设置仓位
 				DefaultBucket:       "low",
@@ -1197,22 +1219,22 @@ func GetOptimizedStrategyConfig(lang string) StrategyConfig {
 				"tp_conservative": {Enabled: true, MinHoldMinutes: 10, ScaledEnabled: boolPtr(true), ScaledLevels: []ScaledTakeProfitLevel{
 					{ProfitPercent: 3.0, ClosePercent: 50, MoveStopToBreakeven: boolPtr(true)},
 					{ProfitPercent: 7.0, ClosePercent: 100, MoveStopToBreakeven: boolPtr(false)},
-				}},
+				}, ScaledProfitPercentMode: "roe"},
 				"tp_balanced": {Enabled: true, MinHoldMinutes: 10, ScaledEnabled: boolPtr(true), ScaledLevels: []ScaledTakeProfitLevel{
 					{ProfitPercent: 2.5, ClosePercent: 25, MoveStopToBreakeven: boolPtr(false)},
 					{ProfitPercent: 6.0, ClosePercent: 25, MoveStopToBreakeven: boolPtr(true)},
 					{ProfitPercent: 10.0, ClosePercent: 100, MoveStopToBreakeven: boolPtr(false)},
-				}},
+				}, ScaledProfitPercentMode: "roe"},
 				"tp_aggressive": {Enabled: true, MinHoldMinutes: 10, ScaledEnabled: boolPtr(true), ScaledLevels: []ScaledTakeProfitLevel{
 					{ProfitPercent: 2.0, ClosePercent: 30, MoveStopToBreakeven: boolPtr(false)},
 					{ProfitPercent: 5.0, ClosePercent: 30, MoveStopToBreakeven: boolPtr(true)},
 					{ProfitPercent: 12.0, ClosePercent: 100, MoveStopToBreakeven: boolPtr(false)},
-				}},
+				}, ScaledProfitPercentMode: "roe"},
 			},
 			SLProfiles: map[string]DynamicStopLossConfig{
-				"sl_tight":  {Enabled: true, TriggerLogic: "any", MinHoldMinutes: 10, InitialStopPercent: 0, TrailingEnabled: boolPtr(true), TrailingLevels: []TrailingStopLevel{{ProfitThreshold: 2.0, TrailingPercent: 1.2}, {ProfitThreshold: 5.0, TrailingPercent: 2.0}}, ATREnabled: boolPtr(true), ATRMultiplierMin: float64Ptr(1.2), ATRMultiplierMax: float64Ptr(2.0), ConfirmCycles: 1, ATRToleranceEnabled: boolPtr(true), ATRHighMultiplier: float64Ptr(1.2), KlinesTimeframe: "15m", TrailingStopOnlyAfterFirstScaledTP: boolPtr(true), AdverseExitWhenNeverProfitATR: float64Ptr(1.2)},
-				"sl_normal": {Enabled: true, TriggerLogic: "any", MinHoldMinutes: 10, InitialStopPercent: 0, TrailingEnabled: boolPtr(true), TrailingLevels: []TrailingStopLevel{{ProfitThreshold: 2.5, TrailingPercent: 1.5}, {ProfitThreshold: 6.0, TrailingPercent: 2.5}}, ATREnabled: boolPtr(true), ATRMultiplierMin: float64Ptr(1.5), ATRMultiplierMax: float64Ptr(2.5), ConfirmCycles: 2, ATRToleranceEnabled: boolPtr(true), ATRHighMultiplier: float64Ptr(1.2), KlinesTimeframe: "15m", TrailingStopOnlyAfterFirstScaledTP: boolPtr(true), AdverseExitWhenNeverProfitATR: float64Ptr(1.5)},
-				"sl_loose":  {Enabled: true, TriggerLogic: "any", MinHoldMinutes: 10, InitialStopPercent: 0, TrailingEnabled: boolPtr(true), TrailingLevels: []TrailingStopLevel{{ProfitThreshold: 3.0, TrailingPercent: 2.0}, {ProfitThreshold: 7.0, TrailingPercent: 3.0}}, ATREnabled: boolPtr(true), ATRMultiplierMin: float64Ptr(2.0), ATRMultiplierMax: float64Ptr(3.2), ConfirmCycles: 2, ATRToleranceEnabled: boolPtr(true), ATRHighMultiplier: float64Ptr(1.25), KlinesTimeframe: "15m", TrailingStopOnlyAfterFirstScaledTP: boolPtr(true), AdverseExitWhenNeverProfitATR: float64Ptr(1.8)},
+				"sl_tight":  {Enabled: true, TriggerLogic: "any", MinHoldMinutes: 10, InitialStopPercent: 0, TrailingEnabled: boolPtr(true), TrailingLevels: []TrailingStopLevel{{ProfitThreshold: 2.0, TrailingPercent: 1.2}, {ProfitThreshold: 5.0, TrailingPercent: 2.0}}, ATREnabled: boolPtr(true), ATRMultiplierMin: float64Ptr(1.2), ATRMultiplierMax: float64Ptr(2.0), ConfirmCycles: 1, ATRToleranceEnabled: boolPtr(true), ATRHighMultiplier: float64Ptr(1.2), KlinesTimeframe: "15m", TrailingStopOnlyAfterFirstScaledTP: boolPtr(false), AdverseExitWhenNeverProfitATR: float64Ptr(1.2)},
+				"sl_normal": {Enabled: true, TriggerLogic: "any", MinHoldMinutes: 10, InitialStopPercent: 0, TrailingEnabled: boolPtr(true), TrailingLevels: []TrailingStopLevel{{ProfitThreshold: 2.5, TrailingPercent: 1.5}, {ProfitThreshold: 6.0, TrailingPercent: 2.5}}, ATREnabled: boolPtr(true), ATRMultiplierMin: float64Ptr(1.5), ATRMultiplierMax: float64Ptr(2.5), ConfirmCycles: 2, ATRToleranceEnabled: boolPtr(true), ATRHighMultiplier: float64Ptr(1.2), KlinesTimeframe: "15m", TrailingStopOnlyAfterFirstScaledTP: boolPtr(false), AdverseExitWhenNeverProfitATR: float64Ptr(1.5)},
+				"sl_loose":  {Enabled: true, TriggerLogic: "any", MinHoldMinutes: 10, InitialStopPercent: 0, TrailingEnabled: boolPtr(true), TrailingLevels: []TrailingStopLevel{{ProfitThreshold: 3.0, TrailingPercent: 2.0}, {ProfitThreshold: 7.0, TrailingPercent: 3.0}}, ATREnabled: boolPtr(true), ATRMultiplierMin: float64Ptr(2.0), ATRMultiplierMax: float64Ptr(3.2), ConfirmCycles: 2, ATRToleranceEnabled: boolPtr(true), ATRHighMultiplier: float64Ptr(1.25), KlinesTimeframe: "15m", TrailingStopOnlyAfterFirstScaledTP: boolPtr(false), AdverseExitWhenNeverProfitATR: float64Ptr(1.8)},
 			},
 			// Dynamic Stop Loss Configuration（与默认预设对齐）
 			DynamicStopLoss: &DynamicStopLossConfig{
@@ -1237,7 +1259,7 @@ func GetOptimizedStrategyConfig(lang string) StrategyConfig {
 				ATRToleranceEnabled:       boolPtr(true),
 				ATRHighMultiplier:         float64Ptr(1.2),
 				KlinesTimeframe:           "15m",
-				TrailingStopOnlyAfterFirstScaledTP: boolPtr(true),
+				TrailingStopOnlyAfterFirstScaledTP: boolPtr(false),
 				AdverseExitWhenNeverProfitATR:      float64Ptr(1.5),
 			},
 			// Dynamic Take Profit Configuration（与回测一致，按建议微调）
@@ -1251,6 +1273,7 @@ func GetOptimizedStrategyConfig(lang string) StrategyConfig {
 					{ProfitPercent: 6.0, ClosePercent: 25, MoveStopToBreakeven: boolPtr(true)},
 					{ProfitPercent: 10.0, ClosePercent: 100, MoveStopToBreakeven: boolPtr(false)},
 				},
+				ScaledProfitPercentMode:     "roe",
 				ATREnabled:                 boolPtr(true),
 				ATRMultiplierMin:           float64Ptr(2.5),
 				ATRMultiplierMax:           float64Ptr(4.0),

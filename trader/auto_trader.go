@@ -247,6 +247,13 @@ type AutoTrader struct {
 	partialCloseIdem       map[string]int64 // key=posKey+"|"+idemKey -> lastExecUnixMs
 	partialCloseBlockMu    sync.Mutex
 	partialCloseBlock      map[string]int64 // key=posKey+"|"+blockKind -> lastExecUnixMs
+	// Breakeven lock latch (per posKey) persisted in DB; cache here to avoid repeated reads.
+	breakevenLockedMu sync.RWMutex
+	breakevenLocked   map[string]bool
+	// Breakeven execution guard: require consecutive mark-price confirmations
+	// to avoid immediate "near entry" sweeps causing small loss.
+	breakevenConfirmCountMu sync.Mutex
+	breakevenConfirmCount   map[string]int
 	// AI-selected per-position profiles (system-enforced, stored by posKey)
 	positionProfileMu    sync.RWMutex
 	positionRiskBucket   map[string]string // posKey -> low/medium/high
@@ -538,6 +545,8 @@ func NewAutoTrader(config AutoTraderConfig, st *store.Store, userID string) (*Au
 		partialCloseCooldown:  make(map[string]int64),
 		partialCloseIdem:      make(map[string]int64),
 		partialCloseBlock:     make(map[string]int64),
+		breakevenLocked:       make(map[string]bool),
+		breakevenConfirmCount: make(map[string]int),
 		positionRiskBucket:    make(map[string]string),
 		positionTPProfile:     make(map[string]string),
 		positionSLProfile:     make(map[string]string),
@@ -641,6 +650,46 @@ func (at *AutoTrader) isBlockedByRecentPartialClose(posKey, blockKind string, wi
 	last := at.partialCloseBlock[key]
 	at.partialCloseBlockMu.Unlock()
 	return last > 0 && now-last < int64(windowSeconds)*1000
+}
+
+func (at *AutoTrader) getBreakevenLocked(posKey, symbol, sideUpper string) bool {
+	at.breakevenLockedMu.RLock()
+	v, ok := at.breakevenLocked[posKey]
+	at.breakevenLockedMu.RUnlock()
+	if ok {
+		return v
+	}
+	if at.store != nil && symbol != "" && sideUpper != "" {
+		dbPos, err := at.store.Position().GetOpenPositionBySymbol(at.id, market.Normalize(symbol), sideUpper)
+		if err == nil && dbPos != nil {
+			at.breakevenLockedMu.Lock()
+			at.breakevenLocked[posKey] = dbPos.BreakevenLocked
+			at.breakevenLockedMu.Unlock()
+			return dbPos.BreakevenLocked
+		}
+	}
+	return false
+}
+
+func (at *AutoTrader) setBreakevenLocked(posKey, symbol, sideUpper string, locked bool) {
+	at.breakevenLockedMu.Lock()
+	at.breakevenLocked[posKey] = locked
+	at.breakevenLockedMu.Unlock()
+	if at.store != nil && symbol != "" && sideUpper != "" {
+		dbPos, err := at.store.Position().GetOpenPositionBySymbol(at.id, market.Normalize(symbol), sideUpper)
+		if err == nil && dbPos != nil {
+			_ = at.store.Position().SetBreakevenLockedByID(dbPos.ID, locked, time.Now().UTC().UnixMilli())
+		}
+	}
+}
+
+func (at *AutoTrader) clearBreakevenLockedForPosition(posKey string) {
+	at.breakevenLockedMu.Lock()
+	delete(at.breakevenLocked, posKey)
+	at.breakevenLockedMu.Unlock()
+	at.breakevenConfirmCountMu.Lock()
+	delete(at.breakevenConfirmCount, posKey)
+	at.breakevenConfirmCountMu.Unlock()
 }
 
 // Run runs the automatic trading main loop.
@@ -2152,6 +2201,10 @@ func (at *AutoTrader) buildTradingContext(flow string) (*kernel.Context, error) 
 	if err != nil {
 		return nil, fmt.Errorf("failed to get positions: %w", err)
 	}
+	// Reconcile DB OPEN positions against execution-layer snapshot to avoid "ghost OPEN" rows.
+	if at.store != nil {
+		_ = at.store.Position().ReconcileOpenPositions(at.id, positions)
+	}
 
 	var positionInfos []kernel.PositionInfo
 	totalMarginUsed := 0.0
@@ -3435,6 +3488,7 @@ func (at *AutoTrader) executeCloseLongWithRecord(decision *kernel.Decision, acti
 	}
 	if closeQty == 0 || closedAmt >= quantity {
 		at.clearScaledLevelsTakenForPosition(posKey)
+		at.clearBreakevenLockedForPosition(posKey)
 		at.ClearPeakPnLCache(decision.Symbol, "long")
 		at.clearPositionParams(posKey)
 		// Clear AI-selected per-position profiles
@@ -4939,6 +4993,51 @@ func (at *AutoTrader) updateSLTPExitSignalState(posKey, phaseLabel, exitBias, in
 		desired = 0
 	}
 
+	// Escalation thresholds (configurable)
+	scaleOutStrength := 70
+	exitStrength := 85
+	scaleOutConfirm := 3
+	exitConfirm := 2
+	if at.strategyEngine != nil && at.strategyEngine.GetConfig() != nil {
+		rc := at.strategyEngine.GetConfig().RiskControl
+		if rc.StructExitScaleOutStrength > 0 {
+			scaleOutStrength = rc.StructExitScaleOutStrength
+		}
+		if rc.StructExitExitStrength > 0 {
+			exitStrength = rc.StructExitExitStrength
+		}
+		if rc.StructExitScaleOutConfirm > 0 {
+			scaleOutConfirm = rc.StructExitScaleOutConfirm
+		}
+		if rc.StructExitExitConfirm > 0 {
+			exitConfirm = rc.StructExitExitConfirm
+		}
+	}
+	if scaleOutStrength < 50 {
+		scaleOutStrength = 50
+	}
+	if scaleOutStrength > 95 {
+		scaleOutStrength = 95
+	}
+	if exitStrength < scaleOutStrength {
+		exitStrength = scaleOutStrength
+	}
+	if exitStrength > 100 {
+		exitStrength = 100
+	}
+	if scaleOutConfirm < 1 {
+		scaleOutConfirm = 1
+	}
+	if scaleOutConfirm > 20 {
+		scaleOutConfirm = 20
+	}
+	if exitConfirm < 1 {
+		exitConfirm = 1
+	}
+	if exitConfirm > 20 {
+		exitConfirm = 20
+	}
+
 	var (
 		stCopy sltpExitSignalState
 		doPersist bool
@@ -4957,12 +5056,12 @@ func (at *AutoTrader) updateSLTPExitSignalState(posKey, phaseLabel, exitBias, in
 		st.StrengthEMA = 0.5*float64(strength) + 0.5*st.StrengthEMA
 	}
 
-	if strength >= 70 {
+	if strength >= scaleOutStrength {
 		st.ConfirmUp70++
 	} else {
 		st.ConfirmUp70 = 0
 	}
-	if strength >= 85 {
+	if strength >= exitStrength {
 		st.ConfirmUp85++
 	} else {
 		st.ConfirmUp85 = 0
@@ -4973,15 +5072,26 @@ func (at *AutoTrader) updateSLTPExitSignalState(posKey, phaseLabel, exitBias, in
 		st.ConfirmDown55 = 0
 	}
 
-	// Upgrade rules (confirmation)
+	// Upgrade rules (confirmation + escalation)
+	desiredEff := desired
+	phase := strings.TrimSpace(strings.ToLower(phaseLabel))
+	// When phase indicates end-of-trend / reversal risk, allow system to escalate beyond AI's tighten/hold if strength persists.
+	if phase == "reversal_risk" || phase == "late_trend" {
+		if desiredEff < 2 && st.ConfirmUp70 >= scaleOutConfirm {
+			desiredEff = 2
+		}
+		if desiredEff < 3 && st.ConfirmUp85 >= exitConfirm {
+			desiredEff = 3
+		}
+	}
 	level := st.LastActionLevel
-	if desired >= 1 && level < 1 {
+	if desiredEff >= 1 && level < 1 {
 		level = 1
 	}
-	if desired >= 2 && strength >= 70 && st.ConfirmUp70 >= 2 && level < 2 {
+	if desiredEff >= 2 && strength >= scaleOutStrength && st.ConfirmUp70 >= scaleOutConfirm && level < 2 {
 		level = 2
 	}
-	if desired >= 3 && strength >= 85 && st.ConfirmUp85 >= 3 && level < 3 {
+	if desiredEff >= 3 && strength >= exitStrength && st.ConfirmUp85 >= exitConfirm && level < 3 {
 		level = 3
 	}
 
@@ -5338,12 +5448,43 @@ func (at *AutoTrader) checkDynamicStopLossTakeProfit(trendViewByPosKey map[strin
 			}
 			if effTP != nil && adj.LockProfitPct > 0 {
 				pct := adj.LockProfitPct
+				// Clamp into global [1,5] bounds first.
 				if pct < 1 {
 					pct = 1
 				}
 				if pct > 5 {
 					pct = 5
 				}
+
+				// Optimization #1:
+				// In choppy_hold/range scenarios, do not reduce lock_profit_pct below scaled TP L1,
+				// otherwise breakeven may trigger before any scaled TP can take profit.
+				adviceNorm := strings.TrimSpace(strings.ToLower(adj.Advice))
+				phaseNorm := strings.TrimSpace(strings.ToLower(adj.PhaseLabel))
+				if (adviceNorm == "choppy_hold" || phaseNorm == "range") && len(effTP.ScaledLevels) > 0 {
+					first := effTP.ScaledLevels[0]
+					minLock := first.ProfitPercent // roe% when mode="roe"; else will be converted below
+					mode := strings.TrimSpace(strings.ToLower(effTP.ScaledProfitPercentMode))
+					if mode != "" && mode != "roe" {
+						// LockProfitPercent is compared against pnlPct (ROE%).
+						// In price mode, scaled profit percent is price% so approximate roe% ~= price% * leverage.
+						lev := float64(leverage)
+						if lev <= 0 {
+							lev = 1
+						}
+						minLock = first.ProfitPercent * lev
+					}
+					if minLock > 0 && pct < minLock {
+						pct = minLock
+						if pct < 1 {
+							pct = 1
+						}
+						if pct > 5 {
+							pct = 5
+						}
+					}
+				}
+
 				effTP.LockProfitPercent = &pct
 			}
 		}
@@ -5593,30 +5734,125 @@ func (at *AutoTrader) checkDynamicStopLossTakeProfit(trendViewByPosKey map[strin
 			}
 		}
 
-		// 锁定利润阈值：达到此盈利后移动止损到盈亏平衡点（策略中 LockProfitPercent）
-		breakevenLocked := takeProfitConfig != nil && takeProfitConfig.LockProfitPercent != nil &&
-			*takeProfitConfig.LockProfitPercent > 0 && pnlPct >= *takeProfitConfig.LockProfitPercent
+		// 锁定利润阈值（latch + 持久化）：一旦达到阈值即锁定，后续回落也保持 locked，直到仓位平掉
+		normalizedSymbol := market.Normalize(symbol)
+		sideUpper := strings.ToUpper(side)
+		lockPct := 0.0
+		if takeProfitConfig != nil && takeProfitConfig.LockProfitPercent != nil {
+			lockPct = *takeProfitConfig.LockProfitPercent
+		}
+		breakevenLocked := at.getBreakevenLocked(posKey, normalizedSymbol, sideUpper)
+		if !breakevenLocked && lockPct > 0 && pnlPct >= lockPct {
+			at.setBreakevenLocked(posKey, normalizedSymbol, sideUpper, true)
+			breakevenLocked = true
+			logger.Infof("🔒 TP/SL: breakeven lock latched for %s %s (roe=%.2f%% >= lock=%.2f%%)", symbol, side, pnlPct, lockPct)
+		}
 		if breakevenLocked {
-			// 价格已回到盈亏平衡点下方（多）或上方（空）→ 按盈亏平衡止损
-			var breakevenDetail string
-			if hasAdj {
-				breakevenDetail = buildSLTPTriggerDetail("sl", "breakeven", entryPrice, &adj)
-			}
-			if side == "long" && markPrice <= entryPrice {
-				signal := &kernel.StopLossSignal{Triggered: true, Reason: "Breakeven stop (profit locked)", Price: entryPrice, Type: "breakeven"}
-				kernel.LogStopLossCheck(symbol, signal)
-				if err := at.executeStopLoss(&positionInfo, signal, hasAdj, breakevenDetail); err != nil {
-					logger.Infof("❌ Failed to execute breakeven stop for %s: %v", symbol, err)
+			// Optimization #2/#3:
+			// 2) breakeven stop 需要非常小的容差 + 连续确认，避免“刚好在入场价附近来回扫”就市价出场导致小亏。
+			// 3) breakeven full exit 需要先触发过 scaled TP 的 L1 档（至少完成 L1 的部分止盈），避免锁利太早却来不及止盈就被 breakeven 扫出。
+			const breakevenMarkEpsilonPct = 0.03
+			const breakevenConfirmSamples = 2 // 连续满足该条件的样本数（每次 TP/SL check 间隔约 20s）
+
+			// breakeven gate: scaled L1 must be taken (if scaled TP is configured)
+			allowedByScaledL1 := true
+			if takeProfitConfig != nil && len(takeProfitConfig.ScaledLevels) > 0 {
+				// scaled_levels_taken stores the same unit as checkScaledTakeProfit trigger threshold:
+				// - roe mode: stores roe%
+				// - price mode: stores price%
+				first := takeProfitConfig.ScaledLevels[0].ProfitPercent
+				taken := at.getScaledLevelsTaken(posKey)
+				const tol = 0.15
+				allowedByScaledL1 = false
+				// 先用内存缓存判断（最快）
+				for _, v := range taken {
+					if v >= first-tol && v <= first+tol {
+						allowedByScaledL1 = true
+						break
+					}
 				}
-				continue
-			}
-			if side == "short" && markPrice >= entryPrice {
-				signal := &kernel.StopLossSignal{Triggered: true, Reason: "Breakeven stop (profit locked)", Price: entryPrice, Type: "breakeven"}
-				kernel.LogStopLossCheck(symbol, signal)
-				if err := at.executeStopLoss(&positionInfo, signal, hasAdj, breakevenDetail); err != nil {
-					logger.Infof("❌ Failed to execute breakeven stop for %s: %v", symbol, err)
+
+				// 若内存缓存丢失（例如重启后尚未重建），则回退读取 DB 的 close_events 记录。
+				// 通过当前 scaled_profit_percent_mode 计算 ROE% / price% 来判断 L1 是否已完成。
+				if !allowedByScaledL1 && at.store != nil && (len(taken) == 0) {
+					mode := strings.TrimSpace(strings.ToLower(takeProfitConfig.ScaledProfitPercentMode))
+					if mode == "" {
+						mode = "price"
+					}
+					dbPos, err := at.store.Position().GetOpenPositionBySymbol(at.id, normalizedSymbol, sideUpper)
+					if err == nil && dbPos != nil {
+						var events []store.CloseEvent
+						if err2 := json.Unmarshal([]byte(dbPos.CloseEvents), &events); err2 == nil {
+							for _, ev := range events {
+								// We only need to confirm scaled TP L1 took place at least once.
+								if ev.CloseReason != "system:tp:scaled" {
+									continue
+								}
+								if entryPrice <= 0 || ev.ExitPrice <= 0 {
+									continue
+								}
+								priceProfitPct := 0.0
+								if side == "long" {
+									priceProfitPct = (ev.ExitPrice - entryPrice) / entryPrice * 100
+								} else {
+									priceProfitPct = (entryPrice - ev.ExitPrice) / entryPrice * 100
+								}
+								roeProfitPct := priceProfitPct * float64(leverage)
+								compareVal := priceProfitPct
+								if mode == "roe" {
+									compareVal = roeProfitPct
+								}
+								// DB fallback 只能从 close_events 的实际成交价推断盈利幅度，
+								// scaled 触发往往已经“明显超过阈值”，成交点 ROE% 不一定落在 first±tol。
+								// 因此只要确认已经达到/超过 L1 阈值，就认为 L1 已完成（L2/L3 也必然意味着 L1 已完成）。
+								if compareVal >= first-tol {
+									allowedByScaledL1 = true
+									break
+								}
+							}
+						}
+					}
 				}
-				continue
+			}
+
+			if !allowedByScaledL1 {
+				// Reset confirm count when gating is not satisfied.
+				at.breakevenConfirmCountMu.Lock()
+				at.breakevenConfirmCount[posKey] = 0
+				at.breakevenConfirmCountMu.Unlock()
+			} else {
+				// 价格已回到盈亏平衡点附近（多：低于；空：高于）→ 按盈亏平衡止损（需连续确认）
+				var shouldTrigger bool
+				if side == "long" {
+					shouldTrigger = markPrice <= entryPrice*(1.0-breakevenMarkEpsilonPct/100.0)
+				} else if side == "short" {
+					shouldTrigger = markPrice >= entryPrice*(1.0+breakevenMarkEpsilonPct/100.0)
+				}
+
+				if shouldTrigger {
+					at.breakevenConfirmCountMu.Lock()
+					at.breakevenConfirmCount[posKey]++
+					cnt := at.breakevenConfirmCount[posKey]
+					at.breakevenConfirmCountMu.Unlock()
+
+					if cnt >= breakevenConfirmSamples {
+						var breakevenDetail string
+						if hasAdj {
+							breakevenDetail = buildSLTPTriggerDetail("sl", "breakeven", entryPrice, &adj)
+						}
+						signal := &kernel.StopLossSignal{Triggered: true, Reason: "Breakeven stop (profit locked)", Price: entryPrice, Type: "breakeven"}
+						kernel.LogStopLossCheck(symbol, signal)
+						if err := at.executeStopLoss(&positionInfo, signal, hasAdj, breakevenDetail); err != nil {
+							logger.Infof("❌ Failed to execute breakeven stop for %s: %v", symbol, err)
+						}
+						continue
+					}
+				} else {
+					// Reset confirm count if mark price moved back out of breakeven trigger zone.
+					at.breakevenConfirmCountMu.Lock()
+					at.breakevenConfirmCount[posKey] = 0
+					at.breakevenConfirmCountMu.Unlock()
+				}
 			}
 		}
 
@@ -6085,11 +6321,18 @@ func (at *AutoTrader) executeTakeProfit(position *kernel.PositionInfo, signal *k
 	if signal.PartialPercent >= 100 {
 		at.clearScaledLevelsTakenForPosition(posKey)
 	} else if signal.Type == "scaled" && signal.PartialPercent > 0 {
-		profitPct := 0.0
-		if position.Side == "long" {
-			profitPct = (signal.Price - position.EntryPrice) / position.EntryPrice * 100
-		} else {
-			profitPct = (position.EntryPrice - signal.Price) / position.EntryPrice * 100
+		// Keep scaled dedup units consistent with checkScaledTakeProfit:
+		// - when scaled_profit_percent_mode="roe": store ROE% (level.ProfitPercent)
+		// - when mode="price": store price% (level.ProfitPercent)
+		// Using the signal's stored threshold avoids price/mode unit mismatch.
+		profitPct := signal.ScaledProfitPercentUsed
+		if profitPct <= 0 {
+			// Fallback (shouldn't happen for scaled signals).
+			if position.Side == "long" {
+				profitPct = (signal.Price - position.EntryPrice) / position.EntryPrice * 100
+			} else {
+				profitPct = (position.EntryPrice - signal.Price) / position.EntryPrice * 100
+			}
 		}
 		at.addScaledLevelTaken(posKey, profitPct)
 	}

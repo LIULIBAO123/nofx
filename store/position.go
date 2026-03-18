@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"nofx/market"
 	"strconv"
 	"strings"
 	"time"
@@ -116,6 +117,9 @@ type TraderPosition struct {
 	// SLTP exit signal state (persisted to survive restarts; JSON blob)
 	SLTPExitSignalState string `gorm:"column:sltp_exit_signal_state;default:''" json:"sltp_exit_signal_state"`
 	SLTPExitSignalAt    int64  `gorm:"column:sltp_exit_signal_at;default:0" json:"sltp_exit_signal_at"` // Unix milliseconds UTC
+	// Breakeven lock (latch): once locked, stays until position closed; persisted to survive restarts
+	BreakevenLocked   bool  `gorm:"column:breakeven_locked;default:false" json:"breakeven_locked"`
+	BreakevenLockedAt int64 `gorm:"column:breakeven_locked_at;default:0" json:"breakeven_locked_at"` // Unix milliseconds UTC
 	Source                   string  `gorm:"column:source;default:system" json:"source"`
 	// Fixed params at open (for history UI, same as backtest trade params)
 	StopLoss      float64 `gorm:"column:stop_loss;default:0" json:"stop_loss,omitempty"`
@@ -180,6 +184,8 @@ func (s *PositionStore) InitTables() error {
 				`ALTER TABLE trader_positions ADD COLUMN IF NOT EXISTS atr_period INTEGER DEFAULT 0`,
 				`ALTER TABLE trader_positions ADD COLUMN IF NOT EXISTS sltp_exit_signal_state TEXT DEFAULT ''`,
 				`ALTER TABLE trader_positions ADD COLUMN IF NOT EXISTS sltp_exit_signal_at BIGINT DEFAULT 0`,
+				`ALTER TABLE trader_positions ADD COLUMN IF NOT EXISTS breakeven_locked BOOLEAN DEFAULT false`,
+				`ALTER TABLE trader_positions ADD COLUMN IF NOT EXISTS breakeven_locked_at BIGINT DEFAULT 0`,
 			} {
 				s.db.Exec(q)
 			}
@@ -189,6 +195,51 @@ func (s *PositionStore) InitTables() error {
 
 	if err := s.db.AutoMigrate(&TraderPosition{}); err != nil {
 		return fmt.Errorf("failed to migrate trader_positions table: %w", err)
+	}
+
+	// Deduplicate OPEN positions: ensure at most 1 OPEN row per (trader_id, symbol, side).
+	// If duplicates exist (historical bug / paper trader restarts), keep the latest entry_time as OPEN,
+	// and mark others as CLOSED with a fix reason to avoid state pollution (e.g., breakeven latch).
+	type dupKey struct {
+		TraderID string
+		Symbol   string
+		Side     string
+		Cnt      int64
+	}
+	var dups []dupKey
+	_ = s.db.Raw(`
+		SELECT trader_id AS trader_id, symbol AS symbol, side AS side, COUNT(*) AS cnt
+		FROM trader_positions
+		WHERE status = 'OPEN'
+		GROUP BY trader_id, symbol, side
+		HAVING COUNT(*) > 1
+	`).Scan(&dups).Error
+	for _, k := range dups {
+		var ids []int64
+		_ = s.db.Raw(`
+			SELECT id
+			FROM trader_positions
+			WHERE trader_id = ? AND symbol = ? AND side = ? AND status = 'OPEN'
+			ORDER BY entry_time DESC, id DESC
+		`, k.TraderID, k.Symbol, k.Side).Scan(&ids).Error
+		if len(ids) <= 1 {
+			continue
+		}
+		keepID := ids[0]
+		toClose := ids[1:]
+		nowMs := time.Now().UTC().UnixMilli()
+		// Close the older duplicates with neutral values; they were invalid duplicates anyway.
+		_ = s.db.Model(&TraderPosition{}).
+			Where("id IN ?", toClose).
+			Updates(map[string]interface{}{
+				"status":       "CLOSED",
+				"exit_time":    nowMs,
+				"exit_price":   0,
+				"realized_pnl": 0,
+				"fee":          0,
+				"close_reason": fmt.Sprintf("system:fix:dedup_open (kept=%d)", keepID),
+				"updated_at":   nowMs,
+			}).Error
 	}
 
 	// Create unique partial index for exchange position deduplication
@@ -204,6 +255,44 @@ func (s *PositionStore) InitTables() error {
 		}
 	}
 
+	// Enforce only one OPEN position per (trader_id, symbol, side).
+	// This prevents state pollution across positions (e.g., breakeven lock latch) and UI inconsistencies.
+	openUniqueSQL := `CREATE UNIQUE INDEX IF NOT EXISTS idx_positions_open_unique ON trader_positions(trader_id, symbol, side) WHERE status = 'OPEN'`
+	if err := s.db.Exec(openUniqueSQL).Error; err != nil {
+		// Best-effort: ignore errors on older SQLite builds that may not support partial indexes.
+		if !strings.Contains(strings.ToLower(err.Error()), "syntax") && !strings.Contains(strings.ToLower(err.Error()), "partial") {
+			return fmt.Errorf("failed to create open unique index: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// SetBreakevenLockedBySymbol persists breakeven lock latch on an OPEN position.
+func (s *PositionStore) SetBreakevenLockedBySymbol(traderID, symbol, side string, locked bool, atMs int64) error {
+	if traderID == "" || symbol == "" || side == "" {
+		return fmt.Errorf("invalid args")
+	}
+	if atMs <= 0 {
+		atMs = time.Now().UTC().UnixMilli()
+	}
+	upd := map[string]interface{}{
+		"breakeven_locked":    locked,
+		"breakeven_locked_at": atMs,
+	}
+	res := s.db.Model(&TraderPosition{}).
+		Where("trader_id = ? AND symbol = ? AND side = ? AND status = 'OPEN'", traderID, symbol, side).
+		Updates(upd)
+	if res.Error != nil {
+		return res.Error
+	}
+	// Fallback: try base symbol without USDT when no row updated
+	if res.RowsAffected == 0 && strings.HasSuffix(strings.ToUpper(symbol), "USDT") {
+		base := strings.TrimSuffix(strings.ToUpper(symbol), "USDT")
+		return s.db.Model(&TraderPosition{}).
+			Where("trader_id = ? AND symbol = ? AND side = ? AND status = 'OPEN'", traderID, base, side).
+			Updates(upd).Error
+	}
 	return nil
 }
 
@@ -240,7 +329,17 @@ func (s *PositionStore) SetSLTPExitSignalStateAndTimeBySymbol(traderID, symbol, 
 
 // Create creates position record
 func (s *PositionStore) Create(pos *TraderPosition) error {
-	pos.Status = "OPEN"
+	// Backward compatible: most callers use Create() to create an OPEN position.
+	// We route OPEN creation through CreateOpenPosition to enforce:
+	// - at most 1 OPEN per (trader_id, symbol, side)
+	// - merge additional fills instead of creating duplicate OPEN rows
+	if pos == nil {
+		return fmt.Errorf("nil position")
+	}
+	if pos.Status == "" || strings.EqualFold(pos.Status, "OPEN") {
+		return s.CreateOpenPosition(pos)
+	}
+	// Non-OPEN records (rare) are inserted directly.
 	if pos.EntryQuantity == 0 {
 		pos.EntryQuantity = pos.Quantity
 	}
@@ -598,6 +697,80 @@ func (s *PositionStore) GetOpenPositionBySymbol(traderID, symbol, side string) (
 		return nil, nil
 	}
 	return nil, err
+}
+
+// ReconcileOpenPositions closes stale OPEN rows that are missing from the current execution-layer snapshot.
+// This prevents "ghost OPEN" positions in DB when the execution layer (exchange/paper) has zero positions
+// but historical bugs left OPEN rows behind.
+//
+// Policy: if missing, close with exit_price=entry_price, realized_pnl=0, fee=0 (do not fabricate PnL).
+func (s *PositionStore) ReconcileOpenPositions(traderID string, currentPositions []map[string]interface{}) error {
+	if traderID == "" {
+		return fmt.Errorf("invalid traderID")
+	}
+	current := make(map[string]bool)
+	for _, pos := range currentPositions {
+		sym, _ := pos["symbol"].(string)
+		if strings.TrimSpace(sym) == "" {
+			continue
+		}
+		side := ""
+		if v, ok := pos["position_side"].(string); ok && v != "" {
+			side = v
+		} else if v, ok := pos["side"].(string); ok && v != "" {
+			side = v
+		}
+		side = strings.ToUpper(strings.TrimSpace(side))
+		if side == "" {
+			continue
+		}
+		amt := 0.0
+		if v, ok := pos["position_amt"].(float64); ok {
+			amt = v
+		} else if v, ok := pos["positionAmt"].(float64); ok {
+			amt = v
+		} else if v, ok := pos["position_amt"].(int64); ok {
+			amt = float64(v)
+		}
+		if amt < 0 {
+			amt = -amt
+		}
+		if amt == 0 {
+			continue
+		}
+		key := market.Normalize(sym) + "_" + strings.ToLower(side)
+		current[key] = true
+	}
+
+	open, err := s.GetOpenPositions(traderID)
+	if err != nil {
+		return err
+	}
+	nowMs := time.Now().UTC().UnixMilli()
+	for _, dbPos := range open {
+		if dbPos == nil {
+			continue
+		}
+		key := market.Normalize(dbPos.Symbol) + "_" + strings.ToLower(dbPos.Side)
+		if current[key] {
+			continue
+		}
+		// close stale OPEN row
+		_ = s.db.Model(&TraderPosition{}).
+			Where("id = ? AND status = 'OPEN'", dbPos.ID).
+			Updates(map[string]interface{}{
+				"status":              "CLOSED",
+				"exit_time":           nowMs,
+				"exit_price":          dbPos.EntryPrice,
+				"realized_pnl":        0,
+				"fee":                 0,
+				"close_reason":        "system:fix:missing_from_exchange",
+				"close_reason_ai_adjusted": false,
+				"close_reason_trigger_detail": "",
+				"updated_at":          nowMs,
+			}).Error
+	}
+	return nil
 }
 
 // CreateOrphanClosedPosition creates a CLOSED position record when we have a close trade but no matching OPEN position.
@@ -1439,6 +1612,18 @@ func (s *PositionStore) CreateOpenPosition(pos *TraderPosition) error {
 		pos.EntryQuantity = pos.Quantity
 	}
 
+	// Prevent duplicate OPEN positions per (trader_id, symbol, side).
+	// If an OPEN position exists, merge as an add-fill (weighted avg entry) instead of creating a new row.
+	if pos.TraderID != "" && pos.Symbol != "" && pos.Side != "" {
+		existing, err := s.GetOpenPositionBySymbol(pos.TraderID, pos.Symbol, pos.Side)
+		if err != nil {
+			return err
+		}
+		if existing != nil {
+			return s.AddToOpenPosition(existing.ID, pos.Quantity, pos.EntryPrice, pos.Fee)
+		}
+	}
+
 	err := s.db.Create(pos).Error
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
@@ -1455,6 +1640,58 @@ func (s *PositionStore) CreateOpenPosition(pos *TraderPosition) error {
 	}
 
 	return nil
+}
+
+// AddToOpenPosition merges an additional open fill into an existing OPEN position.
+// It updates quantity and recalculates weighted-average entry price.
+func (s *PositionStore) AddToOpenPosition(id int64, addQty, fillPrice, fee float64) error {
+	if id <= 0 || addQty <= 0 || fillPrice <= 0 {
+		return fmt.Errorf("invalid args")
+	}
+	var pos TraderPosition
+	if err := s.db.Where("id = ? AND status = 'OPEN'", id).First(&pos).Error; err != nil {
+		return err
+	}
+	oldQty := pos.Quantity
+	newQty := oldQty + addQty
+	if newQty <= 0 {
+		return fmt.Errorf("invalid new quantity")
+	}
+	avg := pos.EntryPrice
+	if oldQty > 0 && pos.EntryPrice > 0 {
+		avg = (pos.EntryPrice*oldQty + fillPrice*addQty) / newQty
+	} else {
+		avg = fillPrice
+	}
+	if pos.EntryQuantity <= 0 {
+		pos.EntryQuantity = pos.Quantity
+	}
+	newEntryQty := pos.EntryQuantity + addQty
+	nowMs := time.Now().UTC().UnixMilli()
+	return s.db.Model(&TraderPosition{}).Where("id = ? AND status = 'OPEN'", id).Updates(map[string]interface{}{
+		"quantity":       newQty,
+		"entry_quantity": newEntryQty,
+		"entry_price":    avg,
+		"fee":            pos.Fee + fee,
+		"updated_at":     nowMs,
+	}).Error
+}
+
+// SetBreakevenLockedByID persists breakeven lock latch on a specific OPEN position id.
+func (s *PositionStore) SetBreakevenLockedByID(positionID int64, locked bool, atMs int64) error {
+	if positionID <= 0 {
+		return fmt.Errorf("invalid args")
+	}
+	if atMs <= 0 {
+		atMs = time.Now().UTC().UnixMilli()
+	}
+	return s.db.Model(&TraderPosition{}).
+		Where("id = ? AND status = 'OPEN'", positionID).
+		Updates(map[string]interface{}{
+			"breakeven_locked":    locked,
+			"breakeven_locked_at": atMs,
+			"updated_at":          atMs,
+		}).Error
 }
 
 // ClosePositionWithAccurateData closes a position with accurate data from exchange

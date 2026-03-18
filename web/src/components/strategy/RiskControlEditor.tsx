@@ -104,6 +104,12 @@ export function RiskControlEditor({
       sltpPriorityDesc: { zh: '默认先止盈再止损；开启后先止损再止盈。', en: 'Default TP-first; enable to check SL first.' },
       scaleoutBlocksScaledtp: { zh: 'scale_out 阻断 scaled TP(秒)', en: 'scale_out blocks scaled TP (sec)' },
       scaledtpBlocksScaleout: { zh: 'scaled TP 阻断 scale_out(秒)', en: 'scaled TP blocks scale_out (sec)' },
+      structExitEscalation: { zh: '结构化退场升级（阶段+强度）', en: 'Structural exit escalation (phase+strength)' },
+      structExitScaleOutStrength: { zh: '升级 scale_out 强度阈值', en: 'Scale_out strength threshold' },
+      structExitExitStrength: { zh: '升级 exit 强度阈值', en: 'Exit strength threshold' },
+      structExitScaleOutConfirm: { zh: '升级 scale_out 确认次数', en: 'Scale_out confirm samples' },
+      structExitExitConfirm: { zh: '升级 exit 确认次数', en: 'Exit confirm samples' },
+      structExitEscalationDesc: { zh: '当 phase=late_trend/reversal_risk 且强度持续满足时，即使 AI 只给 tighten/hold，也可升级到 scale_out/exit。0/留空=默认：70/85 + 3/2。', en: 'When phase=late_trend/reversal_risk and strength persists, system can escalate to scale_out/exit even if AI says tighten/hold. 0/empty defaults: 70/85 + 3/2.' },
     }
     return translations[key]?.[language] || key
   }
@@ -130,6 +136,7 @@ export function RiskControlEditor({
       enabled: true,
       min_hold_minutes: 10,
       scaled_enabled: true,
+      scaled_profit_percent_mode: 'roe',
       scaled_levels: [
         { profit_percent: 3.0, close_percent: 50, move_stop_to_breakeven: true },
         { profit_percent: 6.0, close_percent: 100, move_stop_to_breakeven: false },
@@ -139,6 +146,7 @@ export function RiskControlEditor({
       enabled: true,
       min_hold_minutes: 10,
       scaled_enabled: true,
+      scaled_profit_percent_mode: 'roe',
       scaled_levels: [
         { profit_percent: 2.5, close_percent: 25, move_stop_to_breakeven: false },
         { profit_percent: 6.0, close_percent: 25, move_stop_to_breakeven: true },
@@ -149,6 +157,7 @@ export function RiskControlEditor({
       enabled: true,
       min_hold_minutes: 10,
       scaled_enabled: true,
+      scaled_profit_percent_mode: 'roe',
       scaled_levels: [
         { profit_percent: 1.5, close_percent: 30, move_stop_to_breakeven: false },
         { profit_percent: 3.5, close_percent: 30, move_stop_to_breakeven: true },
@@ -1250,6 +1259,69 @@ export function RiskControlEditor({
               <span className="text-xs" style={{ color: '#848E9C' }}>sec</span>
               <span className="text-xs" style={{ color: '#EAECEF' }}>{t('signalExitMinHold')}</span>
             </div>
+          </div>
+
+          <div>
+            <div className="text-xs mb-2" style={{ color: '#848E9C' }}>{t('structExitEscalationDesc')}</div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <div className="text-xs mb-2" style={{ color: '#848E9C' }}>{t('structExitScaleOutStrength')}</div>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={config.struct_exit_scale_out_strength ?? 0}
+                  onChange={(e) => updateField('struct_exit_scale_out_strength', Number(e.target.value))}
+                  disabled={disabled}
+                  className="w-full px-3 py-2 rounded-lg text-sm"
+                  style={{ background: '#1E2329', border: '1px solid #2B3139', color: '#EAECEF' }}
+                />
+              </div>
+              <div>
+                <div className="text-xs mb-2" style={{ color: '#848E9C' }}>{t('structExitExitStrength')}</div>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={config.struct_exit_exit_strength ?? 0}
+                  onChange={(e) => updateField('struct_exit_exit_strength', Number(e.target.value))}
+                  disabled={disabled}
+                  className="w-full px-3 py-2 rounded-lg text-sm"
+                  style={{ background: '#1E2329', border: '1px solid #2B3139', color: '#EAECEF' }}
+                />
+              </div>
+              <div>
+                <div className="text-xs mb-2" style={{ color: '#848E9C' }}>{t('structExitScaleOutConfirm')}</div>
+                <input
+                  type="number"
+                  min={0}
+                  max={20}
+                  step={1}
+                  value={config.struct_exit_scale_out_confirm ?? 0}
+                  onChange={(e) => updateField('struct_exit_scale_out_confirm', Number(e.target.value))}
+                  disabled={disabled}
+                  className="w-full px-3 py-2 rounded-lg text-sm"
+                  style={{ background: '#1E2329', border: '1px solid #2B3139', color: '#EAECEF' }}
+                />
+              </div>
+              <div>
+                <div className="text-xs mb-2" style={{ color: '#848E9C' }}>{t('structExitExitConfirm')}</div>
+                <input
+                  type="number"
+                  min={0}
+                  max={20}
+                  step={1}
+                  value={config.struct_exit_exit_confirm ?? 0}
+                  onChange={(e) => updateField('struct_exit_exit_confirm', Number(e.target.value))}
+                  disabled={disabled}
+                  className="w-full px-3 py-2 rounded-lg text-sm"
+                  style={{ background: '#1E2329', border: '1px solid #2B3139', color: '#EAECEF' }}
+                />
+              </div>
+            </div>
+            <div className="text-xs mt-2" style={{ color: '#EAECEF' }}>{t('structExitEscalation')}</div>
           </div>
 
           <label className="flex items-center gap-3 cursor-pointer">

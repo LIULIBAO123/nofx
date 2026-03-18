@@ -32,7 +32,9 @@ export function DynamicTakeProfitEditor({
       profitPercent: { zh: '盈利百分比', en: 'Profit %' },
       closePercent: { zh: '平仓百分比', en: 'Close %' },
       moveToBreakeven: { zh: '移动止损到盈亏平衡', en: 'Move Stop to Breakeven' },
-      profitPercentDesc: { zh: '当盈利达到此百分比时触发（按价格相对入场价的变动，非保证金收益率；带杠杆时页面「当前盈亏」会高于价格变动）', en: 'Trigger when profit reaches this % (price move from entry, not margin return; with leverage, dashboard P/L % is higher than price %).' },
+      profitPercentDesc: { zh: '当盈利达到此百分比时触发。可选择按价格变动%或按ROE(保证金收益率)%触发；ROE≈价格%×杠杆', en: 'Trigger when profit reaches this %. You can choose price% or ROE% (margin return); ROE ≈ price% × leverage.' },
+      scaledProfitMode: { zh: '分层止盈阈值口径', en: 'Scaled TP profit mode' },
+      scaledProfitModeDesc: { zh: 'price=按价格涨跌幅%触发；roe=按ROE%触发（约等于价格%×杠杆）。建议短中线/带杠杆使用 roe。', en: 'price=price change %; roe=ROE% (≈ price%×leverage). For leveraged swing, prefer roe.' },
       closePercentDesc: { zh: '平仓该百分比的持仓', en: 'Close this percentage of position' },
       
       // ATR Take Profit
@@ -84,6 +86,7 @@ export function DynamicTakeProfitEditor({
     fixed_enabled: false,
     fixed_percent: 8,
     scaled_enabled: true,
+    scaled_profit_percent_mode: 'roe',
     scaled_levels: [
       { profit_percent: 5, close_percent: 25, move_stop_to_breakeven: false },
       { profit_percent: 8, close_percent: 25, move_stop_to_breakeven: true },
@@ -710,6 +713,20 @@ export function DynamicTakeProfitEditor({
               <label className="text-sm font-semibold" style={{ color: '#EAECEF' }}>
                 {t('lockProfitPercent')}
               </label>
+            </div>
+            <div className="mb-4">
+              <label className="text-xs block mb-1" style={{ color: '#848E9C' }}>{t('scaledProfitMode')}</label>
+              <select
+                value={currentConfig.scaled_profit_percent_mode || 'price'}
+                onChange={(e) => updateField('scaled_profit_percent_mode', e.target.value)}
+                disabled={disabled}
+                className="rounded px-2 py-1 text-sm"
+                style={{ background: '#1E2329', border: '1px solid #2B3139', color: '#EAECEF' }}
+              >
+                <option value="price">price</option>
+                <option value="roe">roe</option>
+              </select>
+              <span className="text-[10px] ml-2" style={{ color: '#5E6673' }}>{t('scaledProfitModeDesc')}</span>
             </div>
             <p className="text-xs mb-3 leading-relaxed" style={{ color: '#848E9C' }}>
               {t('lockProfitPercentDesc')}

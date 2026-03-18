@@ -19,6 +19,15 @@ var (
 	QwenAPIKey = os.Getenv("QWEN_API_KEY")
 )
 
+func TestMain(m *testing.M) {
+	// These tests call external Qwen APIs. Skip when keys are not configured.
+	if strings.TrimSpace(QwenAppID) == "" || strings.TrimSpace(QwenAPIKey) == "" {
+		fmt.Println("SKIP llm: QWEN_APP_ID/QWEN_API_KEY not set")
+		os.Exit(0)
+	}
+	os.Exit(m.Run())
+}
+
 // ============== 测试用例 ==============
 
 // TestQwenBasicChat 测试基本同步对话

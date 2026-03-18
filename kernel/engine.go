@@ -2053,7 +2053,8 @@ func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string
 		sb.WriteString("- `near_term_outlook`：未来 1～2 根 K 或本 session 的整体预期（方向、空间、主要依据）。\n")
 		sb.WriteString("- `key_levels`：1～2 个关键支撑/阻力或目标价位。\n")
 		sb.WriteString("- `symbol_structure_signals`：结构化“阶段标签+证伪点+退场倾向”数组（建议输出，用于更好把握趋势结束点）。每项：symbol、phase_label（trend/late_trend/range/high_vol/reversal_risk/neutral）、invalidation_level（关键位/证伪规则）、invalidation_strength（0-100）、exit_bias（hold/tighten/scale_out/exit）、rationale（一句解释）。**抗抖动**：证伪与 exit_bias 必须以 1h/4h 结构为主，15m 只能小幅微调；避免来回反复，优先输出可被验证的证伪条件。\n")
-		sb.WriteString("- `position_sl_tp_adjustments`：持仓期间止盈/止损参数调节（系统在边界内应用）。规则：choppy_hold→trail=low 或 confirm_cycles_delta=+1；trend_ride→trail=high；lock_profit→lock_profit_pct=2～3；trend_weakening→收紧或 confirm_cycles_delta=-1；high_vol_hold→confirm_cycles_delta=+1 或 atr_mult_sl 上限。每项：symbol、side、advice、trail_aggressiveness、atr_mult_sl、lock_profit_pct、confirm_cycles_delta。\n")
+		sb.WriteString("- `position_sl_tp_adjustments`：持仓期间止盈/止损参数调节（系统在边界内应用）。**口径**：`pnl_pct` 与 `lock_profit_pct` 均为 **ROE(保证金收益率)%**（约等于价格%×杠杆）。规则：choppy_hold→trail=low 或 confirm_cycles_delta=+1；trend_ride→trail=high；lock_profit→lock_profit_pct=2～3；trend_weakening→收紧或 confirm_cycles_delta=-1；high_vol_hold→confirm_cycles_delta=+1 或 atr_mult_sl 上限。每项：symbol、side、advice、trail_aggressiveness、atr_mult_sl、lock_profit_pct、confirm_cycles_delta。\n")
+		sb.WriteString("  - 结构化退场建议：当 `phase_label` 为 late_trend/reversal_risk 且 `invalidation_strength` 持续较强时，可输出更强 `exit_bias`（参考：≥70 可 scale_out，≥85 可 exit；系统仍会做确认+迟滞）。\n")
 		sb.WriteString("\n示例：\n```json\n{\"market_regime\": \"trend_down\", \"scenario\": \"continuation\", \"risk_alert\": false, \"market_summary\": \"...\", \"key_levels\": [\"88000\"]")
 		if riskControl.AIPredictOnly {
 			sb.WriteString(", \"symbol_predictions\": [{\"symbol\": \"BTCUSDT\", \"predicted_direction\": \"down\", \"confidence\": 75, \"suggest_exit\": false, \"suggest_open\": true}, {\"symbol\": \"ETHUSDT\", \"predicted_direction\": \"up\", \"confidence\": 70, \"suggest_exit\": false, \"suggest_open\": false}]")
@@ -2073,7 +2074,8 @@ func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string
 		sb.WriteString("- `near_term_outlook`: short-term outlook for next 1–2 bars or this session.\n")
 		sb.WriteString("- `key_levels`: 1–2 key support/resistance or target levels.\n")
 		sb.WriteString("- `symbol_structure_signals`: structured phase/invalidation/exit-bias array (recommended, used to better capture trend endings). Each: symbol, phase_label (trend/late_trend/range/high_vol/reversal_risk/neutral), invalidation_level, invalidation_strength (0-100), exit_bias (hold/tighten/scale_out/exit), rationale (1 sentence). **Anti-noise**: invalidation and exit_bias must be driven mainly by 1h/4h structure; 15m only for small nudges; avoid flip-flopping, prefer verifiable invalidation conditions.\n")
-		sb.WriteString("- `position_sl_tp_adjustments`: per-position SL/TP parameter suggestions (system applies within bounds). Rules: choppy_hold→trail=low or confirm_cycles_delta=+1; trend_ride→trail=high; lock_profit→lock_profit_pct=2–3; trend_weakening→tighten or confirm_cycles_delta=-1; high_vol_hold→confirm_cycles_delta=+1 or atr_mult_sl upper. Fields: symbol, side, advice, trail_aggressiveness, atr_mult_sl, lock_profit_pct, confirm_cycles_delta.\n")
+		sb.WriteString("- `position_sl_tp_adjustments`: per-position SL/TP parameter suggestions (system applies within bounds). **Convention**: `pnl_pct` and `lock_profit_pct` are **ROE (margin return)%** (≈ price%×leverage). Rules: choppy_hold→trail=low or confirm_cycles_delta=+1; trend_ride→trail=high; lock_profit→lock_profit_pct=2–3; trend_weakening→tighten or confirm_cycles_delta=-1; high_vol_hold→confirm_cycles_delta=+1 or atr_mult_sl upper. Fields: symbol, side, advice, trail_aggressiveness, atr_mult_sl, lock_profit_pct, confirm_cycles_delta.\n")
+		sb.WriteString("  - Structural exit hint: when `phase_label` is late_trend/reversal_risk and `invalidation_strength` stays high, you may output stronger `exit_bias` (ref: ≥70 scale_out, ≥85 exit; system still confirms with hysteresis).\n")
 		sb.WriteString("\nExample:\n```json\n{\"market_regime\": \"trend_down\", \"scenario\": \"continuation\", \"risk_alert\": false, \"market_summary\": \"...\", \"key_levels\": [\"88000\"]")
 		if riskControl.AIPredictOnly {
 			sb.WriteString(", \"symbol_predictions\": [{\"symbol\": \"BTCUSDT\", \"predicted_direction\": \"down\", \"confidence\": 75, \"suggest_exit\": false, \"suggest_open\": true}, {\"symbol\": \"ETHUSDT\", \"predicted_direction\": \"up\", \"confidence\": 70, \"suggest_exit\": false, \"suggest_open\": false}]")
@@ -3600,6 +3602,9 @@ type SLTPPositionInfo struct {
 func BuildSLTPOnlyPrompts(positions []SLTPPositionInfo, regime, scenario, currentCycleSummary string) (systemPrompt, userPrompt string) {
 	systemPrompt = `You are a risk assistant. Output ONLY a JSON object inside <analysis></analysis>. No opening/closing decisions.
 You will be given system strategy BOUNDS per position (atr_mult_sl range, lock_profit_pct range, confirm_cycles base). You MUST suggest values within these bounds only.
+Convention:
+- pnl_pct is ROE (margin return)%, not raw price change%.
+- lock_profit_pct is also ROE%; once reached, the system latches breakeven lock (do not treat it as a one-off).
 Rules for position_sl_tp_adjustments (one per position):
 - choppy_hold: price choppy / ranging → loosen (trail_aggressiveness=low or confirm_cycles_delta=+1)
 - trend_ride: trend intact → tighten (trail_aggressiveness=high)
@@ -3621,7 +3626,7 @@ In each position_sl_tp_adjustments item, also output structured exit signals (us
 - rationale: 1 sentence
 Anti-noise rules for exit signals:
 - Base invalidation and exit_bias mainly on 1h/4h structure; 15m is only for small nudges.
-- Avoid flip-flopping. Only output scale_out/exit when structure invalidation is clear; otherwise tighten/hold.
+- Avoid flip-flopping. Prefer tighten/hold unless invalidation is clear and sustained. As a reference, invalidation_strength ≥ 70 can justify scale_out, and ≥ 85 can justify exit.
 Current cycle market context (if provided) is real-time data for this cycle, possibly multi-line. It may include: BTC 1h/4h/24h/7d price change, MACD, RSI, dominance, Fear&Greed, AltcoinSeason, OI 1h/4h change, Funding, Long/Short ratio, Liquidation 1h/4h/24h (L/S USD), CGDI, CDRI, WhaleIndex, ETF flow, key levels. Use it to distinguish choppy vs trend vs high volatility and to choose the appropriate advice (choppy_hold / trend_ride / lock_profit / trend_weakening / high_vol_hold) per position.
 When a position shows "current_applied (from previous AI)" with trail / atr_mult_sl / lock_profit_pct / last_advice, those are the parameters currently in effect (from your last adjustment). Use them to decide whether to keep or change; you may suggest the same or new values within bounds.
 Output format: <analysis>{"position_sl_tp_adjustments":[{"symbol":"X","side":"long","advice":"choppy_hold","trail_aggressiveness":"low",...}]}</analysis>`

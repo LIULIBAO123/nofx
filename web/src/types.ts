@@ -886,6 +886,14 @@ export interface RiskControlConfig {
   scale_out_blocks_scaled_tp_seconds?: number;
   /** scaled TP 后阻断 scale_out 窗口（秒）；0/未填默认 600 */
   scaled_tp_blocks_scale_out_seconds?: number;
+  /** 结构化退场升级：scale_out 强度阈值（0/未填默认 70） */
+  struct_exit_scale_out_strength?: number;
+  /** 结构化退场升级：exit 强度阈值（0/未填默认 85） */
+  struct_exit_exit_strength?: number;
+  /** 结构化退场升级：scale_out 需要持续确认次数（0/未填默认 3） */
+  struct_exit_scale_out_confirm?: number;
+  /** 结构化退场升级：exit 需要持续确认次数（0/未填默认 2） */
+  struct_exit_exit_confirm?: number;
 
   /** AI 参与仓位与分层止盈止损：离散档位与模板（系统兜底裁剪） */
   position_size_buckets?: PositionSizeBucketsConfig;
@@ -996,6 +1004,8 @@ export interface DynamicTakeProfitConfig {
   // 分批止盈 (Scaled Take Profit)
   scaled_enabled?: boolean;        // 是否启用分批止盈
   scaled_levels?: ScaledTakeProfitLevel[];  // 分批止盈层级
+  /** 分层止盈盈利阈值口径：price(默认) | roe */
+  scaled_profit_percent_mode?: string;
   
   // ATR 止盈 - 动态区间模式
   atr_enabled?: boolean;           // 是否启用 ATR 止盈

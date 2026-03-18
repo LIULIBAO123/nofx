@@ -3,10 +3,16 @@ package alpaca
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 	"testing"
 )
 
 func TestGetBars(t *testing.T) {
+	// External Alpaca API test: require keys.
+	if strings.TrimSpace(os.Getenv("ALPACA_API_KEY")) == "" || strings.TrimSpace(os.Getenv("ALPACA_SECRET_KEY")) == "" {
+		t.Skip("ALPACA_API_KEY/ALPACA_SECRET_KEY not set")
+	}
 	client := NewClient()
 
 	resp, err := client.GetBars(context.TODO(), "AAPL", "1Day", 5)

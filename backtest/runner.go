@@ -1432,11 +1432,17 @@ func (r *Runner) checkAndExecuteDynamicStopTakeProfit(ts int64, marketData map[s
 			delete(r.slConfirmCount, key)
 			r.slConfirmCountMu.Unlock()
 		} else if tpSig != nil && tpSig.Type == "scaled" {
-			profitPct := 0.0
-			if pos.Side == "long" {
-				profitPct = (tpSig.Price - pos.EntryPrice) / pos.EntryPrice * 100
-			} else {
-				profitPct = (pos.EntryPrice - tpSig.Price) / pos.EntryPrice * 100
+			// Keep scaled dedup units consistent with checkScaledTakeProfit:
+			// store the same profit% threshold unit used in the scaled checker.
+			// (ROE mode => ROE%; price mode => price%)
+			profitPct := tpSig.ScaledProfitPercentUsed
+			if profitPct <= 0 {
+				// Fallback (shouldn't happen for scaled signals).
+				if pos.Side == "long" {
+					profitPct = (tpSig.Price - pos.EntryPrice) / pos.EntryPrice * 100
+				} else {
+					profitPct = (pos.EntryPrice - tpSig.Price) / pos.EntryPrice * 100
+				}
 			}
 			r.addScaledLevelTaken(key, profitPct)
 		}

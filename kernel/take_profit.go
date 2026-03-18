@@ -28,6 +28,10 @@ type TakeProfitSignal struct {
 	Price          float64
 	Type           string  // "fixed", "partial", "atr", "resistance"
 	PartialPercent float64 // percentage to close (0-100), 100 means full close
+	// ScaledProfitPercentUsed records the profit% threshold unit used for "scaled" dedup.
+	// When scaled_profit_percent_mode="roe", this should store ROE% (level.ProfitPercent).
+	// When mode="price", this should store price% (level.ProfitPercent).
+	ScaledProfitPercentUsed float64
 }
 
 // CheckTakeProfit checks if any take profit condition is triggered for a position.
@@ -220,6 +224,10 @@ func (c *TakeProfitChecker) checkScaledTakeProfit(position *PositionInfo, curren
 
 	entryPrice := position.EntryPrice
 	firstLevel := c.config.ScaledLevels[0]
+	mode := strings.TrimSpace(strings.ToLower(c.config.ScaledProfitPercentMode))
+	if mode == "" {
+		mode = "price"
+	}
 
 	// Check each level in order
 	for _, level := range c.config.ScaledLevels {
@@ -233,26 +241,58 @@ func (c *TakeProfitChecker) checkScaledTakeProfit(position *PositionInfo, curren
 
 		if position.Side == "long" {
 			targetPrice = entryPrice * (1 + level.ProfitPercent/100)
-
-			if currentPrice >= targetPrice {
+			priceProfitPct := 0.0
+			if entryPrice > 0 {
+				priceProfitPct = (currentPrice - entryPrice) / entryPrice * 100
+			}
+			roeProfitPct := priceProfitPct
+			lev := position.Leverage
+			if lev <= 0 {
+				lev = 1
+			}
+			roeProfitPct = priceProfitPct * float64(lev)
+			ok := false
+			if mode == "roe" {
+				ok = roeProfitPct >= level.ProfitPercent
+			} else {
+				ok = currentPrice >= targetPrice
+			}
+			if ok {
 				return &TakeProfitSignal{
 					Triggered:      true,
-					Reason:         fmt.Sprintf("Scaled take profit reached: %.2f%% profit, closing %.2f%% of position", level.ProfitPercent, level.ClosePercent),
-					Price:          targetPrice,
+					Reason:         fmt.Sprintf("Scaled take profit reached (%s): %.2f%% threshold, closing %.2f%% (price%%=%.2f, roe%%=%.2f, lev=%d)", mode, level.ProfitPercent, level.ClosePercent, priceProfitPct, roeProfitPct, lev),
+					Price:          currentPrice,
 					Type:           "scaled",
 					PartialPercent: level.ClosePercent,
+					ScaledProfitPercentUsed: level.ProfitPercent,
 				}
 			}
 		} else { // short
 			targetPrice = entryPrice * (1 - level.ProfitPercent/100)
-
-			if currentPrice <= targetPrice {
+			priceProfitPct := 0.0
+			if entryPrice > 0 {
+				priceProfitPct = (entryPrice - currentPrice) / entryPrice * 100
+			}
+			roeProfitPct := priceProfitPct
+			lev := position.Leverage
+			if lev <= 0 {
+				lev = 1
+			}
+			roeProfitPct = priceProfitPct * float64(lev)
+			ok := false
+			if mode == "roe" {
+				ok = roeProfitPct >= level.ProfitPercent
+			} else {
+				ok = currentPrice <= targetPrice
+			}
+			if ok {
 				return &TakeProfitSignal{
 					Triggered:      true,
-					Reason:         fmt.Sprintf("Scaled take profit reached: %.2f%% profit, closing %.2f%% of position", level.ProfitPercent, level.ClosePercent),
-					Price:          targetPrice,
+					Reason:         fmt.Sprintf("Scaled take profit reached (%s): %.2f%% threshold, closing %.2f%% (price%%=%.2f, roe%%=%.2f, lev=%d)", mode, level.ProfitPercent, level.ClosePercent, priceProfitPct, roeProfitPct, lev),
+					Price:          currentPrice,
 					Type:           "scaled",
 					PartialPercent: level.ClosePercent,
+					ScaledProfitPercentUsed: level.ProfitPercent,
 				}
 			}
 		}
@@ -260,18 +300,29 @@ func (c *TakeProfitChecker) checkScaledTakeProfit(position *PositionInfo, curren
 
 	// 盈利已超过第一档却未触发时打日志，便于排查分层止盈未激活
 	var currentProfitPct float64
-	if position.Side == "long" && entryPrice > 0 {
-		currentProfitPct = (currentPrice - entryPrice) / entryPrice * 100
-	} else if position.Side == "short" && entryPrice > 0 {
-		currentProfitPct = (entryPrice - currentPrice) / entryPrice * 100
+	if entryPrice > 0 {
+		if position.Side == "long" {
+			currentProfitPct = (currentPrice - entryPrice) / entryPrice * 100
+		} else {
+			currentProfitPct = (entryPrice - currentPrice) / entryPrice * 100
+		}
 	}
-	if currentProfitPct >= firstLevel.ProfitPercent {
+	lev := position.Leverage
+	if lev <= 0 {
+		lev = 1
+	}
+	currentROE := currentProfitPct * float64(lev)
+	compareVal := currentProfitPct
+	if mode == "roe" {
+		compareVal = currentROE
+	}
+	if compareVal >= firstLevel.ProfitPercent {
 		targetFirst := entryPrice * (1 + firstLevel.ProfitPercent/100)
 		if position.Side == "short" {
 			targetFirst = entryPrice * (1 - firstLevel.ProfitPercent/100)
 		}
-		logger.Infof("📋 Scaled TP %s: profit %.2f%% >= first level %.2f%% but no trigger (target=%.4f current=%.4f, side=%s)",
-			position.Symbol, currentProfitPct, firstLevel.ProfitPercent, targetFirst, currentPrice, position.Side)
+		logger.Infof("📋 Scaled TP %s: profit %s %.2f%% >= first level %.2f%% but no trigger (price%%=%.2f roe%%=%.2f lev=%d target=%.4f current=%.4f side=%s)",
+			position.Symbol, mode, compareVal, firstLevel.ProfitPercent, currentProfitPct, currentROE, lev, targetFirst, currentPrice, position.Side)
 	}
 
 	return &TakeProfitSignal{Triggered: false}
